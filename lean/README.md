@@ -21,3 +21,4 @@ Rust 側（`crates/lawean-amend`）は番号ベースの定義の「実装が豊
 `Op` の種類と「番号は直前の状態で解釈する」規約で揃えている。Rust の apply を Lean の定義から生成／検証する段階には至っていない（[TODO](../docs/TODO.md)）。
 
 証明は `lake build` で一度だけ検査する。エディタ（ブラウザ）側は検証済みの `applyUnit` を WASM で実行するだけで、実行時に Lean を動かす必要はない（[ADR-0014](../docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。
+Lean が走るのはサービスを作る側のビルドだけで、省庁向けエディタのサーバーにも担当者の手元にも置かない。ADR-0011 の `consolidates` 定理は開発時の回帰テスト（[ADR-0015](../docs/adr/0015-service-architecture.md)）。

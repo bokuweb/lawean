@@ -1,6 +1,13 @@
 # 0011. 溶け込みの正は Lean の `applyUnit`。Rust は実データを Lean に出力する前処理
 
-状態: accepted（2026-09-20）。実装は未（[TODO](../TODO.md)）
+状態: accepted（2026-09-20）。実装は未（[TODO](../TODO.md)）。**位置づけを [ADR-0015](0015-service-architecture.md) で明確化**（2026-09-20）
+
+> **位置づけ（2026-09-20 追記）**: 本 ADR の `consolidates_… := by native_decide` は**開発時の回帰テスト**である。
+> Lean の `applyUnit` が e-Gov の過去の改正を本則・目次まで再現することを確かめ、モデルが現実に合っている裏付けにする。
+> 省庁向けエディタ（サービス）の経路には出てこない。担当者の改正案ごとに定理を作ることも、サービスのサーバーで Lean を動かすこともしない。
+> 製品の経路は [ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md) / [ADR-0015](0015-service-architecture.md):
+> ブラウザが同じ Lean ソースから作った WASM の `applyUnit` を実行し、証跡は決定性による再現記録で出す。
+> 以下の「CI で `lake build` が実データの定理を検査する」は、この開発時の層についての記述である。
 
 ## 文脈
 
