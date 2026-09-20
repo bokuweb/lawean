@@ -23,6 +23,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 | [docs/design-notes.html](docs/design-notes.html) | 方針と設計のやさしい解説（HTML）。最小の Lean 例、異常検出の例、identity patch の解説つき | — |
+| [docs/playground.html](docs/playground.html) | identity patch をブラウザで試す。改正単位の順序を入れ替えて溶け込み・番号の描画・衝突・依存・全順序の合流を確認（`Ident.lean` と同じ意味論を JS で写したもの） | — |
 
 構想段階のメモ（ツールチェーン比較、改め文の patch 化など）は
 `bokuweb/life` の `idea/legal-ir/` にある。本リポジトリの docs はそれを実装に向けて絞り込んだもの。

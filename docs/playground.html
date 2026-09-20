@@ -1,0 +1,455 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lawean patch playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F4F5F7; --surface:#FFFFFF; --ink:#1A1D24; --muted:#5B6270; --line:#D8DBE1;
+  --accent:#2F5D8A; --accent-soft:#E4EDF6; --law:#B23A2E; --law-soft:#F7E6E3;
+  --ok:#2E7D5B; --ok-soft:#E1F1EA; --warn:#9A6B00; --warn-soft:#FBF1D6; --code-bg:#F0F2F5;
+  --serif:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --sans:"Noto Sans JP","Hiragino Sans",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#15181D; --surface:#1E2229; --ink:#E4E6EA; --muted:#9AA1AC; --line:#2F343D;
+    --accent:#7FAEE0; --accent-soft:#1F2E3F; --law:#E58A7C; --law-soft:#3A2522;
+    --ok:#6FC39C; --ok-soft:#1E3329; --warn:#E0B458; --warn-soft:#3A3120; --code-bg:#181B21;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#15181D; --surface:#1E2229; --ink:#E4E6EA; --muted:#9AA1AC; --line:#2F343D;
+  --accent:#7FAEE0; --accent-soft:#1F2E3F; --law:#E58A7C; --law-soft:#3A2522;
+  --ok:#6FC39C; --ok-soft:#1E3329; --warn:#E0B458; --warn-soft:#3A3120; --code-bg:#181B21;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.7;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:20px 80px}
+h1{font-family:var(--serif);font-size:1.6rem;margin:0;line-height:1.3}
+h2{font-family:var(--sans);font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;font-weight:700}
+p{margin:.4rem 0;max-width:72ch}
+.lead{color:var(--muted);font-size:.95rem}
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+.top a{color:var(--accent);font-size:.9rem}
+.cols{display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:14px;align-items:start}
+@media (max-width:960px){.cols{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.law{font-family:var(--serif);line-height:1.8}
+.art{margin:6px 0 10px}
+.art .t{font-weight:700;margin-bottom:2px}
+.para{display:grid;grid-template-columns:2.2em 1fr;gap:6px;padding:3px 6px;border-radius:4px}
+.para .n{color:var(--muted);font-family:var(--mono);font-size:.8rem;padding-top:.25em;text-align:right}
+.para.new{background:var(--ok-soft)}
+.para.changed{background:var(--accent-soft)}
+.para.conflict{background:var(--law-soft)}
+.para .id{font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-left:6px}
+.para .cf{font-family:var(--sans);font-size:.82rem;color:var(--law);margin-top:2px}
+.para .cf b{font-weight:700}
+.badge{display:inline-block;font-family:var(--mono);font-size:.68rem;padding:0 6px;border-radius:999px;margin-left:6px;vertical-align:middle}
+.badge.new{background:var(--ok-soft);color:var(--ok)}
+.badge.changed{background:var(--accent-soft);color:var(--accent)}
+.badge.conflict{background:var(--law-soft);color:var(--law)}
+.deleted{font-size:.85rem;color:var(--muted);margin-top:6px}
+/* units */
+.unit{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:start;padding:8px 6px;border-bottom:1px solid var(--line)}
+.unit:last-child{border-bottom:none}
+.unit input{margin-top:.45em}
+.unit .name{font-weight:700;font-size:.92rem}
+.unit .desc{font-size:.82rem;color:var(--muted)}
+.unit .ops{font-family:var(--mono);font-size:.72rem;color:var(--accent);margin-top:2px;word-break:break-all}
+.unit .ctl{display:flex;flex-direction:column;gap:2px}
+button{font-family:var(--sans);font-size:.8rem;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:4px;padding:2px 8px;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button:disabled{opacity:.4;cursor:default}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);padding:6px 14px;font-size:.88rem}
+button.primary:hover{opacity:.9;color:#fff}
+.orderline{font-family:var(--mono);font-size:.78rem;color:var(--muted);margin:8px 0 0;word-break:break-all}
+/* checks */
+.checks{display:grid;gap:8px;margin-top:8px}
+.check{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;padding:8px 10px;border-radius:6px;border:1px solid var(--line);background:var(--surface)}
+.check .st{font-family:var(--mono);font-size:.72rem;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;margin-top:.2em}
+.check.ok .st{background:var(--ok-soft);color:var(--ok)}
+.check.bad .st{background:var(--law-soft);color:var(--law)}
+.check.warn .st{background:var(--warn-soft);color:var(--warn)}
+.check .msg{font-size:.9rem}
+.check .msg small{display:block;color:var(--muted);font-size:.8rem}
+table{border-collapse:collapse;width:100%;font-size:.82rem;margin-top:6px}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:700;font-size:.74rem;letter-spacing:.04em}
+td.m{font-family:var(--mono);font-size:.76rem}
+.rel{display:inline-block;padding:0 6px;border-radius:999px;font-family:var(--mono);font-size:.7rem}
+.rel.ind{background:var(--ok-soft);color:var(--ok)}
+.rel.dep{background:var(--warn-soft);color:var(--warn)}
+.rel.con{background:var(--law-soft);color:var(--law)}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;overflow-x:auto;margin:8px 0 0;font-family:var(--mono);font-size:.76rem;line-height:1.55;white-space:pre}
+.stack{display:grid;gap:14px;min-width:0}
+.cols>*,.panel{min-width:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.tablewrap{overflow-x:auto}
+details summary{cursor:pointer;font-size:.9rem;font-weight:700;color:var(--accent)}
+form.add{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;font-size:.82rem}
+form.add label{display:grid;gap:2px;color:var(--muted)}
+form.add input,form.add select{font:inherit;font-size:.85rem;padding:4px 6px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--ink);width:100%}
+form.add .full{grid-column:1/-1}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<div class="top">
+  <div>
+    <h1>lawean patch playground</h1>
+    <p class="lead">改正単位を id で書き、順番を入れ替えて溶け込ませる。番号は描画時に計算され、衝突は値として残り、依存は施行順序の検査に出る。<code style="font-family:var(--mono);font-size:.8rem">lean/Lawean/Ident.lean</code> と同じ意味論を JavaScript で写したもの。</p>
+  </div>
+  <a href="https://github.com/bokuweb/lawean" target="_blank" rel="noopener">bokuweb/lawean</a>
+</div>
+
+<div class="cols">
+  <div class="stack">
+    <div class="panel">
+      <h2>改正前（発射台 rev0）</h2>
+      <div id="base" class="law"></div>
+    </div>
+    <div class="panel">
+      <h2>Lean で書くと</h2>
+      <pre id="lean"></pre>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="panel">
+      <h2>改正単位（上から順に施行）</h2>
+      <div id="units"></div>
+      <div class="orderline" id="orderline"></div>
+      <div class="row">
+        <button id="btn-all">全順序を試す</button>
+        <button id="btn-reset">初期状態に戻す</button>
+      </div>
+      <details style="margin-top:10px">
+        <summary>自分で改正単位を足す</summary>
+        <form class="add" id="addform">
+          <label>操作
+            <select id="f-type">
+              <option value="replace">replace（id の本文が expected なら new に）</option>
+              <option value="insertAfter">insertAfter（anchor の直後に新しい項）</option>
+              <option value="delete">delete（id の項を削る）</option>
+              <option value="resolve">resolve（衝突を解消して本文を確定）</option>
+            </select>
+          </label>
+          <label>対象の id（anchor）<input id="f-id" value="38/2" placeholder="38/2"></label>
+          <label id="l-expected">expected（期待する旧本文）<input id="f-expected" placeholder="あらかじめ書面を交付して説明する"></label>
+          <label id="l-newid">新しい id<input id="f-newid" placeholder="my/38/2a"></label>
+          <label class="full" id="l-text">新しい本文<input id="f-text" placeholder="…"></label>
+          <div class="full"><button type="submit" class="primary">追加</button></div>
+        </form>
+      </details>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="panel">
+      <h2>溶け込み後</h2>
+      <div id="result" class="law"></div>
+    </div>
+    <div class="panel">
+      <h2>検査</h2>
+      <div class="checks" id="checks"></div>
+      <div class="tablewrap"><table id="rels"></table></div>
+    </div>
+    <div class="panel" id="allpanel" hidden>
+      <h2>全順序</h2>
+      <div id="all"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){
+'use strict';
+// ---------- 代数（Ident.lean の写し） ----------
+const rev0 = [
+  { id:'22/1', art:22, text:'書面によって契約をするとき', conflicts:[] },
+  { id:'38/1', art:38, text:'定期建物賃貸借は書面によってする', conflicts:[] },
+  { id:'38/2', art:38, text:'あらかじめ書面を交付して説明する', conflicts:[] },
+  { id:'38/3', art:38, text:'前項の規定に違反したときは無効とする', conflicts:[] },
+];
+const clone = ns => ns.map(n => ({ id:n.id, art:n.art, text:n.text, conflicts:n.conflicts.slice() }));
+
+function touches(op){
+  switch(op.t){
+    case 'replace': return [op.id];
+    case 'insertAfter': return [op.anchor, op.id];
+    case 'delete': return [op.id];
+    case 'resolve': return [op.id];
+  }
+}
+function creates(op){ return op.t === 'insertAfter' ? [op.id] : []; }
+function key(op){ return op.t === 'insertAfter' ? op.anchor : op.id; }
+function edit(op, x){
+  switch(op.t){
+    case 'replace':
+      if (x.text === op.expected) return [{ id:x.id, art:x.art, text:op.text, conflicts:x.conflicts.slice() }];
+      return [{ id:x.id, art:x.art, text:x.text, conflicts:x.conflicts.concat([op.text]) }];
+    case 'insertAfter': return [x, { id:op.id, art:op.art, text:op.text, conflicts:[] }];
+    case 'delete': return [];
+    case 'resolve': return [{ id:x.id, art:x.art, text:op.text, conflicts:[] }];
+  }
+}
+// editAt: 最初に id が k の要素を見つけ、g で置き換える。無ければ null
+function editAt(k, g, nodes){
+  const i = nodes.findIndex(n => n.id === k);
+  if (i < 0) return null;
+  return nodes.slice(0, i).concat(g(nodes[i]), nodes.slice(i+1));
+}
+function applyOp(nodes, op){ return editAt(key(op), x => edit(op, x), nodes); }
+// applyUnit: 途中で失敗したら {ok:false, failedOp}
+function applyOps(nodes, ops){
+  let cur = clone(nodes);
+  for (const op of ops){
+    const next = applyOp(cur, op);
+    if (next === null) return { ok:false, failedOp:op, missing:key(op), nodes:cur };
+    cur = next;
+  }
+  return { ok:true, nodes:cur };
+}
+function paraNum(nodes, id){
+  const n = nodes.find(x => x.id === id); if (!n) return null;
+  const same = nodes.filter(x => x.art === n.art);
+  return same.findIndex(x => x.id === id) + 1;
+}
+const unitTouches = u => u.ops.flatMap(touches);
+const unitCreates = u => u.ops.flatMap(creates);
+const dependsOn = (b, a) => { const c = unitCreates(a); return unitTouches(b).some(i => c.includes(i)); };
+const independentUnits = (u, v) => { const t = unitTouches(v); return unitTouches(u).every(i => !t.includes(i)); };
+function scheduleOk(list){
+  for (let i = 0; i < list.length; i++) for (let j = i+1; j < list.length; j++)
+    if (dependsOn(list[i], list[j])) return { ok:false, first:list[i], later:list[j] };
+  return { ok:true };
+}
+const wf = nodes => new Set(nodes.map(n => n.id)).size === nodes.length;
+const conflictsOf = nodes => nodes.filter(n => n.conflicts.length);
+
+// ---------- 改正単位の定義 ----------
+const presets = [
+  { key:'r3_37', lean:'r3_37', name:'令和3年法律第37号 第35条', desc:'第38条第1項の次に一項を加える（旧第2・3項は繰り下がる）',
+    ops:[{ t:'insertAfter', anchor:'38/1', id:'r3-37/38/1a', art:38, text:'電磁的記録によることができる' }], on:true },
+  { key:'draft', lean:'draft', name:'改正案（発射台 rev0 で起案）', desc:'旧第38条第3項の「前項」を「第二項」に改める',
+    ops:[{ t:'replace', id:'38/3', expected:'前項の規定に違反したときは無効とする', text:'第二項の規定に違反したときは無効とする' }], on:true },
+  { key:'r4_48_73', lean:'r4_48_73', name:'令和4年法律第48号 第73条', desc:'第61条を新設（1 段目）',
+    ops:[{ t:'insertAfter', anchor:'38/3', id:'r4-48/61/1', art:61, text:'民事訴訟法の特例（旧）' }], on:false },
+  { key:'r4_48_74', lean:'r4_48_74', name:'令和4年法律第48号 第74条', desc:'第61条を全部改正（3 段目）。第73条が作った id を触るので第73条に依存',
+    ops:[{ t:'replace', id:'r4-48/61/1', expected:'民事訴訟法の特例（旧）', text:'民事訴訟法の特例（新）' }], on:false },
+  { key:'amendA', lean:'amendA', name:'改正 A', desc:'第22条第1項「書面」を「電磁的記録」に',
+    ops:[{ t:'replace', id:'22/1', expected:'書面によって契約をするとき', text:'電磁的記録によって契約をするとき' }], on:false },
+  { key:'amendB', lean:'amendB', name:'改正 B', desc:'第22条第1項「書面」を「書面又は電子契約」に。A と同じ項を触る',
+    ops:[{ t:'replace', id:'22/1', expected:'書面によって契約をするとき', text:'書面又は電子契約によって契約をするとき' }], on:false },
+  { key:'adjust', lean:'adjust', name:'調整規定', desc:'第22条第1項の衝突を解消して本文を確定する',
+    ops:[{ t:'resolve', id:'22/1', text:'書面、電磁的記録又は電子契約によって契約をするとき' }], on:false },
+];
+let units = presets.map(u => ({ ...u, ops:u.ops.map(o => ({...o})) }));
+let customCount = 0;
+
+// ---------- 描画 ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const kanji = n => ['','一','二','三','四','五','六','七','八','九','十'][n] || String(n);
+
+function renderLaw(nodes, base){
+  const arts = [];
+  for (const n of nodes){ if (!arts.includes(n.art)) arts.push(n.art); }
+  let h = '';
+  for (const a of arts){
+    h += `<div class="art"><div class="t">第${kanji(a)}条</div>`;
+    for (const n of nodes.filter(x => x.art === a)){
+      const b = base ? base.find(x => x.id === n.id) : null;
+      let cls = '', badge = '';
+      if (base && !b){ cls = 'new'; badge = '<span class="badge new">新設</span>'; }
+      else if (base && b.text !== n.text){ cls = 'changed'; badge = '<span class="badge changed">改正</span>'; }
+      if (n.conflicts.length){ cls = 'conflict'; badge += '<span class="badge conflict">衝突</span>'; }
+      h += `<div class="para ${cls}"><span class="n">${paraNum(nodes, n.id)}</span><span>${esc(n.text)}${badge}<span class="id">${esc(n.id)}</span>`;
+      if (n.conflicts.length) h += `<div class="cf">当てられなかった本文: ${n.conflicts.map(c => '<b>「'+esc(c)+'」</b>').join('、')}</div>`;
+      h += `</span></div>`;
+    }
+    h += `</div>`;
+  }
+  if (base){
+    const del = base.filter(b => !nodes.find(n => n.id === b.id));
+    if (del.length) h += `<div class="deleted">削除: ${del.map(d => esc(d.id)+'「'+esc(d.text)+'」').join('、')}</div>`;
+  }
+  return h;
+}
+
+function opText(op){
+  switch(op.t){
+    case 'replace': return `replace ${op.id} 「${op.expected}」→「${op.text}」`;
+    case 'insertAfter': return `insertAfter ${op.anchor} ⇒ ${op.id}（第${kanji(op.art)}条）「${op.text}」`;
+    case 'delete': return `delete ${op.id}`;
+    case 'resolve': return `resolve ${op.id} 「${op.text}」`;
+  }
+}
+function opLean(op){
+  const q = s => JSON.stringify(s);
+  switch(op.t){
+    case 'replace': return `.replace ${q(op.id)} ${q(op.expected)} ${q(op.text)}`;
+    case 'insertAfter': return `.insertAfter ${q(op.anchor)} ${q(op.id)} ${op.art} ${q(op.text)}`;
+    case 'delete': return `.delete ${q(op.id)}`;
+    case 'resolve': return `.resolve ${q(op.id)} ${q(op.text)}`;
+  }
+}
+
+function renderUnits(){
+  const el = $('#units'); el.innerHTML = '';
+  units.forEach((u, i) => {
+    const row = document.createElement('div'); row.className = 'unit';
+    row.innerHTML = `<input type="checkbox" id="u-${u.key}" ${u.on ? 'checked' : ''} aria-label="${esc(u.name)} を適用する">
+      <div><label for="u-${u.key}" class="name">${esc(u.name)}</label><div class="desc">${esc(u.desc)}</div>
+      <div class="ops">${u.ops.map(o => esc(opText(o))).join('<br>')}</div></div>
+      <div class="ctl"><button data-up="${i}" ${i===0?'disabled':''} aria-label="上へ">▲</button><button data-down="${i}" ${i===units.length-1?'disabled':''} aria-label="下へ">▼</button></div>`;
+    row.querySelector('input').addEventListener('change', e => { u.on = e.target.checked; update(); });
+    el.appendChild(row);
+  });
+  el.querySelectorAll('button[data-up]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.up; [units[i-1], units[i]] = [units[i], units[i-1]]; update(); }));
+  el.querySelectorAll('button[data-down]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.down; [units[i+1], units[i]] = [units[i], units[i+1]]; update(); }));
+}
+
+function check(cls, st, msg, sub){
+  return `<div class="check ${cls}"><span class="st">${st}</span><span class="msg">${msg}${sub ? '<small>'+sub+'</small>' : ''}</span></div>`;
+}
+
+function update(){
+  renderUnits();
+  const active = units.filter(u => u.on);
+  const ops = active.flatMap(u => u.ops);
+  $('#orderline').textContent = active.length ? '施行順: ' + active.map(u => u.lean).join(' → ') : '改正単位を選んでください';
+
+  const res = applyOps(rev0, ops);
+  $('#result').innerHTML = renderLaw(res.nodes, rev0) + (res.ok ? '' : `<div class="deleted" style="color:var(--law)">ここで停止: ${esc(opText(res.failedOp))}</div>`);
+
+  let c = '';
+  if (res.ok) c += check('ok', 'some', '溶け込みに成功', `applyUnit rev0 (${active.map(u=>u.lean).join(' ++ ') || '[]'}) = some …`);
+  else c += check('bad', 'none', `id <code>${esc(res.missing)}</code> が発射台に無い`, `${esc(opText(res.failedOp))}。依存先が未施行か、発射台が違う`);
+
+  const sch = scheduleOk(active);
+  if (active.length >= 2){
+    if (sch.ok) c += check('ok', 'scheduleOk', '施行順序は依存の半順序の線形拡張になっている');
+    else c += check('bad', 'scheduleOk = false', `${esc(sch.first.name)} が、後に施行される ${esc(sch.later.name)} の作った id を触っている`, '依存先を先に施行するか、調整規定が要る');
+  }
+
+  const cf = conflictsOf(res.nodes);
+  if (cf.length) c += check('bad', 'hasConflict', `衝突が ${cf.length} 件残っている: ${cf.map(n => '<code>'+esc(n.id)+'</code>').join(' ')}`, '溶け込みは成功しているが、同じ項を別々に改めた。調整規定（resolve）で本文を確定する');
+  else if (res.ok) c += check('ok', 'no conflict', '衝突なし');
+
+  if (res.ok && !wf(res.nodes)) c += check('bad', 'wf = false', 'id が重複している', '新設の id が既存と同じ');
+
+  // 変わった番号
+  const moved = rev0.filter(b => res.nodes.find(n => n.id === b.id) && paraNum(res.nodes, b.id) !== paraNum(rev0, b.id));
+  if (moved.length) c += check('warn', 'paraNum', `番号が動いた項: ${moved.map(b => `<code>${esc(b.id)}</code> 第${paraNum(rev0,b.id)}項 → 第${paraNum(res.nodes,b.id)}項`).join('、')}`, '状態は番号を持たないので参照は壊れない。番号は描画で付け直す');
+  $('#checks').innerHTML = c;
+
+  // 関係表
+  let t = '';
+  if (active.length >= 2){
+    t += '<tr><th>ペア</th><th>関係</th><th>意味</th></tr>';
+    for (let i = 0; i < active.length; i++) for (let j = i+1; j < active.length; j++){
+      const u = active[i], v = active[j];
+      let rel, why;
+      if (dependsOn(v, u)) { rel = '<span class="rel dep">依存</span>'; why = `${esc(v.lean)} は ${esc(u.lean)} が作った id を触る。順序あり`; }
+      else if (dependsOn(u, v)) { rel = '<span class="rel dep">依存</span>'; why = `${esc(u.lean)} は ${esc(v.lean)} が作った id を触る。この順は違反`; }
+      else if (independentUnits(u, v)) { rel = '<span class="rel ind">独立</span>'; why = '触る id が交わらない。applyUnit_comm により順序を入れ替えてよい'; }
+      else { rel = '<span class="rel con">同じ id</span>'; why = '同じ項を触る。順序で結果が変わりうる。衝突として現れる'; }
+      t += `<tr><td class="m">${esc(u.lean)} , ${esc(v.lean)}</td><td>${rel}</td><td>${why}</td></tr>`;
+    }
+  }
+  $('#rels').innerHTML = t;
+
+  // Lean
+  let L = 'def rev0 : Revision := { nodes := [ ... ] }\n\n';
+  for (const u of active) L += `def ${u.lean} : AmendUnit :=\n  [ ${u.ops.map(opLean).join(',\n    ')} ]\n\n`;
+  const expr = active.length ? `applyUnit rev0 (${active.map(u=>u.lean).join(' ++ ')})` : 'applyUnit rev0 []';
+  if (res.ok){
+    L += `example : (${expr}).map (·.hasConflict) = some ${cf.length ? 'true' : 'false'} := by native_decide\n`;
+    for (const b of moved) L += `example : (${expr}).bind (paraNum · "${b.id}") = some ${paraNum(res.nodes,b.id)} := by native_decide\n`;
+  } else {
+    L += `example : ${expr} = none := by native_decide\n`;
+  }
+  if (active.length >= 2 && !sch.ok) L += `example : scheduleOk [${active.map(u=>u.lean).join(', ')}] = false := by native_decide\n`;
+  if (active.length === 2 && independentUnits(active[0], active[1]))
+    L += `example (r : Revision) : applyUnit r (${active[0].lean} ++ ${active[1].lean}) = applyUnit r (${active[1].lean} ++ ${active[0].lean}) :=\n  applyUnit_comm r ${active[0].lean} ${active[1].lean} (by decide)\n`;
+  $('#lean').textContent = L;
+  $('#allpanel').hidden = true;
+}
+
+function permutations(arr){
+  if (arr.length <= 1) return [arr];
+  const out = [];
+  arr.forEach((x, i) => { for (const p of permutations(arr.slice(0,i).concat(arr.slice(i+1)))) out.push([x].concat(p)); });
+  return out;
+}
+function tryAll(){
+  const active = units.filter(u => u.on);
+  const panel = $('#allpanel'); panel.hidden = false;
+  if (active.length < 2){ $('#all').innerHTML = '<p class="lead">改正単位を 2 つ以上選んでください。</p>'; return; }
+  if (active.length > 5){ $('#all').innerHTML = '<p class="lead">5 つまでにしてください（順序が 120 通りを超えます）。</p>'; return; }
+  const perms = permutations(active);
+  const results = new Map();
+  let h = '<table><tr><th>順序</th><th>溶け込み</th><th>schedule</th><th>衝突</th><th>結果</th></tr>';
+  let okCount = 0;
+  for (const p of perms){
+    const r = applyOps(rev0, p.flatMap(u => u.ops));
+    const s = scheduleOk(p);
+    let sig = 'none', label = '—';
+    if (r.ok){
+      okCount++;
+      sig = JSON.stringify(r.nodes);
+      if (!results.has(sig)) results.set(sig, String.fromCharCode(65 + results.size));
+      label = results.get(sig);
+    }
+    h += `<tr><td class="m">${p.map(u=>esc(u.lean)).join(' → ')}</td>
+      <td>${r.ok ? '<span class="rel ind">some</span>' : `<span class="rel con">none</span> <small>${esc(r.missing)} が無い</small>`}</td>
+      <td>${s.ok ? '<span class="rel ind">ok</span>' : '<span class="rel con">違反</span>'}</td>
+      <td>${r.ok && conflictsOf(r.nodes).length ? '<span class="rel con">あり</span>' : (r.ok ? '<span class="rel ind">なし</span>' : '—')}</td>
+      <td class="m">${label}</td></tr>`;
+  }
+  h += '</table>';
+  let sum;
+  if (okCount === perms.length && results.size === 1) sum = check('ok', '合流', `全 ${perms.length} 通りで成功し、結果は 1 種類。順序は要らない`);
+  else if (okCount === perms.length) sum = check('bad', '合流しない', `全 ${perms.length} 通りで成功するが、結果が ${results.size} 種類ある`, '同じ項を別々に改めている。どれが意図か起案者に確認し、調整規定で確定する');
+  else sum = check('bad', '順序依存', `${perms.length} 通りのうち ${perms.length - okCount} 通りが失敗し、成功した結果は ${results.size} 種類`, '失敗する順序は依存違反。施行日を揃えるか調整規定が要る');
+  $('#all').innerHTML = sum + '<div class="tablewrap">' + h + '</div>';
+  panel.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+// 追加フォーム
+function syncForm(){
+  const t = $('#f-type').value;
+  $('#l-expected').hidden = t !== 'replace';
+  $('#l-newid').hidden = t !== 'insertAfter';
+  $('#l-text').hidden = t === 'delete';
+}
+$('#f-type').addEventListener('change', syncForm); syncForm();
+$('#addform').addEventListener('submit', e => {
+  e.preventDefault();
+  const t = $('#f-type').value, id = $('#f-id').value.trim(), text = $('#f-text').value;
+  if (!id) return;
+  let op;
+  if (t === 'replace') op = { t, id, expected:$('#f-expected').value, text };
+  else if (t === 'insertAfter'){
+    const nid = $('#f-newid').value.trim() || ('my/' + id + '/' + (++customCount));
+    const anchor = rev0.find(n => n.id === id);
+    op = { t, anchor:id, id:nid, art: anchor ? anchor.art : 99, text };
+  }
+  else if (t === 'delete') op = { t, id };
+  else op = { t, id, text };
+  customCount++;
+  units.push({ key:'custom'+customCount, lean:'custom'+customCount, name:'自作 '+customCount, desc:opText(op), ops:[op], on:true });
+  update();
+});
+$('#btn-all').addEventListener('click', tryAll);
+$('#btn-reset').addEventListener('click', () => { units = presets.map(u => ({ ...u, ops:u.ops.map(o => ({...o})) })); customCount = 0; update(); });
+
+$('#base').innerHTML = renderLaw(rev0, null);
+update();
+})();
+</script>
