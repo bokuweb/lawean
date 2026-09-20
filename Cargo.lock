@@ -12,6 +12,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-extract"
+version = "0.1.0"
+dependencies = [
+ "lawean-resolve",
+ "lawean-semantic",
+ "lawean-source",
+ "regex",
+]
+
+[[package]]
 name = "lawean-resolve"
 version = "0.1.0"
 dependencies = [

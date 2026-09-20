@@ -136,6 +136,95 @@ impl LegalDocument {
     }
 }
 
+/// 項単位にまとめた文（号・欄の文も含む）。抽出・参照解決の入力に使う
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentenceGroup<'a> {
+    /// 項（附則直下の項も含む）の stable_id
+    pub paragraph: &'a StableId,
+    pub sentences: Vec<SentenceRef<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentenceRef<'a> {
+    pub sentence: &'a Sentence,
+    /// 号（イロハ含む）の中の文
+    pub in_item: bool,
+    /// 定義欄（Column）の中の文
+    pub in_column: bool,
+}
+
+impl LegalDocument {
+    /// 本則・附則の全文を項ごとに（文書順で）返す
+    pub fn sentence_groups(&self) -> Vec<SentenceGroup<'_>> {
+        let mut out = Vec::new();
+        fn item<'a>(i: &'a Item, g: &mut SentenceGroup<'a>) {
+            match &i.body {
+                ItemBody::Sentences(ss) => g.sentences.extend(ss.iter().map(|s| SentenceRef {
+                    sentence: s,
+                    in_item: true,
+                    in_column: false,
+                })),
+                ItemBody::Columns(cs) => {
+                    for c in cs {
+                        g.sentences.extend(c.sentences.iter().map(|s| SentenceRef {
+                            sentence: s,
+                            in_item: true,
+                            in_column: true,
+                        }));
+                    }
+                }
+                ItemBody::Mixed(_) | ItemBody::None => {}
+            }
+            for c in &i.children {
+                if let ItemChild::Subitem(s) = c {
+                    item(s, g);
+                }
+            }
+        }
+        fn para<'a>(p: &'a Paragraph, out: &mut Vec<SentenceGroup<'a>>) {
+            let mut g = SentenceGroup {
+                paragraph: &p.stable_id,
+                sentences: Vec::new(),
+            };
+            g.sentences.extend(p.sentences.iter().map(|s| SentenceRef {
+                sentence: s,
+                in_item: false,
+                in_column: false,
+            }));
+            for c in &p.children {
+                if let ParagraphChild::Item(i) = c {
+                    item(i, &mut g);
+                }
+            }
+            out.push(g);
+        }
+        fn prov<'a>(p: &'a Provision, out: &mut Vec<SentenceGroup<'a>>) {
+            match p {
+                Provision::Container(c) => c.children.iter().for_each(|c| prov(c, out)),
+                Provision::Article(a) => {
+                    for c in &a.children {
+                        if let ArticleChild::Paragraph(p) = c {
+                            para(p, out);
+                        }
+                    }
+                }
+                Provision::Raw(_) => {}
+            }
+        }
+        self.main_provision.iter().for_each(|p| prov(p, &mut out));
+        for s in &self.suppl_provisions {
+            for c in &s.children {
+                match c {
+                    SupplChild::Provision(p) => prov(p, &mut out),
+                    SupplChild::Paragraph(p) => para(p, &mut out),
+                    SupplChild::Raw(_) => {}
+                }
+            }
+        }
+        out
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegalDocument {
     pub stable_id: StableId,
