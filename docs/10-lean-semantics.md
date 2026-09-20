@@ -1,6 +1,6 @@
 # 10. 法令の意味を Lean に載せる — 計画
 
-状態: M1・M2 済み（`lean/Lawean/Sem.lean`、`SemTheorems.lean`、`Properties.lean`、`Data/Sem_403AC0000000090_hand.lean`）。M3 以降は §6。[ADR-0016](adr/0016-lean-as-semantic-backend.md)（2026-09-20）
+状態: M1〜M3 済み（`lean/Lawean/Sem.lean`、`SemTheorems.lean`、`Properties.lean`、`Frame.lean`、`FrameExamples.lean`、`Data/Sem_403AC0000000090_hand.lean`）。M4 以降は §6。[ADR-0016](adr/0016-lean-as-semantic-backend.md)（2026-09-20）
 
 ## 1. 何を作るか
 
@@ -119,19 +119,24 @@ theorem art3_ge_30 : ∀ w, consistent model w → 360 ≤ w.ints "存続期間"
 
 同じ性質を Z3 にも出す（`lawean-verify::Property` から Lean の `theorem` 文を生成）。両方が同じ結論なら実装ミスの検出になる。
 
-## 4. 改正 × 意味（`lean/Lawean/Frame.lean`）
+## 4. 改正 × 意味（`lean/Lawean/Frame.lean`、M3 済み）
 
-最初の目標。改め文が意味に与える影響を、再抽出せずに言えるところまで言う。
+改め文が意味に与える影響を、再抽出せずに言えるところまで言う。実装した形は計画より単純で、改正単位そのものは定理に出てこない:
 
-- `Rule.source` は項の stable_id。改正単位 `u : Ident.AmendUnit` が触る id は `u.touches`
-- 性質 `P` が依存する Rule の閉包 `dep m P`: `P` が参照する変数・述語を効果に持つ Rule、その条件が参照する Rule、それらを上書きする Rule、の推移閉包
-- **frame 定理**: `(dep m P).all (·.source ∉ u.touches) → (∀ w, consistent m w → P w) → (∀ w, consistent m' w → P w)`
-  ただし `m'` は「`u.touches` に source を持つ Rule だけを差し替え、それ以外は `m` と同じ」モデル。
-  差し替えた Rule が閉包内の Rule を上書きしない（`overrides` が閉包に入らない）ことも前提に入る — 「〜にかかわらず」の追加は閉包を破るので再検証になる
-- 交わる場合は `m'` の該当 Rule を層 2 で抽出し直し（または人が書き）、性質を新しいデータで再証明する。`lawean-space` の「意味変化」報告がこの引き金
+- 性質ごとに依存する Rule の集合 `S` を宣言する（`Properties.lean` の `S3` / `S4` / `S9`）。性質は `consistentOn m S w`（S の Rule だけの consistent）から証明する
+- `closed S`（`decide`）: S の各 Rule の依存先 — 例外（`exceptions`）、条件の `ref`、`ruleValue`、効果の `sameAs` — が S の中にある
+- `Sub S m`（要素ごとに `rfl`）: S の Rule が m に**同じレコードで**入っている。Rust は同じレコードの Rule を Model をまたいで同じ `def` にするので、`rfl` で決まる
+- **`transfer`**: `wf m → wf m' → Sub S m → Sub S m' → closed S → (∀ w, consistentOn m S w → P w) → ∀ w, consistent m' w → P w`。
+  中身は `applies_agree`（閉じた S の applies は両 Model で一致。層化順の帰納法）と `holds_congr`
+- 「改正が S の Rule を変えた」は `Sub S m'` が壊れることで現れる: 本文が変わって層 2 が抽出し直した（レコードが違う）か、新しい Rule がそれを上書きするようになった（`exceptions` が違う）か。
+  どちらも再検証。「〜にかかわらず」の追加は後者
+- 改正単位との結びつきは Rust が計算する `modified_…`（本文を変えた・作った項の e-Gov id）で人が読む。`untouched S modified`（`decide`）は説明で、定理の前提ではない
 
-実データでの最初の定理: 令和3年法律第37号 第35条（第22・38・39条を触る）は第3・4・9条の性質を壊さない（frame）。
-第22条第2項の追加（電磁的記録のみなし）は第22条 × 第9条の性質の閉包に入るので再検証になる — これは正しい挙動で、再検証しても成立する。
+実データ（`FrameExamples.lean`）: 令和3年法律第37号 第35条の前後（現行の手書き Model と、2021-05-19 版に存在する項だけの Model）で、
+第3・4・9条の 5 性質を `transfer` で移送した。再証明なし、公理は `propext` / `Classical.choice` / `Quot.sound`。
+計画では「第22条第2項の追加は第22条 × 第9条の閉包に入るので再検証」と見ていたが、実際は違った: 第2項は第1項の**後ろに加わった**だけで、
+第1項（R22-1a）のレコードは変わらず、第2項の Rule（R22-2）は何も上書きしないので S9 に入らない。`touches`（anchor を含む）とは交わるが `modified` とは交わらない。
+触る改正の例は架空のもの（第3条ただし書きを「二十年より長い」に書き換える）: `Sub S3` が壊れ、再検証すると 25 年の反例で破れる。第4条は同じ改正後でもそのまま移送できる。
 
 ## 5. 生成（`lawean-lean` の拡張）
 
@@ -145,7 +150,7 @@ theorem art3_ge_30 : ∀ w, consistent model w → 360 ≤ w.ints "存続期間"
 |---|---|---|
 | ~~M1~~ | `Sem.lean`（型・評価器・`consistent`）と第3条の手書きデータ。性質 2 件 | 済み。≥ 30 年は `simp` + `omega`、= 30 年の反例は証人を `native_decide`。Z3 と同じ結論 |
 | ~~M2~~ | `lawean-lean::sem` が手書き 8 条を層化して出力。[07](07-verification.md) の 6 性質を `Properties.lean` に | 済み。6 件が Lean と Z3 で一致。公理は `propext` / `Classical.choice` / `Quot.sound`（`ofReduceBool` は反例の証人だけ）。**層化が手書き IR のバグを 1 件検出**（§8） |
-| M3 | `Frame.lean`。令3-37 第35条で frame 定理を実データに当てる。`drafts/widen-30.txt`（第30条を広げる案）で閉包に入る例 | 「触らない条の性質は保たれる」が定理に。触る案は再検証が要ると Lean が言う |
+| ~~M3~~ | `Frame.lean`（`applies_agree` / `consistentOn_agree` / `transfer`）。令3-37 第35条の前後で 5 性質を移送。触る改正（架空）で `Sub` が壊れて反例 | 済み。`drafts/widen-30.txt` は第30条の手書き IR が無いので未。層 2 が出せるようになったら |
 | M4 | Lean → C。`Ident.applyUnit` と `Sem.applies` を C に出して Rust / WASM から呼ぶ | `ident::apply_unit`（Rust の写し）を削除。三者一致テストが二者に減る |
 | M5 | 層 2 の出力を同じ経路に（[11](11-layer2.md)）。確度と Unknown を前提に持つ性質 | 手書きでない IR で M2 の性質が通る（または Unknown が前提に出る） |
 

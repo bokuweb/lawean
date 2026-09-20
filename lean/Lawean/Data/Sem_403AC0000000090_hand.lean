@@ -3,8 +3,12 @@ import Lawean.Sem
 /-!
 自動生成: `cargo run -p lawean-lean --example gen`。手で編集しない。
 
-借地借家法 `403AC0000000090_20260521_504AC0000000048` の手書き Semantic IR（`lawean-semantic/src/examples/shakuchi_shakuya.rs`、docs/03-examples の第2〜6・9・22・26条）。
-Rule は層化された順（例外 → 原則、参照先 → 参照元）
+借地借家法の手書き Semantic IR（`lawean-semantic/src/examples/shakuchi_shakuya.rs`、docs/03-examples の第2〜6・9・22・26条）。Rule は層化された順（例外 → 原則、参照先 → 参照元）。
+
+- `sem_403AC0000000090_hand`: 現行（`403AC0000000090_20260521_504AC0000000048`）
+- `sem_403AC0000000090_20210519_hand`: 令和3年法律第37号 第35条の発射台（2021-05-19 版）に存在する項の Rule だけ（第22条第2項が無い）
+- `touched_503AC0000000037_art35`: 同条が触った項（anchor を含む。e-Gov の 2022-05-18 版の id）
+- `modified_503AC0000000037_art35`: 同条が本文を変えた・作った項（anchor を除く）。frame 定理（`Frame.lean`）で「触らない Rule の性質は保たれる」を言うのに使う
 -/
 
 namespace Lawean.Data
@@ -182,5 +186,11 @@ def «R26-3» : Rule :=
     conf := 100 }
 
 def sem_403AC0000000090_hand : Model := { rules := [«R3-2», «R3-1», «R4-2'», «R4-1'», «R4-2», «R4-1», «R5-1-proviso», «R5-1», «R5-2», «R5-3», «R6», «R22-1a», «R9», «R22-1b», «R22-2», «R26-1», «R26-1-proviso», «R26-2», «R26-3»] }
+
+def sem_403AC0000000090_20210519_hand : Model := { rules := [«R3-2», «R3-1», «R4-2'», «R4-1'», «R4-2», «R4-1», «R5-1-proviso», «R5-1», «R5-2», «R5-3», «R6», «R22-1a», «R9», «R22-1b», «R26-1», «R26-1-proviso», «R26-2», «R26-3»] }
+
+def touched_503AC0000000037_art35 : List String := ["403AC0000000090/main/chap:2/sec:4/art:22/para:1", "403AC0000000090/main/chap:2/sec:4/art:22/para:2", "403AC0000000090/main/chap:3/sec:3/art:38/para:5", "403AC0000000090/main/chap:3/sec:3/art:38/para:3", "403AC0000000090/main/chap:3/sec:3/art:38/para:4", "403AC0000000090/main/chap:3/sec:3/art:38/para:1", "403AC0000000090/main/chap:3/sec:3/art:38/para:2", "403AC0000000090/main/chap:3/sec:3/art:39/para:2", "403AC0000000090/main/chap:3/sec:3/art:39/para:3"]
+
+def modified_503AC0000000037_art35 : List String := ["403AC0000000090/main/chap:2/sec:4/art:22/para:2", "403AC0000000090/main/chap:3/sec:3/art:38/para:5", "403AC0000000090/main/chap:3/sec:3/art:38/para:3", "403AC0000000090/main/chap:3/sec:3/art:38/para:4", "403AC0000000090/main/chap:3/sec:3/art:38/para:2", "403AC0000000090/main/chap:3/sec:3/art:39/para:3"]
 
 end Lawean.Data

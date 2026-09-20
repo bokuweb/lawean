@@ -161,44 +161,87 @@ fn ident(id: &str) -> String {
     format!("«{}»", id.replace('»', "_"))
 }
 
-/// Rule ごとに `def «id» : Rule`、最後に `def <name> : Model`。Rule は層化された順。
-/// `exceptions` は層化した並びの中で計算する（Lean の `Model.exceptionsOf` と同じ順）
-pub fn emit_model(doc: &str, name: &str, model: &SemanticModel) -> Result<String, SemError> {
-    let rm = ResolvedModel::new(model);
-    let rules = stratify(&rm)?;
+/// 1 つの Rule の Lean レコード（`def` 名を除く本体）。層化した並びの中で `exceptions` を計算する
+fn rule_record(rm: &ResolvedModel<'_>, rules: &[&Rule], r: &Rule) -> String {
+    let overrides: Vec<String> = r
+        .overrides
+        .iter()
+        .filter_map(|o| match o {
+            Override::Rule(id) => Some(ls(&id.0)),
+            Override::Contract => None,
+        })
+        .collect();
+    let exceptions: Vec<String> = rules
+        .iter()
+        .filter(|x| x.overrides.contains(&Override::Rule(r.id.clone())))
+        .map(|x| ls(&x.id.0))
+        .collect();
+    let mut s = String::new();
+    writeln!(s, "  {{ id := {},", ls(&r.id.0)).unwrap();
+    writeln!(s, "    cond := {},", expr(rm, &r.condition)).unwrap();
+    writeln!(s, "    effect := {},", effect(&r.effect, &r.id)).unwrap();
+    writeln!(s, "    overrides := [{}],", overrides.join(", ")).unwrap();
+    writeln!(s, "    exceptions := [{}],", exceptions.join(", ")).unwrap();
+    writeln!(s, "    source := {},", ls(&r.provenance.source.0)).unwrap();
+    write!(s, "    conf := {} }}", conf(r.provenance.confidence)).unwrap();
+    s
+}
+
+/// 複数の Model を 1 つのファイルに出す。Rule ごとに `def «id» : Rule`、Model ごとに `def <name> : Model`。
+/// **同じレコードの Rule は Model をまたいで同じ `def` を共有する**（frame 定理の `Sub S m` を `rfl` で示すため）。
+/// 同じ id で（`exceptions` 等が）違うレコードになる Rule は `«id@model»` に分ける。
+/// `lists` は `def <name> : List String`（改正単位が触った項の id 等）
+pub fn emit_models(
+    doc: &str,
+    models: &[(&str, &SemanticModel)],
+    lists: &[(&str, &[String])],
+) -> Result<String, SemError> {
     let mut s = format!(
         "import Lawean.Sem\n\n/-!\n自動生成: `cargo run -p lawean-lean --example gen`。手で編集しない。\n\n{doc}\n-/\n\nnamespace Lawean.Data\nopen Lawean.Sem\n\n"
     );
-    for r in &rules {
-        let overrides: Vec<String> = r
-            .overrides
-            .iter()
-            .filter_map(|o| match o {
-                Override::Rule(id) => Some(ls(&id.0)),
-                Override::Contract => None,
-            })
-            .collect();
-        let exceptions: Vec<String> = rules
-            .iter()
-            .filter(|x| x.overrides.contains(&Override::Rule(r.id.clone())))
-            .map(|x| ls(&x.id.0))
-            .collect();
-        writeln!(s, "def {} : Rule :=", ident(&r.id.0)).unwrap();
-        writeln!(s, "  {{ id := {},", ls(&r.id.0)).unwrap();
-        writeln!(s, "    cond := {},", expr(&rm, &r.condition)).unwrap();
-        writeln!(s, "    effect := {},", effect(&r.effect, &r.id)).unwrap();
-        writeln!(s, "    overrides := [{}],", overrides.join(", ")).unwrap();
-        writeln!(s, "    exceptions := [{}],", exceptions.join(", ")).unwrap();
-        writeln!(s, "    source := {},", ls(&r.provenance.source.0)).unwrap();
-        writeln!(s, "    conf := {} }}\n", conf(r.provenance.confidence)).unwrap();
+    // (id, record) → def 名
+    let mut defs: Vec<(String, String, String)> = Vec::new();
+    let mut model_lines = Vec::new();
+    for (name, model) in models {
+        let rm = ResolvedModel::new(model);
+        let rules = stratify(&rm)?;
+        let mut ids = Vec::new();
+        for r in &rules {
+            let rec = rule_record(&rm, &rules, r);
+            let def_name = match defs.iter().find(|(id, rc, _)| id == &r.id.0 && rc == &rec) {
+                Some((_, _, n)) => n.clone(),
+                None => {
+                    let n = if defs.iter().any(|(id, _, _)| id == &r.id.0) {
+                        ident(&format!("{}@{name}", r.id.0))
+                    } else {
+                        ident(&r.id.0)
+                    };
+                    defs.push((r.id.0.clone(), rec, n.clone()));
+                    n
+                }
+            };
+            ids.push(def_name);
+        }
+        model_lines.push(format!(
+            "def {name} : Model := {{ rules := [{}] }}",
+            ids.join(", ")
+        ));
     }
-    let ids: Vec<String> = rules.iter().map(|r| ident(&r.id.0)).collect();
-    writeln!(
-        s,
-        "def {name} : Model := {{ rules := [{}] }}",
-        ids.join(", ")
-    )
-    .unwrap();
-    s.push_str("\nend Lawean.Data\n");
+    for (_, rec, name) in &defs {
+        writeln!(s, "def {name} : Rule :=\n{rec}\n").unwrap();
+    }
+    for l in model_lines {
+        writeln!(s, "{l}\n").unwrap();
+    }
+    for (name, items) in lists {
+        let items: Vec<String> = items.iter().map(|x| ls(x)).collect();
+        writeln!(s, "def {name} : List String := [{}]\n", items.join(", ")).unwrap();
+    }
+    s.push_str("end Lawean.Data\n");
     Ok(s)
+}
+
+/// `def <name> : Model` を 1 つ出す
+pub fn emit_model(doc: &str, name: &str, model: &SemanticModel) -> Result<String, SemError> {
+    emit_models(doc, &[(name, model)], &[])
 }

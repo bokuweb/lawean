@@ -49,7 +49,7 @@
 - [x] id の決定性: `<改正法ID>/art<条>/art:<条>/new:<連番>`。Lean は id を計算しない（Rust が出したものを使う）ので揃える対象は Rust だけ
 - [x] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査（Rust と Lean の両方）
 - [x] `Ident` の `Revision` に目次（`toc`）を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う。`Node.art` は `String`（枝番 `42_2` のため）
-- [ ] 第74条の束縛は e-Gov の版ではなく「第73条を束縛した文書」に対して行う（第73条が作った id を保つため）。改正法をまたいで id を保つには、e-Gov の版に改正法が振った id を対応付ける表が要る
+- [x] 改正法が振った id と e-Gov の id の対応表: `ident::id_map`（当てた結果と e-Gov の版を文書順で突き合わせる）。`touched_egov_ids` / `modified_egov_ids` が Semantic IR の provenance と交わるかを frame 定理で使う
 
 ## 他法令への波及（[docs/09](09-cross-law-impact.md)）
 

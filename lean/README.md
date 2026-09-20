@@ -18,6 +18,8 @@ cd lean && lake build
 | `Lawean/Sem.lean` | **法令の意味**（ADR-0016、docs/10）。Semantic IR のデータ型（`Value` / `Expr` / `Effect` / `Rule` / `Model`）、世界 `World`（自由変数の割り当て）、評価器 `applies`（層化された順に例外 → 原則で積む。燃料なし）、`consistent`（世界が法令の模型か）、`Model.stratified` / `wf` |
 | `Lawean/SemTheorems.lean` | 評価器のメタ定理。`applies_spec`（wf な Model では applies はその Rule の条件と例外だけで決まる。`run` の不変量で証明）、`consistent_rule`。性質の証明を Model 全体の展開なしに局所化する |
 | `Lawean/Properties.lean` | **法令の内容の性質**（docs/10 M2）。`Data/Sem_403AC0000000090_hand.lean`（Rust が出した手書き 8 条）について docs/07 の 6 性質: 第3条 ≥ 30 年、= 30 年の反例、第4条 ≥ 10 年 / 最初の更新 ≥ 20 年、第22条 × 第9条、第9条 + 補題。すべて `omega`、公理は `propext` / `Classical.choice` / `Quot.sound` |
+| `Lawean/Frame.lean` | **改正 × 意味の frame 定理**（docs/10 §4）。`closed S`（依存で閉じた Rule 集合）、`Sub S m`（同じレコードで入っている）、`applies_agree`（閉じた S の applies は両 Model で一致）、`consistentOn_agree`、`transfer`（S だけから証明した性質は、S を同じレコードで含む別の Model に再証明なしで移る） |
+| `Lawean/FrameExamples.lean` | 令3-37 第35条の前後で第3・4・9条の 5 性質を `transfer` で移送。`modified_…`（Rust が計算した本文の変わった項）と S が交わらないことを `decide`。架空の第3条改正で `Sub` が壊れ、再検証すると破れる例 |
 | `Lawean/SemExamples.lean` | 第3条だけの小さな Model で、評価器を全部展開する素朴な証明と反例の検証 |
 | `Lawean/IdentExamples.lean` | 令和3年 第35条・令和4年 第73/74条の形で、割り込み（発射台がずれても同じ項に当たる）、独立なら可換（定理を `decide` で適用）、依存と施行順序の違反、同じ項への 2 改正の衝突と調整規定による解消を `native_decide` で検査 |
 
@@ -47,7 +49,7 @@ def unit_503AC0000000037_art35 : AmendUnit :=
 Rust 側（`crates/lawean-amend`）は番号ベースの定義の「実装が豊かな版」（本文の文分割・XML との往復・ハネ検出）。意味論の対応は
 `Op` の種類と「番号は直前の状態で解釈する」規約で揃えている。Rust の apply を Lean の定義から生成／検証する段階には至っていない（[TODO](../docs/TODO.md)）。
 
-法令の**意味**も同じ形で載せる（[ADR-0016](../docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](../docs/10-lean-semantics.md)）: `Sem.lean` / `Properties.lean` は済み。次は `Frame.lean`（改正単位が触らない Rule の性質は保たれる）。
+法令の**意味**も同じ形で載せる（[ADR-0016](../docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](../docs/10-lean-semantics.md)）: `Sem.lean` / `Properties.lean` / `Frame.lean` まで済み。次は Lean → C（M4）。
 
 証明は `lake build` で一度だけ検査する。エディタ（ブラウザ）側は検証済みの `applyUnit` を WASM で実行するだけで、実行時に Lean を動かす必要はない（[ADR-0014](../docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。
 Lean が走るのはサービスを作る側のビルドだけで、省庁向けエディタのサーバーにも担当者の手元にも置かない。ADR-0011 の `consolidates` 定理は開発時の回帰テスト（[ADR-0015](../docs/adr/0015-service-architecture.md)）。

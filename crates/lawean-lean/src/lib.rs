@@ -12,7 +12,7 @@
 pub mod sem;
 
 use lawean_amend::ident::{IdentOp, IdentRevision};
-pub use sem::{emit_model, stratify, SemError};
+pub use sem::{emit_model, emit_models, stratify, SemError};
 use std::fmt::Write;
 
 /// Lean の文字列リテラル。空白は `para_text` で除いてあるので、逃がすのは `\` と `"` だけ
@@ -140,7 +140,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Rev_403AC0000000090_20260521", "rev_403AC0000000090_20260521", "借地借家法 `403AC0000000090_20260521_504AC0000000048`（現行。令和4年法律第48号 第74条の施行後）", from_document(&r3)),
     ];
     let units = [
-        ("Unit_503AC0000000037_art35", "unit_503AC0000000037_art35", "デジタル社会形成整備法（令和3年法律第37号）第35条（`fixtures/amendments/503AC0000000037_art35.txt`）を `rev_403AC0000000090_20210519` に束縛したもの。\n繰り下げ・「第P項を第Q項とし」は id の世界では操作にならないので消え、「前項」の手当ては本文全体の `replace` になる", b35.ops),
+        ("Unit_503AC0000000037_art35", "unit_503AC0000000037_art35", "デジタル社会形成整備法（令和3年法律第37号）第35条（`fixtures/amendments/503AC0000000037_art35.txt`）を `rev_403AC0000000090_20210519` に束縛したもの。\n繰り下げ・「第P項を第Q項とし」は id の世界では操作にならないので消え、「前項」の手当ては本文全体の `replace` になる", b35.ops.clone()),
         ("Unit_504AC0000000048_art73", "unit_504AC0000000048_art73", "民事訴訟法等改正法（令和4年法律第48号）第73条（`fixtures/amendments/504AC0000000048_art73-74.txt`）を `rev_403AC0000000090_20220518` に束縛したもの。目次・第42条第1項・第61条の新設", b73.ops),
         ("Unit_504AC0000000048_art74", "unit_504AC0000000048_art74", "同 第74条を、第73条を当てた後の状態に束縛したもの。第61条の全部改正 = 第73条が作った id に anchor した `insertAfter` と、その id の `delete`。\n第73条が作った id を触るので第73条に依存する（`dependsOn`）", b74.ops),
     ];
@@ -151,14 +151,38 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     for (file, name, doc, ops) in &units {
         out.push((format!("{file}.lean"), emit_unit(doc, name, ops)));
     }
-    // 手書き Semantic IR（docs/03-examples の 8 条）。層 2 の出力も同じ経路に乗せる
+    // 手書き Semantic IR（docs/03-examples の 8 条、現行 = 令3-37 の施行後）。層 2 の出力も同じ経路に乗せる。
+    // frame 定理（docs/10 §4）のために、令3-37 の発射台（2021-05-19 版）に存在する項の Rule だけを残した Model と、
+    // 令3-37 が触った項（e-Gov の id）も出す
     let hand = lawean_semantic::examples::shakuchi_shakuya::model();
+    let before_ids: Vec<String> = from_document(&r0)
+        .nodes
+        .iter()
+        .map(|n| n.id.clone())
+        .collect();
+    let para_of = |src: &str| src.split("/sent:").next().unwrap_or(src).to_string();
+    let mut hand_before = hand.clone();
+    hand_before
+        .rules
+        .retain(|r| before_ids.contains(&para_of(&r.provenance.source.0)));
+    let touched =
+        lawean_amend::ident::touched_egov_ids(&from_document(&r0), &b35.ops, &from_document(&r1))
+            .expect("令3-37 は 2021-05-19 版に当たる");
+    let modified =
+        lawean_amend::ident::modified_egov_ids(&from_document(&r0), &b35.ops, &from_document(&r1))
+            .unwrap();
     out.push((
         "Sem_403AC0000000090_hand.lean".into(),
-        emit_model(
-            "借地借家法 `403AC0000000090_20260521_504AC0000000048` の手書き Semantic IR（`lawean-semantic/src/examples/shakuchi_shakuya.rs`、docs/03-examples の第2〜6・9・22・26条）。\nRule は層化された順（例外 → 原則、参照先 → 参照元）",
-            "sem_403AC0000000090_hand",
-            &hand,
+        emit_models(
+            "借地借家法の手書き Semantic IR（`lawean-semantic/src/examples/shakuchi_shakuya.rs`、docs/03-examples の第2〜6・9・22・26条）。Rule は層化された順（例外 → 原則、参照先 → 参照元）。\n\n- `sem_403AC0000000090_hand`: 現行（`403AC0000000090_20260521_504AC0000000048`）\n- `sem_403AC0000000090_20210519_hand`: 令和3年法律第37号 第35条の発射台（2021-05-19 版）に存在する項の Rule だけ（第22条第2項が無い）\n- `touched_503AC0000000037_art35`: 同条が触った項（anchor を含む。e-Gov の 2022-05-18 版の id）\n- `modified_503AC0000000037_art35`: 同条が本文を変えた・作った項（anchor を除く）。frame 定理（`Frame.lean`）で「触らない Rule の性質は保たれる」を言うのに使う",
+            &[
+                ("sem_403AC0000000090_hand", &hand),
+                ("sem_403AC0000000090_20210519_hand", &hand_before),
+            ],
+            &[
+                ("touched_503AC0000000037_art35", &touched),
+                ("modified_503AC0000000037_art35", &modified),
+            ],
         )
         .unwrap(),
     ));

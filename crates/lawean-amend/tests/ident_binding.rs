@@ -170,3 +170,40 @@ fn wrong_base_yields_conflicts_not_failure() {
         ]
     );
 }
+
+/// 改正法が振った id と e-Gov の id の対応: 令3-37 第35条が触った項を e-Gov の id で言える
+#[test]
+fn touched_paragraphs_in_egov_ids() {
+    let base = revision("403AC0000000090_20210519_503AC0000000037");
+    let after = revision("403AC0000000090_20220518_503AC0000000037");
+    let b = bind(&base, &unit35(), "503AC0000000037/art35").unwrap();
+    let touched = touched_egov_ids(&from_document(&base), &b.ops, &from_document(&after)).unwrap();
+    assert_eq!(
+        touched,
+        [
+            "403AC0000000090/main/chap:2/sec:4/art:22/para:1",
+            "403AC0000000090/main/chap:2/sec:4/art:22/para:2",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:5",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:3",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:4",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:1",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:2",
+            "403AC0000000090/main/chap:3/sec:3/art:39/para:2",
+            "403AC0000000090/main/chap:3/sec:3/art:39/para:3",
+        ]
+    );
+    // anchor を除いた「本文が変わった・できた項」
+    let modified =
+        modified_egov_ids(&from_document(&base), &b.ops, &from_document(&after)).unwrap();
+    assert_eq!(
+        modified,
+        [
+            "403AC0000000090/main/chap:2/sec:4/art:22/para:2",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:5",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:3",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:4",
+            "403AC0000000090/main/chap:3/sec:3/art:38/para:2",
+            "403AC0000000090/main/chap:3/sec:3/art:39/para:3",
+        ]
+    );
+}

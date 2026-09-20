@@ -67,6 +67,16 @@ impl IdentOp {
         }
     }
 
+    /// 操作が本文を変える・作る・消す id（`insertAfter` の anchor は位置を指すだけなので含まない）
+    pub fn modifies(&self) -> Vec<&str> {
+        match self {
+            IdentOp::Replace { id, .. } | IdentOp::Delete { id } | IdentOp::Resolve { id, .. } => {
+                vec![id]
+            }
+            IdentOp::InsertAfter { new_id, .. } => vec![new_id],
+        }
+    }
+
     /// 操作が新しく作る id
     pub fn creates(&self) -> Vec<&str> {
         match self {
@@ -251,6 +261,63 @@ pub fn from_document(doc: &LegalDocument) -> IdentRevision {
     }
     nodes_of(&doc.main_provision, &mut nodes);
     IdentRevision { nodes }
+}
+
+/// 改正法が振った id と e-Gov の id の対応。束縛した操作を発射台に当てた結果と、e-Gov の改正後リビジョンを
+/// 文書順で突き合わせる（`render` が一致していることが前提）。返すのは (当てた結果の id, e-Gov の id)
+pub fn id_map(
+    base: &IdentRevision,
+    ops: &[IdentOp],
+    egov_after: &IdentRevision,
+) -> Option<Vec<(String, String)>> {
+    let got = apply_unit(base, ops)?;
+    if got.render() != egov_after.render() {
+        return None;
+    }
+    Some(
+        got.nodes
+            .iter()
+            .zip(&egov_after.nodes)
+            .map(|(a, b)| (a.id.clone(), b.id.clone()))
+            .collect(),
+    )
+}
+
+fn to_egov_ids(map: &[(String, String)], ids: Vec<&str>) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in ids {
+        match map.iter().find(|(a, _)| a == t) {
+            Some((_, e)) => out.push(e.clone()),
+            None => out.push(t.to_string()),
+        }
+    }
+    out.dedup();
+    out
+}
+
+/// 改正単位が触った項（anchor を含む）を e-Gov の改正後リビジョンの id で返す（削った項は発射台の id のまま）。
+/// Semantic IR の Rule（`provenance.source` は e-Gov の id）と突き合わせるためのもの
+pub fn touched_egov_ids(
+    base: &IdentRevision,
+    ops: &[IdentOp],
+    egov_after: &IdentRevision,
+) -> Option<Vec<String>> {
+    let map = id_map(base, ops, egov_after)?;
+    Some(to_egov_ids(&map, touches(ops)))
+}
+
+/// 改正単位が本文を変えた・作った・消した項（anchor は含まない）を e-Gov の id で返す。
+/// 触っただけの anchor は本文が変わらないので、その項の Rule はそのまま（frame 定理の `Sub` が成り立つ）
+pub fn modified_egov_ids(
+    base: &IdentRevision,
+    ops: &[IdentOp],
+    egov_after: &IdentRevision,
+) -> Option<Vec<String>> {
+    let map = id_map(base, ops, egov_after)?;
+    Some(to_egov_ids(
+        &map,
+        ops.iter().flat_map(|op| op.modifies()).collect(),
+    ))
 }
 
 // ---------------------------------------------------------------- 束縛

@@ -79,7 +79,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 11. ~~Lean を溶け込みの正にする~~（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）: 実リビジョン 4 版と束縛した改め文 3 件を Lean に出力し、`consolidates_…` を `Ident.applyUnit` + `native_decide` で。第73→74条の依存、第35条と第73条の独立（`applyUnit_comm` の実データ版）、発射台のずれが衝突として残ることも定理に
 12. ~~他法令への波及~~（[docs/09](docs/09-cross-law-impact.md)）: 借地借家法の改正案が高齢者居住安定確保法・施行令に生む参照ずれ・時期の区間・上書きの循環を検出、Z3 で反例
 13. ~~identity patch~~（[ADR-0013](docs/adr/0013-identity-patches.md)）: 割り込み（未確定施行日・整備法）で発射台がずれても同じ項に当たるよう、改正単位を stable_id で書く。独立なら可換を Lean で証明。Rust の束縛 `ident::bind` も実データ 3 件で通る
-14. **法令の意味を Lean に**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ M3: 改正 × 意味の frame 定理を令3-37 で → M4: Lean → C（Rust の写しを消す）
+14. **法令の意味を Lean に**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ ~~M3: 改正 × 意味の frame 定理を令3-37 で~~（5 性質を再証明なしで移送）→ M4: Lean → C（Rust の写しを消す）
 15. **層 2**（[docs/11](docs/11-layer2.md)）: 形態素解析 + 格助詞で候補 → grande で判定。docs/10 の M1〜M3 と並行、M5 で合流
 16. `Ident` に条の挿入（条ずれ、令和5年法律第53号）と参照の id 化。`checkUnit`（[ADR-0014](docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）
 17. その他: [TODO](docs/TODO.md)

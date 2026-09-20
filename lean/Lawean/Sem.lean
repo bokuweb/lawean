@@ -159,7 +159,7 @@ def run (m : Model) (w : World) : Env :=
 /-- Rule r が世界 w で適用されるか -/
 def applies (m : Model) (w : World) (r : RuleId) : Bool := (run m w).get r
 
-/-- 効果の帰結。`sameAs` は 1 段だけ辿る -/
+/-- 効果の帰結。`sameAs` は 1 段だけ辿る（辿った先の `set` の `ruleValue` は変数扱い） -/
 def holds (m : Model) (w : World) : Effect → Bool
   | .set attr v => w.ints attr == evalV m w v
   | .deem f => w.bools f
@@ -168,13 +168,12 @@ def holds (m : Model) (w : World) : Effect → Bool
   | .exception _ => true
   | .sameAs r =>
     match m.rule? r with
-    | some { effect := .sameAs _, .. } => w.bools ("eff:" ++ r)
-    | some r' => holds1 m w r'.effect
+    | some r' => holds1 w r'.effect
     | none => w.bools ("eff:" ++ r)
   | .mark kind => w.bools ("eff:" ++ kind)
 where
-  holds1 (m : Model) (w : World) : Effect → Bool
-    | .set attr v => w.ints attr == evalV m w v
+  holds1 (w : World) : Effect → Bool
+    | .set attr v => w.ints attr == evalV.evalV1 w v
     | .deem f => w.bools f
     | .void t => w.bools ("void:" ++ t)
     | .preserve t => w.bools ("preserve:" ++ t)
@@ -201,6 +200,54 @@ mutual
     | [] => []
     | e :: es => e.refs ++ refsAll es
 end
+
+/-- 値が参照する Rule（`ruleValue`） -/
+def Value.ruleValues : Value → List RuleId
+  | .ruleValue r => [r]
+  | .add a b => a.ruleValues ++ b.ruleValues
+  | .sub a b => a.ruleValues ++ b.ruleValues
+  | _ => []
+
+mutual
+  /-- 式が `ruleValue` で参照する Rule -/
+  def Expr.ruleValues : Expr → List RuleId
+    | .and es => ruleValuesAll es
+    | .or es => ruleValuesAll es
+    | .not e => e.ruleValues
+    | .cmp a _ b => a.ruleValues ++ b.ruleValues
+    | _ => []
+  def ruleValuesAll : List Expr → List RuleId
+    | [] => []
+    | e :: es => e.ruleValues ++ ruleValuesAll es
+end
+
+/-- 効果が参照する Rule -/
+def Effect.deps : Effect → List RuleId
+  | .set _ v => v.ruleValues
+  | .sameAs r => [r]
+  | _ => []
+
+/-- Rule の評価が依存する Rule: 例外、条件の参照、`ruleValue`、効果の参照。frame 定理の閉包はこれで取る -/
+def Rule.deps (r : Rule) : List RuleId :=
+  r.exceptions ++ r.cond.refs ++ r.cond.ruleValues ++ r.effect.deps
+
+def isPrefixChars : List Char → List Char → Bool
+  | [], _ => true
+  | _, [] => false
+  | a :: as, b :: bs => a == b && isPrefixChars as bs
+
+def containsChars (pat : List Char) : List Char → Bool
+  | [] => isPrefixChars pat []
+  | c :: cs => isPrefixChars pat (c :: cs) || containsChars pat cs
+
+/-- pat が最後に現れる位置の手前までの接頭辞（現れなければ全体）。`String.splitOn` は kernel で簡約できないので自前で -/
+def beforeLast (pat : List Char) : List Char → List Char
+  | [] => []
+  | c :: cs => if isPrefixChars pat (c :: cs) && !containsChars pat cs then [] else c :: beforeLast pat cs
+
+/-- 所属する項（source から `/sent:N` を除いたもの）。改正単位が触る id と突き合わせる -/
+def Rule.para (r : Rule) : String :=
+  String.mk (beforeLast "/sent:".toList r.source.toList)
 
 /-- Rule の並びが評価順として正しいか: 各 Rule の例外と参照先が、その Rule より前（`seen`）に積まれている -/
 def stratifiedFrom (seen : List RuleId) : List Rule → Bool
