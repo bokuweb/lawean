@@ -1,5 +1,5 @@
 /-!
-# Semantic IR の意味論（ADR-0015、docs/10-lean-semantics.md §2）
+# Semantic IR の意味論（ADR-0016、docs/10-lean-semantics.md §2）
 
 法令は Lean の**データ**（`Model`）、意味論はこのファイルの評価器 1 つ。docs/07 の SMT 写像をそのまま Lean に書いたもの:
 

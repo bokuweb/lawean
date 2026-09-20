@@ -18,7 +18,7 @@
 
 ## 2. 出力の形
 
-層 2 は Semantic IR の値を出す（Lean のソースではない。[ADR-0015](adr/0015-lean-as-semantic-backend.md)）。
+層 2 は Semantic IR の値を出す（Lean のソースではない。[ADR-0016](adr/0016-lean-as-semantic-backend.md)）。
 各ノードに `Provenance { stable_id, by: Parser | Model("grande/e4b") | Human, confidence }`。
 判定できなかった選択肢は捨てず `Unknown(Ambiguous)` に両方残す（[ADR-0005](adr/0005-no-single-interpretation.md)）。
 

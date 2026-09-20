@@ -1,6 +1,6 @@
 # 10. 法令の意味を Lean に載せる — 計画
 
-状態: M1・M2 済み（`lean/Lawean/Sem.lean`、`SemTheorems.lean`、`Properties.lean`、`Data/Sem_403AC0000000090_hand.lean`）。M3 以降は §6。[ADR-0015](adr/0015-lean-as-semantic-backend.md)（2026-09-20）
+状態: M1・M2 済み（`lean/Lawean/Sem.lean`、`SemTheorems.lean`、`Properties.lean`、`Data/Sem_403AC0000000090_hand.lean`）。M3 以降は §6。[ADR-0016](adr/0016-lean-as-semantic-backend.md)（2026-09-20）
 
 ## 1. 何を作るか
 
@@ -17,7 +17,7 @@ Semantic IR ─→ Sem.Model      ──────→  Data/Sem_*.lean   ┘  
                                                             Frame.lean（改正 × 意味）
 ```
 
-法令は **Lean のデータ**、意味論は **Lean の評価器 1 つ**（深い埋め込み）。条を Lean のコードにはしない（理由は ADR-0015）。
+法令は **Lean のデータ**、意味論は **Lean の評価器 1 つ**（深い埋め込み）。条を Lean のコードにはしない（理由は ADR-0016）。
 
 ## 2. Lean 側の型（`lean/Lawean/Sem.lean`）
 
@@ -161,7 +161,7 @@ Z3 は第26条を触る性質が無かったので気づかず、Lean 出力の�
 
 ## 8. やらないこと
 
-- 条を Lean のコードにする（浅い埋め込み）。ADR-0015
+- 条を Lean のコードにする（浅い埋め込み）。ADR-0016
 - 手続法の状態遷移。[00](00-overview.md) の非目的のまま
 - Z3 の廃止。反例探索は Z3 のまま。Lean から Z3 を呼ぶ（`lean-smt`）のは必要になったら
 - 民法 140〜143 条の暦計算の Lean 化。期間は月数の Int のまま（07 と同じ制限）。日付が要る性質が出た時点で `Time` を足す

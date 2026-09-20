@@ -1,4 +1,4 @@
-# 0015. 法令の意味も Lean に載せる。法令は Lean の「データ」、意味論は Lean の評価器 1 つ。Z3 は反例探索に併用
+# 0016. 法令の意味も Lean に載せる。法令は Lean の「データ」、意味論は Lean の評価器 1 つ。Z3 は反例探索に併用
 
 状態: accepted（2026-09-20）。実装は [docs/10](../10-lean-semantics.md) の計画に沿って進める
 
@@ -29,7 +29,8 @@
    自由変数（評価概念・Unknown）を含む反例探索は **Z3 を残して併用**する。Lean は「証明と実行」、Z3 は「反例」
 4. **改正 × 意味の定理を最初の目標にする**: 改正単位が触る id と、性質が依存する Rule の閉包が交わらなければ性質は保たれる（frame 定理）。
    交われば再検証（新しいデータに対する `native_decide` / `omega`）。`lawean-space` の「意味変化」報告がその引き金
-5. **評価器は実行時にも使う。** 「条件充足の判定」（[00](../00-overview.md) の Rust evaluator）は Lean の評価器を Lean → C で動かす。Rust に写しを書かない（[ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md) の経路 1）
+5. **評価器は実行時にも使う。** 「条件充足の判定」（[00](../00-overview.md) の Rust evaluator）は Lean の評価器を Lean → C で動かす。Rust に写しを書かない（[ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md) の経路 1、[ADR-0015](0015-service-architecture.md) の表）。
+   性質の**定理**（`Properties.lean`）は [ADR-0015](0015-service-architecture.md) §6 の `consolidates` と同じく開発時の検証で、担当者の改正案ごとに作るものではない。担当者に返るのは評価器と Z3 の値
 
 ## 理由
 
@@ -56,4 +57,4 @@
 ## 関連
 
 [docs/10-lean-semantics.md](../10-lean-semantics.md)（計画）、[docs/11-layer2.md](../11-layer2.md)（入力側の計画）、
-[ADR-0011](0011-lean-as-reference-for-consolidation.md)、[ADR-0013](0013-identity-patches.md)、[ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md)、[07](../07-verification.md)
+[ADR-0011](0011-lean-as-reference-for-consolidation.md)、[ADR-0013](0013-identity-patches.md)、[ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md)、[ADR-0015](0015-service-architecture.md)、[07](../07-verification.md)

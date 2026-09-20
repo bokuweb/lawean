@@ -1,4 +1,4 @@
-//! Semantic IR → `Lawean.Sem.Model`（docs/10 §5、ADR-0015）。
+//! Semantic IR → `Lawean.Sem.Model`（docs/10 §5、ADR-0016）。
 //! 写像は `lawean-verify::smt` の SMT 写像と同じ（同じ名前・同じ値）。違いは Rule の並びだけで、
 //! Lean の評価器は層化された順（例外 → 原則、参照先 → 参照元）を前提にするので、ここでトポロジカルソートする。
 
