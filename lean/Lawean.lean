@@ -5,3 +5,5 @@ import Lawean.Examples
 import Lawean.Ident
 import Lawean.IdentExamples
 import Lawean.Consolidate
+import Lawean.Sem
+import Lawean.SemExamples
