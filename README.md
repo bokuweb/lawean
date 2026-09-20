@@ -36,6 +36,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
 | [lawean-amend](crates/lawean-amend) | **改正**（[docs/08](docs/08-amendment.md)）。改め文パーサ（閉じた語彙 11 種）、Source IR への apply、発射台・順序・ハネの検査。実際の改正 3 件で e-Gov の改正後リビジョンと一致 |
 | [lean/](lean/) | patch 代数（`Revision` / `Op` / `applyOp`）とメタ定理。触る条が違う 2 操作の可換性 `applyOp_comm` を証明 |
+| [lawean-render](crates/lawean-render) | **逆変換**（[ADR-0012](docs/adr/0012-structured-authoring.md)）。`Op` → 改め文（実改正 2 件で parse ∘ render = id）、Semantic IR → 日本語（原文と並べてレビュー） |
 | [lawean-verify](crates/lawean-verify) | Verification IR（[docs/07](docs/07-verification.md)）。Semantic IR を SMT-LIB に落とし z3 で性質を証明・反証。手書き IR で 第3・4・9・22条の性質 6 件（証明 5、意図した反例 1）。**手書き IR のバグを 1 件検出**（第4条ただし書きの「これ」） |
 | [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
 
@@ -45,6 +46,7 @@ cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 3    #
 cargo run -p lawean-resolve --example refs -- fixtures/403AC0000000090.xml 41  # 条文中の参照を解決して表示
 cargo run -p lawean-extract --example skeleton -- fixtures/403AC0000000090.xml 22  # 層 1 の抽出結果（骨組み）
 cargo run -p lawean-verify --example smt -- R3 R4   # 手書き IR の SMT-LIB（要 z3 で cargo test）
+cargo run -p lawean-render --example review -- fixtures/403AC0000000090.xml  # 手書き IR を原文と並べて日本語で表示
 cargo run -p lawean-amend --example amend -- fixtures/amendments/503AC0000000037_art35.txt fixtures/revisions/403AC0000000090_20210519_503AC0000000037.xml fixtures/revisions/403AC0000000090_20220518_503AC0000000037.xml  # 改め文の適用と突き合わせ
 ```
 
@@ -65,6 +67,7 @@ cargo run -p lawean-amend --example amend -- fixtures/amendments/503AC0000000037
    4. ~~Lean: patch 代数と可換性の十分条件~~ [lean/](lean/)。`applyOp_comm` を証明
    5. ~~3 段施行のシナリオ検査~~ 順序依存と合流を実データで検出
    6. ~~リビジョンへの意味層の適用~~ Semantic IR はリビジョンに束縛される（改正前では validate が落ちる）
-10. **Lean を溶け込みの正にする**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）: 実リビジョンと改め文を Lean に出力し `consolidates` を `native_decide` で ← 次
-11. **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）: 借地借家法の改正案が高齢者居住安定確保法・施行令に矛盾を生むことの検出と証明
-12. その他: 条ずれ（令和5年法律第53号）/ Verification IR の拡張 / 層 2（grande）。[TODO](docs/TODO.md)
+10. ~~逆変換~~（[ADR-0012](docs/adr/0012-structured-authoring.md)）: 既存法令は一回だけ構造化、改正は構造化記述で書いて改め文を生成する方針。`Op` → 改め文と Semantic IR → 日本語を実装
+11. **Lean を溶け込みの正にする**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）: 実リビジョンと改め文を Lean に出力し `consolidates` を `native_decide` で ← 次
+12. **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）: 借地借家法の改正案が高齢者居住安定確保法・施行令に矛盾を生むことの検出と証明
+13. その他: 条ずれ（令和5年法律第53号）/ Verification IR の拡張 / 層 2（grande）。[TODO](docs/TODO.md)

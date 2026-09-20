@@ -17,6 +17,7 @@
 | [0009](0009-layer2-decisions-via-grande.md) | 層 2 の判定は grande（Gemma 4 E4B）。生成 LLM は中核から外す | accepted、実装は後回し |
 | [0010](0010-amendment-first.md) | 主役は改正。patch 代数を Lean で定義し、Z3 は反例オラクル | accepted |
 | [0011](0011-lean-as-reference-for-consolidation.md) | 溶け込みの正は Lean の `applyUnit`。Rust は実データを Lean に出力する前処理 | accepted、実装は未 |
+| [0012](0012-structured-authoring.md) | 既存法令は一回だけ構造化（frontier model 可）、改正は構造化記述で書いて改め文と条文を生成。逆変換を一級に | accepted |
 
 ## テンプレート
 

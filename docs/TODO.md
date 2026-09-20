@@ -16,6 +16,14 @@
 
 - [ ] 手書き例 8 条分（`lawean-semantic/examples`）を正解にして、規則 + grande の出力との一致率を測る
 
+## 構造化記述（[ADR-0012](adr/0012-structured-authoring.md)）
+
+- [x] `Op` → 改め文（`lawean-render::amend`、往復テスト）
+- [x] Semantic IR → 日本語（`lawean-render::semantic`、原文と並べる）
+- [ ] 人が書く構造化記述の入力形式（Rust 構築子か専用記法か）。改正案を IR patch として書き、改め文・新旧対照表・溶け込み条文を生成する
+- [ ] 述語・引数の日本語化を自然文に近づける（今は `更新を請求した（by=借地権者）`）。語彙表と格助詞の逆変換
+- [ ] 証明結果（Z3 の反例、Lean の定理名）に Provenance を引きずって表示する
+
 ## Lean を溶け込みの正にする（[ADR-0011](adr/0011-lean-as-reference-for-consolidation.md)）
 
 - [ ] `lawean-lean` crate: Source IR → `def rev_… : Revision`、改め文の `Op` 列 → `def unit_… : AmendUnit` を `.lean` として出力（空白・全角数字の正規化を Rust 側と揃える）

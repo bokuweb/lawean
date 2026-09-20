@@ -58,7 +58,11 @@ fn layer1_extraction_runs_on_the_applied_revision() {
 
     let sk_before = extract(&before);
     let sk_after = extract(&after);
-    assert_eq!(sk_after.len(), sk_before.len() + 5, "追加された 4 項分の文（第38条第4項は 2 文）");
+    assert_eq!(
+        sk_after.len(),
+        sk_before.len() + 5,
+        "追加された 4 項分の文（第38条第4項は 2 文）"
+    );
     let new22 = sk_after
         .iter()
         .find(|s| s.sentence.0.ends_with("/art:22/para:2/sent:1"))

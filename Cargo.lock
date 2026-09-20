@@ -664,6 +664,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-render"
+version = "0.1.0"
+dependencies = [
+ "lawean-amend",
+ "lawean-resolve",
+ "lawean-semantic",
+ "lawean-source",
+]
+
+[[package]]
 name = "lawean-resolve"
 version = "0.1.0"
 dependencies = [
