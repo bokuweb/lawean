@@ -30,6 +30,14 @@ Semantic IR の**テストコーパス**。対象法（借地借家法）から�
 | [附則第6条](suppl-06.md) | 「なお従前の例による」。廃止された旧法への参照 | ✅ |
 | [民法第140〜143条](minpo-140-143.md) | 期間計算（初日不算入、暦による計算）。Temporal モデルの前提 | ✅ |
 
+stable_id は章・節のセグメントを省略して `main/art:3/para:1/sent:2` と書く。実際の ID は `main/chap:2/sec:1/art:3/para:1/sent:2`。
+原文と正確な ID は次で取れる:
+
+```sh
+cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 22
+cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml suppl:0 4
+```
+
 ## 記法（仮）
 
 ```

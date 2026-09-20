@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bokuweb/lawean"
+
+[workspace.dependencies]
+roxmltree = "0.20"
+thiserror = "2"

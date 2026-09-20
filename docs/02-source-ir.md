@@ -1,6 +1,6 @@
 # 02. Source IR — e-Gov 法令 XML の lossless な写像
 
-状態: draft。写像表は `fixtures/403AC0000000090.xml`（借地借家法）に実際に出てくる要素から書いた。
+状態: **実装済み**（[crates/lawean-source](../crates/lawean-source)）。写像表は `fixtures/403AC0000000090.xml`（借地借家法）に実際に出てくる要素から書いた。
 他法令で出てくる要素（別表・様式・図・改正規定など）は出てきたときに追記する。
 
 ## 方針
@@ -82,7 +82,7 @@ MainProvision
 | `ArticleCaption` | `Article.caption: Option<String>` | 「（借地権の存続期間）」。括弧込みで保持。**無いことがある**（民法第140条） |
 | `ArticleTitle` | `Article.title` | 「第三条」。`Num` から導出できるが保持 |
 | `Paragraph @Num @OldStyle? @OldNum?` | `Paragraph { stable_id, num, caption?, sentences, items }` | |
-| `ParagraphCaption` | `Paragraph.caption: Option<String>` | 民法にある（項単位の見出し） |
+| `ParagraphCaption` | `Paragraph.caption: Option<String>` | 附則で Article を持たない Paragraph に付く「（施行期日）」（民法で確認） |
 | `ParagraphNum` | `Paragraph.num_text` | 第1項は空要素、第2項以降は「２」（全角） |
 | `ParagraphSentence / Sentence` | `Paragraph.sentences: Vec<Sentence>` | |
 | `Item @Num / ItemTitle / ItemSentence` | `Item { stable_id, num, title, sentences_or_columns, subitems }` | |
@@ -98,7 +98,7 @@ MainProvision
 | `@Function` 無し | `SentenceFunction::Unspecified` | 1 文だけの項はこれ。`Main` に潰さない（lossless） |
 | `@WritingMode="vertical"` | 保持するだけ | |
 | `Column @Num` | `ItemBody::Columns(Vec<Column { num, sentences }>)` | 第2条の定義規定が `Column1 = 用語 / Column2 = 定義` の形。**Definition 抽出の手掛かり**だが、それは Semantic IR の仕事 |
-| `Ruby / Rt`, `Line`, `Sup`, `Sub` | `Inline::Ruby { base, rt }` など | 民法に `Ruby` あり |
+| `Ruby / Rt`, `Line`, `Sup`, `Sub` | `Inline::Raw(element)` | 民法に `Ruby` あり。v0.1 では型付けせず raw のまま。テキスト抽出時は子孫テキストを連結する |
 | `QuoteStruct`, `ArithFormula`, `Fig`, `Table`, `List`, `Note`, `Style`, `Format`, `Remarks` | `Inline::Raw(xml)` で逃がす | v0.1 では未着手。lossless のため raw 保持 |
 
 ### 改正規定
@@ -113,14 +113,18 @@ MainProvision
 **位置ベースの ID と、改正 lineage を持つ ID の 2 層**にする。v0.1 では位置ベースのみ実装する。
 
 ```
-403AC0000000090 / main / art:3 / para:1 / sent:2          第3条第1項ただし書き
-403AC0000000090 / main / art:2 / para:1 / item:1 / col:1   第2条第1号 前段（用語）
-403AC0000000090 / suppl:0 / art:4 / para:1 / sent:1        原始附則第4条
-403AC0000000090 / suppl:令和三年五月一九日法律第三七号 / art:72 / para:1  改正法附則
+403AC0000000090/main/chap:2/sec:1/art:3/para:1/sent:2     第3条第1項ただし書き
+403AC0000000090/main/chap:1/art:2/para:1/item:1/col:1     第2条第1号 前段（用語）
+403AC0000000090/suppl:0/art:4/para:1/sent:1               原始附則第4条
+403AC0000000090/suppl:6/art:72/para:1/sent:1              令和3年改正法附則（7 本目）
 ```
 
-- 附則は `suppl:{index}` または `suppl:{AmendLawNum}` で区別する。原始附則は `suppl:0`
-- 枝番は `art:22_2` のように XML の `Num` をそのまま使う
+- 編・章・節・款・目は `part: / chap: / sec: / subsec: / div:` としてパスに含める。「この節の規定」のような scope 参照に使うため
+- 附則は `suppl:{index}`（`LawBody` 内での出現順、原始附則が `suppl:0`）。`AmendLawNum` は SupplProvision 側に持つ
+- 号は `item:{Num}`、イロハは `sub1:{Num}` … `sub10:{Num}`、定義の欄は `col:{Num}`
+- 文は `sent:{Num}`。`Num` が無ければ出現順（1 始まり）
+- 枝番は `art:121_2` のように XML の `Num` をそのまま使う
+- docs/03-examples では章・節のセグメントを省略して `main/art:3/...` と書いている
 - **Semantic IR の Provenance はこの stable_id を指す。** テキストオフセットではなく構造パスで指す
 
 ## 型（Rust 疑似コード）
@@ -194,5 +198,6 @@ struct SupplProvision {
 
 - [ ] 法令標準 XML スキーマ（XSD）の一次情報を確認し、上の表に無い要素を洗い出す
 - [x] `Article @Num` の枝番表記 → `_` 区切り（`121_2`）。`:` は削除条の範囲（`155:157`）
-- [ ] 往復テスト（XML → IR → XML）の正規化ルールを決める（空白・改行・属性順）
+- [x] 往復テスト（XML → IR → XML）: 要素間の ASCII 空白だけのテキストノードを落とし、属性をソートして比較（`tests/roundtrip.rs`）。U+3000 は落とさない
+- [x] `Raw` で保持している要素は TOC / EnactStatement / Ruby（inline）のみ（`tests/structure.rs::raw_coverage_report`）
 - [ ] 過去版の取得: `law_revisions` API で `law_revision_id` の一覧を取り、v0.2 の改正 patch に備える
