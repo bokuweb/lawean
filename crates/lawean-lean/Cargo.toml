@@ -1,0 +1,15 @@
+[package]
+name = "lawean-lean"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Emit real revisions and bound amendment units as Lean data, so lean/ checks consolidation with native_decide (ADR-0011)"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-amend = { path = "../lawean-amend" }
+lawean-semantic = { path = "../lawean-semantic" }
+lawean-resolve = { path = "../lawean-resolve" }
+lawean-verify = { path = "../lawean-verify" }
+thiserror.workspace = true

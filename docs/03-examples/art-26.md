@@ -30,7 +30,7 @@ Rule R26-1
 Rule R26-1-proviso
   condition:  Pred(R26-1 により更新された)
   effect:     Set(期間, Indefinite)                          ← 「定めがないものとする」
-  overrides:  [R26-1]                                       ← 「同一の条件」のうち期間だけ上書き
+  overrides:  []                                            ← 例外ではない（下の考察）
   provenance: main/art:26/para:1/sent:2 (high, human)
 
 Rule R26-2
@@ -55,6 +55,9 @@ Rule R26-3
   `Event(満了) - 1年` から `Event(満了) - 6月` まで。民法第140条（初日不算入）が「前」の計算にどう効くかは別途（[minpo-140-143.md](minpo-140-143.md)）
 - **この条のただし書きは例外ではなく部分的な上書き**。「同一の条件で更新」のうち期間だけ「定めなし」にする。
   `overrides` で表せるが、上書きの粒度が「Rule 全体」ではなく「effect の一部（期間）」になる。
-  → `overrides` は Rule 単位のままにし、部分上書きは Resolved IR で `Set(期間)` が `Deem(同一条件)` より優先されることで表す
+  → `overrides` は Rule 単位のままにし、部分上書きは Resolved IR で `Set(期間)` が `Deem(同一条件)` より優先されることで表す。
+  **`overrides: [R26-1]` と書いてはいけない**: 07 の意味論では applies(R26-1) = cond ∧ ¬applies(proviso) かつ applies(proviso) = applies(R26-1) となり、
+  cond が真の世界が存在しなくなる（第26条第1項が成り立つ模型が無い）。手書き IR の当初版はそう書いており、Lean の層化（[10](../10-lean-semantics.md)、上書き・参照の循環）が検出した。
+  Z3 は第26条を触る性質が無かったので気づかなかった
 - 第5条と構造が並行（法定更新 → 使用継続 → 転貸借の読み替え）。**パターン化できる**。semantic parser のルール候補
 - 「期間の定めがない」は借地借家法で特別な意味を持つ状態（第27条 解約申入れ → 6 月で終了）。`Indefinite` を Temporal の値にする

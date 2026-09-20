@@ -2,11 +2,14 @@
 
 pub mod apply;
 pub mod hane;
+pub mod ident;
 pub mod op;
 pub mod parse;
 pub mod scenario;
 
-pub use apply::{apply_unit, diff_snapshots, paragraph_mapping, snapshot_main, ApplyError};
+pub use apply::{
+    apply_unit, diff_snapshots, para_text, paragraph_mapping, snapshot_main, toc_text, ApplyError,
+};
 pub use hane::{hane_candidates, HaneCandidate};
 pub use op::*;
 pub use parse::{parse_instruction, parse_units, ParseError};

@@ -1,6 +1,6 @@
 # 0013. 改正単位は identity で書く。独立なら可換、衝突は値、依存は半順序
 
-状態: accepted（2026-09-20）。Lean は実装済み（`lean/Lawean/Ident.lean`、`IdentExamples.lean`）。Rust 側の束縛は未（[TODO](../TODO.md)）
+状態: accepted（2026-09-20）。Lean は実装済み（`lean/Lawean/Ident.lean`、`IdentExamples.lean`）。Rust 側の束縛も実装済み（`lawean-amend::ident::bind`、実際の改正 3 件で Lean の `Consolidate.lean` を通る）
 
 ## 文脈
 
@@ -41,7 +41,7 @@ CRDT を検討した。収束型 CRDT（RGA / Yjs / Automerge）は位置を一�
 ## 結果（トレードオフ）
 
 - Lean: `Ident.lean`（型・apply・検査・定理）、`IdentExamples.lean`（割り込み・独立・依存・衝突の実行例）。`#print axioms` は `propext` と `Quot.sound`
-- Rust に要るもの: `lawean-amend` の `Op` を発射台に対して stable_id に束縛する `bind`、Source IR の参照を id 参照にする、番号の描画
+- Rust: `lawean-amend::ident::bind` が `Op` を発射台の stable_id に束縛する。「第N条を次のように改める」は旧第1項に anchor した `insertAfter` の連鎖 + 旧 id の `delete`（隣の条に anchor すると隣を触る改正と偽の依存が出る）。Source IR の参照を id 参照にするのは未
 - 「「A」を「B」に改める」が複数の項に当たる場合は、束縛時に id ごとの `replace` に展開する
 - 「次のように改める」（全部改正）は `delete` + `insertAfter` に落とす。旧 id が消えるので他法令からの参照切れが正しく出る
 - 同じ anchor への 2 つの挿入は独立ではない（順序が番号を決める）。これは正しく、順序を要求する

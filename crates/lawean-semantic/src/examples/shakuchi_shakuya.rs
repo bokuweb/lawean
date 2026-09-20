@@ -328,12 +328,15 @@ fn art26() -> Vec<Rule> {
                     .fact(),
             ))
             .provenance(&p(1, 1), Confidence::High, BY),
+        // ただし書きだが R26-1 の例外ではない（R26-1 が適用された上で期間だけを定める）。
+        // 当初は `.overrides(&["R26-1"])` を付けていたが、docs/07 の意味論では
+        // applies(R26-1) = cond ∧ ¬applies(proviso), applies(proviso) = applies(R26-1) となり、
+        // cond が真の世界が存在しなくなる。Lean の層化（docs/10）が循環として検出した
         rule("R26-1-proviso")
             .condition(rule_ref("R26-1"))
             .effect(set("期間", Value::PeriodValue(PeriodValue::Indefinite)))
-            .overrides(&["R26-1"])
             .provenance(&p(1, 2), Confidence::High, BY)
-            .note("Rule 全体ではなく「同一の条件」のうち期間だけを上書きする"),
+            .note("Rule 全体ではなく「同一の条件」のうち期間だけを上書きする。overrides ではなく R26-1 を条件に持つ"),
         rule("R26-2")
             .condition(and([
                 pred("通知した").expr(),

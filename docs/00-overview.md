@@ -17,12 +17,13 @@ e-Gov 法令 XML
    ▼
 ③ Resolved IR      参照・定義語・特則・時間を解決したグラフ
    │
-   ├──▶ ④ Verification IR ──▶ Lean（性質の証明） / Z3・cvc5（矛盾検出、数量・日付）
-   ├──▶ Rust evaluator（条件充足の判定）
+   ├──▶ ④ Lean（評価器 `applies`・性質の証明・改正 × 意味の定理。実行時も同じ評価器を C 経由で）
+   ├──▶ Z3（反例探索。評価概念・Unknown を自由変数にして sat モデルを出す）
    └──▶ 依存グラフ（参照グラフ、改正の波及解析）
 ```
 
-中心は **② Semantic IR**。Lean / SMT / Rust はすべて IR のバックエンドであり、差し替え可能。
+中心は **② Semantic IR**。Lean は IR の意味論の置き場（[ADR-0016](adr/0016-lean-as-semantic-backend.md): 法令はデータ、意味論は評価器 1 つ）、
+Z3 は反例探索の道具。改正（[08](08-amendment.md)）も同じ Lean に載っているので、改正と意味をまたぐ定理が書ける（[10](10-lean-semantics.md)）。
 
 ## 何を作らないか
 
@@ -43,7 +44,7 @@ e-Gov 法令 XML
   ```
 
 - 扱う対象: **人物・日付・期間・金額・条件・義務・禁止・許可・例外・条項参照**
-- 検証は「数値・期間・参照だけ Z3」「重要な 5〜10 個の性質だけ Lean」
+- 検証は「数値・期間・参照だけ Z3」「重要な 5〜10 個の性質だけ Lean」（→ [ADR-0016](adr/0016-lean-as-semantic-backend.md) で「証明は Lean、反例は Z3」に改めた）
 - Resolved IR / Verification IR / 改正 patch は **v0.1 に含めない**。ただし ID 設計（`stable_id + version_id`）だけは最初から入れる
 
 ## 設計原則（ADR に切り出したもの）
