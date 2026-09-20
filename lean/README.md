@@ -25,6 +25,7 @@ cd lean && lake build
 | `Lawean/RefsExamples.lean` | 令3-37 第35条の第38条第2・3項を `Body` で書き、生成した手当てが実際の改め文の `replace` と一字違わず一致することを `native_decide` で |
 | `Lawean/Space.lean` | **法令空間と他法令への波及**（docs/09）。`LawSpace`（法令 id → リビジョン）、`XPiece.xref`（他法令の項への id 参照）、`renderXBody`、`impact`（`dangling` / `shifted fix` / `semanticChange` の分類）。`ximpact_complete`（他法令の描画が変わるなら参照先の番号が動いている）、`classify_dangling` / `classify_shifted` / `classify_semantic`（健全性） |
 | `Lawean/SpaceExamples.lean` | 施行令の「借地借家法第三十八条第四項」2 箇所と高齢者居住安定確保法第58条の「借地借家法第二十八条」を `XBody` で書き、第38条への項の挿入で `shifted`（手当て「第三十八条第五項」）、第28条の削除で `dangling` を `native_decide` で |
+| `Lawean/Check.lean` | **エディタが実行する判定関数** `checkUnit`（ADR-0014 / 0015）と正しさ: `checkUnit_iff`（true ⟺ 溶け込めて id 重複なく衝突なし）、`applyOp_none_iff` / `applyUnit_none_iff`（失敗するのは、ある操作の時点でその対象 id が無いとき、それだけ）。Rust の `lawean-check` の Base / Order / Conflict / Consolidate はこの条件をそのまま報告する |
 | `Lawean/Koshoku.lean` | **実際に起きた改正漏れ**（公職選挙法 平成30年法律第75号、docs/12 §5）。訂正法（令和3年法律第51号）が e-Gov と一致する（本則 1167 項）、第244条第1項を id 参照で描画し直すと生成される手当てが訂正法の `replace` と一字違わず同じ、元の改正法にはその置換が無い、を `native_decide` で |
 | `Lawean/Cases.lean` | **失敗例**（docs/12、`fixtures/cases`）。`hane-missing`: 溶け込むが e-Gov と第38条の 1 項だけ違う。`conflict-22`: どちらの順でも第22条第1項が衝突として残り、`resolve` で解消できる |
 | `Lawean/IdentExamples.lean` | 令和3年 第35条・令和4年 第73/74条の形で、割り込み（発射台がずれても同じ項に当たる）、独立なら可換（定理を `decide` で適用）、依存と施行順序の違反、同じ項への 2 改正の衝突と調整規定による解消を `native_decide` で検査 |

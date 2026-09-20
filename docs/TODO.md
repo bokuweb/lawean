@@ -34,7 +34,7 @@
 - [x] 3 段施行の順序依存を `applyUnit … = none` の定理に（`art74_before_art73_fails`）
 - [x] Rust `ident::apply_unit`（Lean の写し）と `apply_unit`（Source IR 版）と Lean の三者一致。Rust 側は `tests/ident_binding.rs`、Lean 側は `Consolidate.lean`。Lean → C 抽出で Rust の写しを不要にするのは未
 - [ ] 条の見出し・条名の変更は `render` に入っていない（`snapshot_main` と同じ。全部改正で見出しが変わるケースは検査できない）
-- [ ] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（[ADR-0014](adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。エディタから呼ぶ判定関数
+- [x] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（`lean/Lawean/Check.lean`: `checkUnit_iff`、`applyUnit_none_iff`）
 - [ ] WASM 化の経路: **Lean → C** を本線に決めた（[ADR-0015](adr/0015-service-architecture.md)、[ADR-0016](adr/0016-lean-as-semantic-backend.md)、[docs/10](10-lean-semantics.md) M4）。C 呼び出しができたら `ident::apply_unit` を消す
 - [ ] 証跡の形式（[ADR-0015](adr/0015-service-architecture.md) §5）: 発射台リビジョンのハッシュ、改正単位、結果のハッシュ、WASM のバージョン。ハッシュ対象の正規化を Rust / Lean / WASM で揃える
 - [ ] エディタの各判定に裏付けの定理名を添える（`applyUnit_comm` / `scheduleOk` 等）
