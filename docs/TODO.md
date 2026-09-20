@@ -4,6 +4,8 @@
 
 ## 層 2: grande による判定（[ADR-0009](adr/0009-layer2-decisions-via-grande.md)）
 
+→ 着手順と完了条件は [docs/11](11-layer2.md) に移した。ここは細目だけ残す。
+
 - [ ] 格助詞パーサ: 条件節 → 節末動詞（述語）+ が／を／に／から／まで の格（引数候補）。形態素解析は vibrato / lindera。数量・期間は正規表現
 - [ ] `lawean-decide` crate: state = 項の骨組み、questions = ADR-0009 の表、grande の `POST /v1/systemone` を叩く。確率 → `Confidence`
 - [ ] 「できる」44 文（借地借家法）の Permission / Power を人がラベル → E4B ゼロショットの精度を測る → 足りなければ pointer head を学習（`tools/train_head.py`）
@@ -26,23 +28,25 @@
 
 ## Lean を溶け込みの正にする（[ADR-0011](adr/0011-lean-as-reference-for-consolidation.md)）
 
-- [ ] `lawean-lean` crate: Source IR → `def rev_… : Revision`、改め文の `Op` 列 → `def unit_… : AmendUnit` を `.lean` として出力（空白・全角数字の正規化を Rust 側と揃える）
-- [ ] `lean/Lawean/Data/` に出力を置き、`theorem consolidates_r3_37_art35 : applyUnit rev_20210519 unit_r3_37_art35 = some rev_20220518 := by native_decide`
-- [ ] Lean の `Revision` に目次と条の挿入・繰り下げを足す
-- [ ] 3 段施行の順序依存を `applyUnit … = none` の定理に
-- [ ] Rust `apply_unit` と Lean `applyUnit` の一致をテスト（同じ Op 列）
+- [x] `lawean-lean` crate: Source IR → `def rev_… : Revision`、束縛した改め文 → `def unit_… : AmendUnit`（`Ident` 版。正規化は `para_text` の空白除去だけ）
+- [x] `lean/Lawean/Data/` に出力を置き、`Consolidate.lean` で `consolidates_…`（`render` の一致）を `native_decide`
+- [x] 目次は `toc` ノード。条の挿入は `insertAfter`（`AppendArticle`）で足りる。条の繰り下げ（条ずれ）は未（令和5年法律第53号）
+- [x] 3 段施行の順序依存を `applyUnit … = none` の定理に（`art74_before_art73_fails`）
+- [x] Rust `ident::apply_unit`（Lean の写し）と `apply_unit`（Source IR 版）と Lean の三者一致。Rust 側は `tests/ident_binding.rs`、Lean 側は `Consolidate.lean`。Lean → C 抽出で Rust の写しを不要にするのは未
+- [ ] 条の見出し・条名の変更は `render` に入っていない（`snapshot_main` と同じ。全部改正で見出しが変わるケースは検査できない）
 - [ ] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（[ADR-0014](adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。エディタから呼ぶ判定関数
-- [ ] WASM 化の経路を決める: Lean → C → Emscripten か、Rust → wasm32 + 一致テストか（ADR-0014）
-- [ ] （後）Semantic IR の Lean 化: `applies_R` を Bool 関数、期間を Int、07 の 6 性質を `omega` / `decide` で
+- [ ] WASM 化の経路: **Lean → C** を本線に決めた（[ADR-0015](adr/0015-lean-as-semantic-backend.md)、[docs/10](10-lean-semantics.md) M4）。C 呼び出しができたら `ident::apply_unit` を消す
+- [ ] Semantic IR の Lean 化 → [docs/10](10-lean-semantics.md) に移した（M1〜M5）
 
 ## identity patch（[ADR-0013](adr/0013-identity-patches.md)）
 
 - [x] Lean: `Ident.lean`（id ベースの `Op`、衝突を値に、`dependsOn` / `scheduleOk`、`paraNum`）と `applyOp_comm` / `applyUnit_comm`
-- [ ] Rust: `lawean-amend` の番号 `Op` を発射台リビジョンに対して stable_id に束縛する `bind`（「「A」を「B」に改める」の複数箇所は id ごとに展開、全部改正は delete + insert）
+- [x] Rust: `lawean-amend::ident::bind`（複数箇所は id ごとに展開、全部改正は旧第1項に anchor した insert + delete、繰り下げは消える）
 - [ ] Source IR の参照を id 参照にし、番号を描画で出す。ハネ手当ての改め文を生成し、成立した改め文との差分で検査する
-- [ ] id の決定性: 改正法 ID + 位置から振る規則を Rust と Lean で揃える
-- [ ] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査
-- [ ] `Ident` の `Revision` にも目次と条を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う
+- [x] id の決定性: `<改正法ID>/art<条>/art:<条>/new:<連番>`。Lean は id を計算しない（Rust が出したものを使う）ので揃える対象は Rust だけ
+- [x] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査（Rust と Lean の両方）
+- [x] `Ident` の `Revision` に目次（`toc`）を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う。`Node.art` は `String`（枝番 `42_2` のため）
+- [ ] 第74条の束縛は e-Gov の版ではなく「第73条を束縛した文書」に対して行う（第73条が作った id を保つため）。改正法をまたいで id を保つには、e-Gov の版に改正法が振った id を対応付ける表が要る
 
 ## 他法令への波及（[docs/09](09-cross-law-impact.md)）
 

@@ -153,7 +153,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
 
 // ---------------------------------------------------------------- 位置の解決
 
-fn loc_name(l: &Loc) -> String {
+pub(crate) fn loc_name(l: &Loc) -> String {
     match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("第{}条第{n}項", l.article.to_num_string()),
         None => format!("第{}条", l.article.to_num_string()),
@@ -175,7 +175,7 @@ fn find_article<'a>(ps: &'a mut [Provision], num: &ArticleNum) -> Option<&'a mut
     None
 }
 
-fn remove_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
+pub(crate) fn remove_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
     let before = ps.len();
     ps.retain(|p| !matches!(p, Provision::Article(a) if &a.num == num));
     if ps.len() != before {
@@ -191,7 +191,7 @@ fn remove_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
     false
 }
 
-fn article_mut<'a>(
+pub(crate) fn article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,
 ) -> Result<&'a mut Article, ApplyError> {
@@ -199,7 +199,7 @@ fn article_mut<'a>(
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
 }
 
-fn chapter_mut(doc: &mut LegalDocument, n: u32) -> Result<&mut Container, ApplyError> {
+pub(crate) fn chapter_mut(doc: &mut LegalDocument, n: u32) -> Result<&mut Container, ApplyError> {
     fn go(ps: &mut [Provision], n: u32) -> Option<&mut Container> {
         for p in ps {
             if let Provision::Container(c) = p {
@@ -216,7 +216,7 @@ fn chapter_mut(doc: &mut LegalDocument, n: u32) -> Result<&mut Container, ApplyE
     go(&mut doc.main_provision, n).ok_or(ApplyError::ChapterNotFound(n))
 }
 
-fn paragraphs(art: &Article) -> Vec<&Paragraph> {
+pub(crate) fn paragraphs(art: &Article) -> Vec<&Paragraph> {
     art.children
         .iter()
         .filter_map(|c| match c {
@@ -226,7 +226,7 @@ fn paragraphs(art: &Article) -> Vec<&Paragraph> {
         .collect()
 }
 
-fn paragraph_mut(art: &mut Article, idx: usize) -> &mut Paragraph {
+pub(crate) fn paragraph_mut(art: &mut Article, idx: usize) -> &mut Paragraph {
     art.children
         .iter_mut()
         .filter_map(|c| match c {
@@ -238,7 +238,7 @@ fn paragraph_mut(art: &mut Article, idx: usize) -> &mut Paragraph {
 }
 
 /// idx 番目の Paragraph が children の何番目か
-fn nth_paragraph_child(art: &Article, idx: usize) -> usize {
+pub(crate) fn nth_paragraph_child(art: &Article, idx: usize) -> usize {
     art.children
         .iter()
         .enumerate()
@@ -248,18 +248,18 @@ fn nth_paragraph_child(art: &Article, idx: usize) -> usize {
         .unwrap()
 }
 
-fn label(p: &Paragraph) -> u32 {
+pub(crate) fn label(p: &Paragraph) -> u32 {
     p.num.parse().unwrap_or(0)
 }
 
-fn snapshot(art: &Article, snapshots: &mut BTreeMap<String, Vec<Option<u32>>>) {
+pub(crate) fn snapshot(art: &Article, snapshots: &mut BTreeMap<String, Vec<Option<u32>>>) {
     snapshots
         .entry(art.num.to_num_string())
         .or_insert_with(|| paragraphs(art).iter().map(|p| Some(label(p))).collect());
 }
 
 /// 文の始まりの番号で項を引く。None は条全体
-fn para_index(
+pub(crate) fn para_index(
     art: &Article,
     r: &Option<ParaRef>,
     snapshots: &mut BTreeMap<String, Vec<Option<u32>>>,
@@ -305,7 +305,12 @@ fn sentences_mut(p: &mut Paragraph) -> Vec<&mut Sentence> {
 }
 
 /// 条（idx=None）または項の中の全出現を置換し、置換数を返す
-fn replace_in_article(art: &mut Article, idx: Option<usize>, from: &str, to: &str) -> usize {
+pub(crate) fn replace_in_article(
+    art: &mut Article,
+    idx: Option<usize>,
+    from: &str,
+    to: &str,
+) -> usize {
     let mut n = 0;
     let count = paragraphs(art).len();
     for i in 0..count {
@@ -324,7 +329,7 @@ fn replace_in_article(art: &mut Article, idx: Option<usize>, from: &str, to: &st
     n
 }
 
-fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
+pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
     fn go(e: &mut Element, from: &str, to: &str) -> usize {
         let mut n = 0;
         for c in &mut e.children {
@@ -351,7 +356,7 @@ fn fullwidth(n: u32) -> String {
         .collect()
 }
 
-fn set_label(p: &mut Paragraph, n: u32) {
+pub(crate) fn set_label(p: &mut Paragraph, n: u32) {
     p.num = n.to_string();
     p.num_text = Some(if n == 1 {
         Vec::new()
@@ -408,7 +413,7 @@ fn make_sentences(text: &str) -> Vec<Sentence> {
 }
 
 /// 「２　本文」または「本文」（第1項）
-fn parse_paragraph(lines: &[String]) -> Result<Paragraph, ApplyError> {
+pub(crate) fn parse_paragraph(lines: &[String]) -> Result<Paragraph, ApplyError> {
     let Some(first) = lines.first() else {
         return Err(ApplyError::BadContent("empty".into()));
     };
@@ -451,7 +456,7 @@ fn split_leading_number(line: &str) -> (Option<u32>, &str) {
 }
 
 /// 「（見出し）」「第N条　本文」「２　本文」…
-fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
+pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
     let mut caption = None;
     let mut title = None;
     let mut num = None;
@@ -493,7 +498,7 @@ fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
 
 // ---------------------------------------------------------------- 事後検査と再パース
 
-fn check_numbering(doc: &LegalDocument) -> Result<(), ApplyError> {
+pub(crate) fn check_numbering(doc: &LegalDocument) -> Result<(), ApplyError> {
     fn go(ps: &[Provision]) -> Result<(), ApplyError> {
         for p in ps {
             match p {
@@ -558,37 +563,46 @@ pub fn paragraph_mapping(
 
 // ---------------------------------------------------------------- 比較用スナップショット
 
+/// 空白を除く。Lean 側と突き合わせる本文の正規化はこれだけ
+pub(crate) fn strip_ws(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// 項の本文（文 + 号・欄の文）を空白を除いた平文に。Rust の突き合わせと Lean への出力で同じものを使う
+pub fn para_text(p: &Paragraph) -> String {
+    let mut s: String = p.sentences.iter().map(|x| x.plain_text()).collect();
+    fn item(i: &Item, s: &mut String) {
+        if let Some(t) = &i.title {
+            s.push_str(&inline_text(t));
+        }
+        match &i.body {
+            ItemBody::Sentences(ss) => ss.iter().for_each(|x| s.push_str(&x.plain_text())),
+            ItemBody::Columns(cs) => cs
+                .iter()
+                .for_each(|c| c.sentences.iter().for_each(|x| s.push_str(&x.plain_text()))),
+            _ => {}
+        }
+        for c in &i.children {
+            if let ItemChild::Subitem(x) = c {
+                item(x, s);
+            }
+        }
+    }
+    for c in &p.children {
+        if let ParagraphChild::Item(i) = c {
+            item(i, &mut s);
+        }
+    }
+    strip_ws(&s)
+}
+
+/// 目次の平文（空白を除く）
+pub fn toc_text(doc: &LegalDocument) -> Option<String> {
+    doc.toc.as_ref().map(|t| strip_ws(&t.text()))
+}
+
 /// 本則の 条番号 → [(項ラベル, 本文)]。空白を除いた平文。目次は "TOC" キー
 pub fn snapshot_main(doc: &LegalDocument) -> BTreeMap<String, Vec<(u32, String)>> {
-    fn strip(s: &str) -> String {
-        s.chars().filter(|c| !c.is_whitespace()).collect()
-    }
-    fn para_text(p: &Paragraph) -> String {
-        let mut s: String = p.sentences.iter().map(|x| x.plain_text()).collect();
-        fn item(i: &Item, s: &mut String) {
-            if let Some(t) = &i.title {
-                s.push_str(&inline_text(t));
-            }
-            match &i.body {
-                ItemBody::Sentences(ss) => ss.iter().for_each(|x| s.push_str(&x.plain_text())),
-                ItemBody::Columns(cs) => cs
-                    .iter()
-                    .for_each(|c| c.sentences.iter().for_each(|x| s.push_str(&x.plain_text()))),
-                _ => {}
-            }
-            for c in &i.children {
-                if let ItemChild::Subitem(x) = c {
-                    item(x, s);
-                }
-            }
-        }
-        for c in &p.children {
-            if let ParagraphChild::Item(i) = c {
-                item(i, &mut s);
-            }
-        }
-        strip(&s)
-    }
     let mut out = BTreeMap::new();
     fn go(ps: &[Provision], out: &mut BTreeMap<String, Vec<(u32, String)>>) {
         for p in ps {
@@ -612,8 +626,8 @@ pub fn snapshot_main(doc: &LegalDocument) -> BTreeMap<String, Vec<(u32, String)>
         }
     }
     go(&doc.main_provision, &mut out);
-    if let Some(t) = &doc.toc {
-        out.insert("TOC".into(), vec![(0, strip(&t.text()))]);
+    if let Some(t) = toc_text(doc) {
+        out.insert("TOC".into(), vec![(0, t)]);
     }
     out
 }

@@ -1,6 +1,7 @@
 # 07. Verification IR — Semantic IR を SMT に落として性質を検証する
 
 状態: 実装（`crates/lawean-verify`）。z3 で手書き IR（第3・4・9・22条）の性質を証明・反証している。
+同じ意味論を Lean の評価器として書き直し、証明と改正 × 意味の定理は Lean、反例探索は Z3 のまま併用する計画が [docs/10](10-lean-semantics.md)（[ADR-0015](adr/0015-lean-as-semantic-backend.md)）。ここの SMT 写像が Lean 版の仕様になる。
 
 ## 目的
 

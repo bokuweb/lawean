@@ -1,6 +1,8 @@
 # 0011. 溶け込みの正は Lean の `applyUnit`。Rust は実データを Lean に出力する前処理
 
-状態: accepted（2026-09-20）。実装は未（[TODO](../TODO.md)）
+状態: accepted（2026-09-20）。実装済み（2026-09-20、`crates/lawean-lean`、`lean/Lawean/Consolidate.lean`、`lean/Lawean/Data/`）。
+判断 1 の `applyUnit` は番号ベースではなく [ADR-0013](0013-identity-patches.md) の `Ident.applyUnit` で行い、Rust の束縛（`lawean-amend::ident::bind`）が番号を id に落とす。
+一致は `Revision.render`（id を捨てた (条, 本文) の列）で見る。e-Gov は改正後に stable_id を振り直すので id までは一致しない
 
 ## 文脈
 
@@ -31,9 +33,9 @@
 
 ## 結果
 
-- Lean の `Revision` に目次と条の挿入・繰り下げ（条ずれ）を足す必要がある
+- Lean の `Revision` に目次を足した（`toc` ノード）。条の挿入は `insertAfter` で足りる。条の繰り下げ（条ずれ）は未
 - 文字列の照合は Lean と Rust で同じでなければならない（空白・全角数字の正規化を出力側で揃える）
-- CI で `lake build` が実データの定理を検査する。Lean のビルド時間が増える
+- CI で `lake build` が実データの定理を検査する。借地借家法（131 項 × 4 版）で `Consolidate.lean` のビルドは数秒
 
 ## 関連
 

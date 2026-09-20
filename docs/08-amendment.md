@@ -89,7 +89,10 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 **identity patch（[ADR-0013](adr/0013-identity-patches.md)）**: 番号ベースの `Op` では可換性が「触る条が違う」までしか言えず、未確定施行日や整備法の割り込みで発射台がずれると別の項を指す。
 `lean/Lawean/Ident.lean` は対象を stable_id で指す `Op` を定義し、触る id が交わらない（独立な）2 操作 / 2 改正単位の可換性 `applyOp_comm` / `applyUnit_comm` を証明した。
 衝突（期待した本文と違う）は `Node.conflicts` に値として残り、調整規定 `resolve` で解消する。依存（相手が作った id を触る）は半順序で、施行順序はその線形拡張であることを `scheduleOk` で検査する。
-番号は描画時に計算する（`paraNum`）ので、ハネ改正の手当ては探すものではなく生成するものになる。番号ベースの `Op` は改め文の表層構文として残し、発射台に対する束縛（Rust、未実装）で id に落とす。
+番号は描画時に計算する（`paraNum`）ので、ハネ改正の手当ては探すものではなく生成するものになる。番号ベースの `Op` は改め文の表層構文として残し、発射台に対する束縛（Rust `lawean-amend::ident::bind`）で id に落とす。
+
+**実データを Lean に通す（[ADR-0011](adr/0011-lean-as-reference-for-consolidation.md)）**: `lawean-lean` が e-Gov のリビジョン 4 版（2021-05-19 / 2022-05-18 / 2023-02-20 / 2026-05-21）を `Revision`、束縛した改め文 3 件（令3-37 第35条、令4-48 第73・74条）を `AmendUnit` として `lean/Lawean/Data/` に出し、`lean/Lawean/Consolidate.lean` が `native_decide` で検査する。
+`consolidates_…`（当てた結果の `render` が次の版と一致）、`wf`（id 重複・衝突なし）、第73→74条の依存と逆順の失敗（`= none`）、第35条と第73条の独立（`IndependentUnits` から `applyUnit_comm` で全発射台について可換）、改正済みの版に第35条を当て直すと「前項」を手当てした 2 項が衝突として残ること。これで §5 の定理は玩具データではなく実データに載っている `applyUnit` について言える。
 
 ## 6. 進め方（優先順）
 
