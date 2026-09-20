@@ -2,7 +2,7 @@
 
 状態: §6 の 1〜3 を実装（`crates/lawean-amend`）。実際の改正 3 件（令和3年法律第37号 第35条、令和4年法律第48号 第73・74条）を
 改正前リビジョンに適用した結果が e-Gov の改正後リビジョンと本則・目次まで一致する。発射台の不一致・順序依存・ハネの検出も実データで確認。
-Lean（§5）は未着手。方針は [ADR-0010](adr/0010-amendment-first.md)。
+Lean（§5）は `lean/` に patch 代数を定義し、**触る条が違う 2 操作の可換性**（`applyOp_comm`）を証明済み（`sorry` なし、公理は `propext` のみ）。方針は [ADR-0010](adr/0010-amendment-first.md)。
 
 ## 1. 法制執務の実態（一次資料）
 
@@ -91,8 +91,8 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 1. ~~改め文パーサ（Rust）。第35条・第73/74条の実データを ops に分解できること~~
 2. ~~apply（Rust、Source IR 上）。適用結果が e-Gov の次リビジョンと一致すること（本則）~~ 3 件とも一致
 3. ~~発射台・ハネの検査~~ 第35条の「前項」2 箇所が候補として出て、両方とも手当て済みと判定。手当てを外すと未手当てになる
-4. Lean: `Revision` / `AmendUnit` / `apply` の定義と、可換性の十分条件の証明 ← 次
-5. シナリオ（令和4年法律第48号の 3 段施行）の検査
+4. ~~Lean: `Revision` / `AmendUnit` / `apply` の定義と、可換性の十分条件の証明~~ `lean/`（[README](../lean/README.md)）
+5. シナリオ（令和4年法律第48号の 3 段施行）の検査 ← 次
 6. 溶け込み後リビジョンへの 07 の適用
 
 ### 実装して分かったこと

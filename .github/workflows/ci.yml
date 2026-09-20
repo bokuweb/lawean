@@ -15,3 +15,11 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: sudo apt-get install -y z3
       - run: cargo test
+  lean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          use-mathlib-cache: false
