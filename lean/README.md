@@ -21,6 +21,8 @@ cd lean && lake build
 | `Lawean/Frame.lean` | **改正 × 意味の frame 定理**（docs/10 §4）。`closed S`（依存で閉じた Rule 集合）、`Sub S m`（同じレコードで入っている）、`applies_agree`（閉じた S の applies は両 Model で一致）、`consistentOn_agree`、`transfer`（S だけから証明した性質は、S を同じレコードで含む別の Model に再証明なしで移る） |
 | `Lawean/FrameExamples.lean` | 令3-37 第35条の前後で第3・4・9条の 5 性質を `transfer` で移送。`modified_…`（Rust が計算した本文の変わった項）と S が交わらないことを `decide`。架空の第3条改正で `Sub` が壊れ、再検証すると破れる例 |
 | `Lawean/SemExamples.lean` | 第3条だけの小さな Model で、評価器を全部展開する素朴な証明と反例の検証 |
+| `Lawean/Refs.lean` | **参照を id で持つ本文とハネの完全性**（ADR-0012 / 0013）。`Body`（平文の断片 + id 参照）、`renderBody`（番号は `paraNum` から描画。相対形は距離が同じならそのまま、1 なら「前項」、それ以外は絶対形）、`renderBody_congr`（描画は参照の番号にしか依存しない）、`hane_complete`（本文が同じなのに描画が違えば参照の番号が動いている）、`haneFixes` / `haneFixes_sound`（手当ての生成と健全性）。公理は `propext` / `Classical.choice` / `Quot.sound` |
+| `Lawean/RefsExamples.lean` | 令3-37 第35条の第38条第2・3項を `Body` で書き、生成した手当てが実際の改め文の `replace` と一字違わず一致することを `native_decide` で |
 | `Lawean/Cases.lean` | **失敗例**（docs/12、`fixtures/cases`）。`hane-missing`: 溶け込むが e-Gov と第38条の 1 項だけ違う。`conflict-22`: どちらの順でも第22条第1項が衝突として残り、`resolve` で解消できる |
 | `Lawean/IdentExamples.lean` | 令和3年 第35条・令和4年 第73/74条の形で、割り込み（発射台がずれても同じ項に当たる）、独立なら可換（定理を `decide` で適用）、依存と施行順序の違反、同じ項への 2 改正の衝突と調整規定による解消を `native_decide` で検査 |
 

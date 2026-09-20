@@ -87,5 +87,6 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 14. **法令の意味を Lean に**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ ~~M3: 改正 × 意味の frame 定理を令3-37 で~~（5 性質を再証明なしで移送）→ M4: Lean → C（Rust の写しを消す）
 15. **層 2**（[docs/11](docs/11-layer2.md)）: 形態素解析 + 格助詞で候補 → grande で判定。docs/10 の M1〜M3 と並行、M5 で合流
 16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 4 件が通り、失敗例 8 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
+    - ~~ハネの手当てを生成する~~（ADR-0012）: Rust が正しい置換を生成して改め文と突き合わせ、足りなければ改め文の形で提案。Lean `Refs.lean` で「描画が変わるのは参照先の番号が動いたときだけ」（完全性）を証明、令3-37 の実データで生成 = 実際の置換
 17. `Ident` に条の挿入（条ずれ、令和5年法律第53号）と参照の id 化。`checkUnit`（[ADR-0014](docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）
 18. その他: [TODO](docs/TODO.md)

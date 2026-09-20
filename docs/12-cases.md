@@ -17,13 +17,14 @@
 | Base（発射台） | 指す条・項・字句が発射台にあるか | `ident::bind` |
 | Order（施行順序） | 当たらない単位が、他の単位の後なら当たるか（依存）。`schedule_ok` | `ident::bind` の再試行、`depends_on` |
 | Conflict（衝突） | 発射台には当たるが先行する改正の後では本文が違う | `ident::apply_unit` の `conflicts` |
-| Hane（ハネ） | 項の繰り下げでずれる参照に、**正しい番号への**手当てがあるか | `hane_candidates`（置換先の番号まで見る） |
+| Hane（ハネ） | 項の繰り下げでずれる参照に、**正しい番号への**手当てがあるか。無ければ**手当てを生成して改め文の形で出す**（`suggested_fixes`） | `hane_candidates`（`render_fix` で置換先を生成し、改め文の置換と突き合わせる） |
 | Consolidate | id の重複なし | `IdentRevision::wf` |
 | Expected | e-Gov の改正後リビジョンと本則が一致するか | `render` の比較 |
 | Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ | `lawean-space::impact` |
 
 Order / Conflict / Consolidate は Lean の `Ident.applyUnit` の Rust 写しで判定している。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
+Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`RefsExamples.lean` が「生成した手当て = 令3-37 の実際の置換」を確かめる。
 
 ## 3. ケース
 

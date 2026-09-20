@@ -93,7 +93,19 @@ fn failure_details_name_the_cause() {
     assert!(d.contains("第七十三条") && d.contains("依存"), "{d}");
     let r = get("hane-missing");
     let d = detail(&r, Kind::Hane);
-    assert!(d.contains("art:38/para:3") && d.contains("前項"), "{d}");
+    assert!(
+        d.contains("art:38/para:3")
+            && d.contains("「前項」→「第三項」")
+            && d.contains("手当てが無い"),
+        "{d}"
+    );
+    assert_eq!(
+        r.suggested_fixes,
+        ["第三十八条第三項中「前項」を「第三項」に改める。"]
+    );
+    let r = get("hane-wrong-number");
+    let d = detail(&r, Kind::Hane);
+    assert!(d.contains("改め文にあるのは「第四項」"), "{d}");
     let r = get("wrong-ref");
     assert!(
         detail(&r, Kind::Base).contains("第38条第11項"),

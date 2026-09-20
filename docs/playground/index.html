@@ -117,7 +117,8 @@ const LEAN = {
   'r3-37-then-r4-48-art73': 'Consolidate.lean: independent_art35_art73 → art35_art73_commute（applyUnit_comm）, both_orders_reach_20230220',
   'wrong-base': 'Consolidate.lean: art35_on_wrong_base_conflicts（発射台がずれると衝突として残る）',
   'r4-48-reversed': 'Consolidate.lean: art74_before_art73_fails（applyUnit … = none）, schedule_504AC0000000048',
-  'hane-missing': 'Cases.lean: hane_missing_differs（溶け込みはするが e-Gov と一致しない）',
+  'hane-missing': 'Cases.lean: hane_missing_differs（溶け込みはするが e-Gov と一致しない）。RefsExamples.lean: hane_fixes_are_in_the_real_amendment（生成した手当て = 実際の改め文の置換）',
+  'hane-wrong-number': 'RefsExamples.lean: hane_fixes_38（正しい手当ては「第三項」）。Refs.lean: hane_complete（描画が変わるのは参照先の番号が動いたときだけ）',
   'wrong-ref': 'Rust の束縛（bind）で止まる。Lean には id 操作が届かない',
   'taisho-wrong': 'Rust の突き合わせ。Lean の対象外（資料の検査）',
   'conflict-22': 'Cases.lean: conflict_22_has_conflict（Node.conflicts に値として残る）',
@@ -181,6 +182,7 @@ function render(r, ms) {
     h += '</li>';
   }
   h += '</ul>';
+  if (r.suggested_fixes && r.suggested_fixes.length) h += `<details open><summary>生成したハネの手当て（この改め文を繰り下げの文より前に足す）</summary><pre>${esc(r.suggested_fixes.join('\n'))}</pre></details>`;
   if (current && LEAN[current.id]) h += `<p class="lean">Lean 側の対応: <code>${esc(LEAN[current.id])}</code></p>`;
   if (r.diff.length) {
     h += `<details open><summary>発射台からの差分（${r.diff.length} 項）</summary><pre class="diff">` +

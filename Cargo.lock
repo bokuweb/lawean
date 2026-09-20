@@ -644,6 +644,7 @@ name = "lawean-check"
 version = "0.1.0"
 dependencies = [
  "lawean-amend",
+ "lawean-render",
  "lawean-resolve",
  "lawean-source",
  "lawean-space",

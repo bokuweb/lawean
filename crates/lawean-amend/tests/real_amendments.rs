@@ -230,3 +230,56 @@ fn units_touching_different_articles_are_confluent() {
     assert_eq!(report.successes, 2, "{:?}", report.outcomes);
     assert!(report.confluent);
 }
+
+/// 手当ての生成: 令3-37 第35条の 2 箇所は、生成した手当てが実際の改め文と同じ字句になる
+#[test]
+fn generated_hane_fixes_match_the_real_amendment() {
+    let units = parse_units(&fixture("amendments/503AC0000000037_art35.txt")).unwrap();
+    let before = revision("403AC0000000090_20210519_503AC0000000037");
+    let cands = hane_candidates(&before, &units[0]);
+    let fixes: Vec<(String, String, Option<String>)> = cands
+        .iter()
+        .map(|c| {
+            (
+                c.sentence.0.rsplit("/main/").next().unwrap().to_string(),
+                c.text.clone(),
+                c.fix.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        fixes,
+        [
+            (
+                "chap:3/sec:3/art:38/para:2/sent:1".to_string(),
+                "前項".to_string(),
+                Some("第一項".to_string())
+            ),
+            (
+                "chap:3/sec:3/art:38/para:3/sent:1".to_string(),
+                "前項".to_string(),
+                Some("第三項".to_string())
+            ),
+        ]
+    );
+    assert!(
+        cands.iter().all(|c| c.handled && c.found_to == c.fix),
+        "{cands:#?}"
+    );
+    // 生成した手当てを改め文の操作にすると、番号は改正前のもの
+    let op = cands[1].fix_op.clone().unwrap();
+    assert_eq!(
+        op,
+        Op::Replace {
+            at: Loc {
+                article: ArticleNum::Single {
+                    base: 38,
+                    branch: vec![]
+                },
+                paragraph: Some(ParaRef::Num(3))
+            },
+            from: "前項".into(),
+            to: "第三項".into(),
+        }
+    );
+}

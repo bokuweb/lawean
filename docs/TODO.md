@@ -45,7 +45,7 @@
 
 - [x] Lean: `Ident.lean`（id ベースの `Op`、衝突を値に、`dependsOn` / `scheduleOk`、`paraNum`）と `applyOp_comm` / `applyUnit_comm`
 - [x] Rust: `lawean-amend::ident::bind`（複数箇所は id ごとに展開、全部改正は旧第1項に anchor した insert + delete、繰り下げは消える）
-- [ ] Source IR の参照を id 参照にし、番号を描画で出す。ハネ手当ての改め文を生成し、成立した改め文との差分で検査する
+- [x] ハネ手当ての生成（`hane::render_fix`、`lawean-check` の `suggested_fixes`）と、成立した改め文との突き合わせ。Lean `Refs.lean` で本文を id 参照で持つ `Body` と完全性。Source IR そのものを id 参照にする（層 2 の参照解決で `Body` を出す）のは未
 - [x] id の決定性: `<改正法ID>/art<条>/art:<条>/new:<連番>`。Lean は id を計算しない（Rust が出したものを使う）ので揃える対象は Rust だけ
 - [x] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査（Rust と Lean の両方）
 - [x] `Ident` の `Revision` に目次（`toc`）を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う。`Node.art` は `String`（枝番 `42_2` のため）
@@ -66,7 +66,7 @@
 ## 改正（[docs/08](08-amendment.md)）
 
 - [ ] Lean と Rust の対応: Rust の apply を Lean の定義に対してテストで突き合わせる（同じ Op 列を両方で実行して比較）。将来的には Lean から C へ抽出して Rust から呼ぶ
-- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）と参照索引の更新の定理（ハネの完全性）
+- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）。ハネの完全性は `Refs.lean` で済み（項の参照。条の参照は条ずれと一緒に）
 - [ ] 令和4年法律第48号の 3 段施行をシナリオとして検査（§6 の 5）
 - [ ] 令和5年法律第53号（2028 施行、第46〜48条の挿入 = 条ずれ）の改め文を取得して条の挿入・繰り下げに対応
 - [ ] 他法令へのハネ（被改正法令を参照する他法令）

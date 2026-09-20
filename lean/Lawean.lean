@@ -12,3 +12,5 @@ import Lawean.Properties
 import Lawean.Frame
 import Lawean.FrameExamples
 import Lawean.Cases
+import Lawean.Refs
+import Lawean.RefsExamples
