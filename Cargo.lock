@@ -640,6 +640,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-check"
+version = "0.1.0"
+dependencies = [
+ "lawean-amend",
+ "lawean-resolve",
+ "lawean-source",
+ "lawean-space",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lawean-extract"
 version = "0.1.0"
 dependencies = [
@@ -728,6 +740,15 @@ dependencies = [
  "lawean-semantic",
  "lawean-source",
  "thiserror",
+]
+
+[[package]]
+name = "lawean-wasm"
+version = "0.1.0"
+dependencies = [
+ "lawean-check",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
