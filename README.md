@@ -15,7 +15,8 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/03-examples/](docs/03-examples/) | 対象法の条文と、手書きの期待 Semantic IR（IR 設計のテストコーパス） | 15 例 |
 | [docs/04-semantic-ir.md](docs/04-semantic-ir.md) | Semantic IR の仕様 | v0.1 型を実装 |
 | [docs/05-glossary.md](docs/05-glossary.md) | 法令用語 ↔ IR 用語 | 育成中 |
-| [docs/06-llm-extraction.md](docs/06-llm-extraction.md) | 層 2: LLM による要件・効果の構造化。入出力・棄却条件・API 設定・コスト | 設計 + 実装、実行は未 |
+| [docs/06-llm-extraction.md](docs/06-llm-extraction.md) | 層 2 の Claude 版。契約と棄却条件は grande 版でも流用 | 保留（ADR-0009） |
+| [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 
 構想段階のメモ（ツールチェーン比較、改め文の patch 化など）は
@@ -28,7 +29,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-source](crates/lawean-source) | Source IR。e-Gov 法令 XML の lossless なパース・出力。`fixtures/` の 2 法令で往復テスト済み |
 | [lawean-semantic](crates/lawean-semantic) | Semantic IR の型、手書き用の構築子、Source IR に対する参照整合性の検査。借地借家法 8 条分の手書きデータ入り |
 | [lawean-extract](crates/lawean-extract) | 層 1 の規則ベース抽出（[ADR-0008](docs/adr/0008-extraction-strategy.md)）。文末の効果種別（20 種）、条件節、「〜の規定にかかわらず」→ overrides、「契約の条件にかかわらず」→ Contract、譲歩、参照を文ごとに認識し、条件の中身が `Unknown` の骨組み Rule を作る。借地借家法の平叙文 211 のうち 97% を分類 |
-| [lawean-llm](crates/lawean-llm) | 層 2（[docs/06](docs/06-llm-extraction.md)）。骨組み Rule を Claude（`claude-opus-5`、structured outputs）に埋めさせ、層 1 の効果種別・参照・定義語と突き合わせて文単位で採否を決める。Rust に公式 SDK が無いので `/v1/messages` を直接叩く。**実 API での実行は未**（`ANTHROPIC_API_KEY` が要る）。オフラインテストは手書きサンプルで通る |
+| [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
 | [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
 
 ```sh
@@ -48,7 +49,6 @@ ANTHROPIC_API_KEY=... cargo run -p lawean-llm --example extract_paragraph -- fix
 4. ~~03 で裏付けられた分だけ Semantic IR を仕様化し、実装する（04）~~ 型と手書きデータまで
 5. ~~Resolved IR: 相対参照（前項・前条）の解決、`overrides` の逆引き、定義語 scope の解決~~
 6. ~~層 1: 文末の効果表現の分類、「〜にかかわらず」3 分類、節境界、骨組み Rule（[ADR-0008](docs/adr/0008-extraction-strategy.md)）~~
-7. ~~層 2: 骨組み Rule の条件・効果を LLM に IR スキーマで埋めさせ、層 1 と `validate` で突き合わせる~~ 実装まで。**実 API で 1 項回して出力を見る** ← 次（要 API キー）
-8. 層 2 の eval: 手書き例 8 条分を正解にして一致率を測り、プロンプトを詰める
-9. 手書きデータを Z3 / Lean に落とす最小の Verification IR
-10. 改正 patch（過去版の取得から）
+7. 層 2: 規則で述語・引数の候補 → grande（Gemma 4 E4B）で判定（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md)）— **後回し**（[TODO](docs/TODO.md)）
+8. **手書きデータを Z3 に落とし、性質を 1 つ証明する（Verification IR）** ← いまここ。変換できる前提で、IR が検証に使えるかを先に確かめる
+9. 改正 patch（過去版の取得から）

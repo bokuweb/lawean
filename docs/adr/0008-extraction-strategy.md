@@ -1,6 +1,6 @@
 # 0008. 自然文 → Semantic IR の抽出戦略: 定型は規則、非定型は LLM + 検証、確度を必ず持つ
 
-状態: proposed
+状態: accepted。ただし層 2 の手段は [ADR-0009](0009-layer2-decisions-via-grande.md) で「LLM 生成」から「規則で候補 + grande で判定」に変更
 
 ## 文脈
 
