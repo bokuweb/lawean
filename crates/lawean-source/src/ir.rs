@@ -118,6 +118,7 @@ impl LegalDocument {
                         }
                     }
                 }
+                Provision::Paragraph(p) => para(p, out),
                 Provision::Raw(_) => {}
             }
         }
@@ -208,6 +209,7 @@ impl LegalDocument {
                         }
                     }
                 }
+                Provision::Paragraph(p) => para(p, out),
                 Provision::Raw(_) => {}
             }
         }
@@ -275,6 +277,8 @@ pub struct LawTitle {
 pub enum Provision {
     Container(Container),
     Article(Article),
+    /// 条を持たない政令・省令の本則に直に並ぶ項（`MainProvision/Paragraph`）
+    Paragraph(Paragraph),
     /// 予期しない要素。lossless 用
     Raw(Element),
 }

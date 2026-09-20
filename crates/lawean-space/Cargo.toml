@@ -1,0 +1,16 @@
+[package]
+name = "lawean-space"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Law space: several laws at a time point, cross-law references, and the impact of an amendment on referencing laws"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-resolve = { path = "../lawean-resolve" }
+lawean-amend = { path = "../lawean-amend" }
+lawean-semantic = { path = "../lawean-semantic" }
+
+[dev-dependencies]
+lawean-verify = { path = "../lawean-verify" }

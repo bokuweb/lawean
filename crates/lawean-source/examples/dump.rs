@@ -93,6 +93,7 @@ fn provision(p: &Provision, only: Option<u32>) {
                 }
             }
         }
+        Provision::Paragraph(p) => paragraph(p),
         Provision::Raw(e) => println!("[raw <{}>]", e.name),
     }
 }

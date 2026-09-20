@@ -54,6 +54,7 @@ fn paragraphs(doc: &LegalDocument) -> Vec<Para> {
                     para(p, out)
                 }
             }),
+            Provision::Paragraph(p) => para(p, out),
             Provision::Raw(_) => {}
         }
     }

@@ -119,6 +119,9 @@ fn provision(el: &Element, parent: &StableId) -> Provision {
     if el.name == "Article" {
         return Provision::Article(article(el, parent));
     }
+    if el.name == "Paragraph" {
+        return Provision::Paragraph(paragraph(el, parent));
+    }
     Provision::Raw(el.clone())
 }
 

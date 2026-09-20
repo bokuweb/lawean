@@ -698,6 +698,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-space"
+version = "0.1.0"
+dependencies = [
+ "lawean-amend",
+ "lawean-resolve",
+ "lawean-semantic",
+ "lawean-source",
+ "lawean-verify",
+]
+
+[[package]]
 name = "lawean-verify"
 version = "0.1.0"
 dependencies = [

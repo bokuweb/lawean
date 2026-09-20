@@ -79,6 +79,7 @@ fn provision(p: &Provision) -> Element {
     match p {
         Provision::Container(c) => container(c),
         Provision::Article(a) => article(a),
+        Provision::Paragraph(p) => paragraph(p),
         Provision::Raw(e) => e.clone(),
     }
 }

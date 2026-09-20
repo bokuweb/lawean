@@ -14,7 +14,7 @@ fn articles<'a>(ps: &'a [Provision], out: &mut Vec<&'a Article>) {
         match p {
             Provision::Article(a) => out.push(a),
             Provision::Container(c) => articles(&c.children, out),
-            Provision::Raw(_) => {}
+            Provision::Paragraph(_) | Provision::Raw(_) => {}
         }
     }
 }
@@ -307,6 +307,7 @@ fn collect_raw(
                     }
                 }
             }
+            Provision::Paragraph(p) => para(p, raw, im),
             Provision::Raw(e) => bump(raw, e),
         }
     }

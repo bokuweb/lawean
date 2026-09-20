@@ -140,11 +140,9 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                             .remove(idx);
                     }
                     None => {
-                        // 条の削除: 見出し・本文を「削除」にする（条番号は残す。法制執務の慣行）
-                        art.caption = None;
-                        art.children = vec![ArticleChild::Paragraph(parse_paragraph(&[
-                            "削除".to_string()
-                        ])?)];
+                        // 「第N条を削る」: 条そのものを取り除く（番号の繰り上げは改め文が別に指示する）。
+                        // 番号を残して内容を「削除」にするのは「第N条を次のように改める。第N条　削除」の形
+                        remove_article(&mut doc.main_provision, &at.article);
                     }
                 }
             }
@@ -175,6 +173,22 @@ fn find_article<'a>(ps: &'a mut [Provision], num: &ArticleNum) -> Option<&'a mut
         }
     }
     None
+}
+
+fn remove_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
+    let before = ps.len();
+    ps.retain(|p| !matches!(p, Provision::Article(a) if &a.num == num));
+    if ps.len() != before {
+        return true;
+    }
+    for p in ps.iter_mut() {
+        if let Provision::Container(c) = p {
+            if remove_article(&mut c.children, num) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn article_mut<'a>(
@@ -493,7 +507,7 @@ fn check_numbering(doc: &LegalDocument) -> Result<(), ApplyError> {
                         });
                     }
                 }
-                Provision::Raw(_) => {}
+                Provision::Paragraph(_) | Provision::Raw(_) => {}
             }
         }
         Ok(())
@@ -589,6 +603,10 @@ pub fn snapshot_main(doc: &LegalDocument) -> BTreeMap<String, Vec<(u32, String)>
                             .collect(),
                     );
                 }
+                Provision::Paragraph(p) => out
+                    .entry("main".into())
+                    .or_default()
+                    .push((label(p), para_text(p))),
                 Provision::Raw(_) => {}
             }
         }

@@ -38,10 +38,16 @@ pub struct Index {
 impl Index {
     pub fn build(doc: &LegalDocument) -> Index {
         let mut articles = Vec::new();
-        fn walk(ps: &[Provision], region: &Region, out: &mut Vec<ArticleEntry>) {
+        fn walk(
+            ps: &[Provision],
+            region: &Region,
+            out: &mut Vec<ArticleEntry>,
+            loose: &mut Vec<ParagraphEntry>,
+        ) {
             for p in ps {
                 match p {
-                    Provision::Container(c) => walk(&c.children, region, out),
+                    Provision::Container(c) => walk(&c.children, region, out, loose),
+                    Provision::Paragraph(p) => loose.push(para_entry(p)),
                     Provision::Article(a) => out.push(ArticleEntry {
                         stable_id: a.stable_id.clone(),
                         region: region.clone(),
@@ -59,14 +65,29 @@ impl Index {
                 }
             }
         }
-        walk(&doc.main_provision, &Region::Main, &mut articles);
+        let mut main_loose = Vec::new();
+        walk(
+            &doc.main_provision,
+            &Region::Main,
+            &mut articles,
+            &mut main_loose,
+        );
+        if !main_loose.is_empty() {
+            // 条を持たない政令・省令: 本則全体を 1 つの擬似条として扱う
+            articles.push(ArticleEntry {
+                stable_id: doc.stable_id.child("main"),
+                region: Region::Main,
+                num: None,
+                paragraphs: main_loose,
+            });
+        }
         for (i, s) in doc.suppl_provisions.iter().enumerate() {
             let region = Region::Suppl(i);
             let mut loose = Vec::new();
             for c in &s.children {
                 match c {
                     SupplChild::Provision(p) => {
-                        walk(std::slice::from_ref(p), &region, &mut articles)
+                        walk(std::slice::from_ref(p), &region, &mut articles, &mut loose)
                     }
                     SupplChild::Paragraph(p) => loose.push(para_entry(p)),
                     SupplChild::Raw(_) => {}
