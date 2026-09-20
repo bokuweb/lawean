@@ -41,7 +41,7 @@ law_data_response
 | `LawNum` | `LegalDocument.law_num_text` | 「平成三年法律第九十号」 |
 | `LawBody / LawTitle @Kana @Abbrev @AbbrevKana` | `LegalDocument.title` | |
 | `LawBody / TOC` | 保持するが IR 上は導出可能。往復のために raw で持つ | `TOCChapter / TOCSection / TOCArticle / TOCSupplProvision / ArticleRange` |
-| `LawBody / EnactStatement` | `LegalDocument.enact_statement` | 借地借家法には無い |
+| `LawBody / EnactStatement` | `LegalDocument.enact_statement` | 民法にある（複数） |
 | `LawBody / Preamble` | `LegalDocument.preamble` | 借地借家法には無い |
 | `LawBody / MainProvision` | `LegalDocument.main_provision: Vec<Provision>` | 本則 |
 | `LawBody / SupplProvision` (複数) | `LegalDocument.suppl_provisions: Vec<SupplProvision>` | 附則。**原始附則 1 本 + 改正法ごとの附則**が並ぶ |
@@ -77,15 +77,16 @@ MainProvision
 | XML | Source IR | 備考 |
 |---|---|---|
 | `Chapter @Num / ChapterTitle` | `Provision::Chapter { num, title, children }` | |
-| `Section @Num / SectionTitle` | `Provision::Section { … }` | Part / Subsection / Division も同型。借地借家法には無いが型は用意する |
-| `Article @Num @Delete? @Hide?` | `Article { stable_id, num: ArticleNum, caption, title, paragraphs }` | `Num` は `"3"`, `"22_2"`（第二十二条の二）など枝番あり → `ArticleNum` 型で持つ |
-| `ArticleCaption` | `Article.caption` | 「（借地権の存続期間）」。括弧込みで保持 |
+| `Section @Num / SectionTitle` | `Provision::Section { … }` | Part / Subsection / Division も同型。民法にある |
+| `Article @Num @Delete? @Hide?` | `Article { stable_id, num: ArticleNum, caption, title, paragraphs }` | `Num` は `"3"` / `"121_2"`（第百二十一条の二）/ `"155:157"`（第百五十五条から第百五十七条まで 削除）の 3 形。民法で確認済み → `ArticleNum { base, branch: Vec<u32> }` と `ArticleNumRange` |
+| `ArticleCaption` | `Article.caption: Option<String>` | 「（借地権の存続期間）」。括弧込みで保持。**無いことがある**（民法第140条） |
 | `ArticleTitle` | `Article.title` | 「第三条」。`Num` から導出できるが保持 |
 | `Paragraph @Num @OldStyle? @OldNum?` | `Paragraph { stable_id, num, caption?, sentences, items }` | |
+| `ParagraphCaption` | `Paragraph.caption: Option<String>` | 民法にある（項単位の見出し） |
 | `ParagraphNum` | `Paragraph.num_text` | 第1項は空要素、第2項以降は「２」（全角） |
 | `ParagraphSentence / Sentence` | `Paragraph.sentences: Vec<Sentence>` | |
 | `Item @Num / ItemTitle / ItemSentence` | `Item { stable_id, num, title, sentences_or_columns, subitems }` | |
-| `Subitem1..10` | `Item.subitems`（再帰） | 借地借家法には無い |
+| `Subitem1..10 / Subitem1Title / Subitem1Sentence` | `Item.subitems`（再帰） | 民法にある。イ・ロ・ハ |
 
 ### 文
 
@@ -97,7 +98,7 @@ MainProvision
 | `@Function` 無し | `SentenceFunction::Unspecified` | 1 文だけの項はこれ。`Main` に潰さない（lossless） |
 | `@WritingMode="vertical"` | 保持するだけ | |
 | `Column @Num` | `ItemBody::Columns(Vec<Column { num, sentences }>)` | 第2条の定義規定が `Column1 = 用語 / Column2 = 定義` の形。**Definition 抽出の手掛かり**だが、それは Semantic IR の仕事 |
-| `Ruby / Rt`, `Line`, `Sup`, `Sub` | `Inline::Ruby { base, rt }` など | 借地借家法には無い。型は用意する |
+| `Ruby / Rt`, `Line`, `Sup`, `Sub` | `Inline::Ruby { base, rt }` など | 民法に `Ruby` あり |
 | `QuoteStruct`, `ArithFormula`, `Fig`, `Table`, `List`, `Note`, `Style`, `Format`, `Remarks` | `Inline::Raw(xml)` で逃がす | v0.1 では未着手。lossless のため raw 保持 |
 
 ### 改正規定
@@ -192,6 +193,6 @@ struct SupplProvision {
 ## 未確認・TODO
 
 - [ ] 法令標準 XML スキーマ（XSD）の一次情報を確認し、上の表に無い要素を洗い出す
-- [ ] `Article @Num` の枝番表記（`22_2` か `22:2` か）を実 XML で確認する
+- [x] `Article @Num` の枝番表記 → `_` 区切り（`121_2`）。`:` は削除条の範囲（`155:157`）
 - [ ] 往復テスト（XML → IR → XML）の正規化ルールを決める（空白・改行・属性順）
 - [ ] 過去版の取得: `law_revisions` API で `law_revision_id` の一覧を取り、v0.2 の改正 patch に備える

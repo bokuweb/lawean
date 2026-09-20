@@ -48,9 +48,14 @@ struct Rule {
 | `Void(Target)` | 「無効とする」 | 第9条。**03 で追加** |
 | `Exception(RuleId)` | 「この限りでない」「適用しない」 | 第5条ただし書き |
 | `SameAs(RuleId)` | 「前項と同様とする」 | 第5条第2項。**03 で追加。要検討** |
-| `Unknown(UnknownExpr)` | 上のどれにも当てはまらない | 第5条第3項の「みなして〜適用する」 |
+| `DeemAndApply { deem: (Fact, Fact), apply: RuleId }` | 「A を B とみなして、〜の規定を適用する」 | 第5条第3項・第22条第2項・第26条第3項・第38条第2項。**4 箇所で同型なので合成 Effect にする** |
+| `Apply(Scope)` | 「〜の規定は、〜にも適用する」 | 附則第4条 |
+| `ApplyExternal { law, topic }` | 「なお従前の例による」 | 附則第6条。廃止法令の適用 |
+| `Preserve(Target)` | 「〜の効力を妨げない」 | 附則第4条ただし書き。Void の反対 |
+| `Unknown(UnknownExpr)` | 上のどれにも当てはまらない | |
 
-TODO: `Deem(X AS Y) THEN Apply(R)`（読み替え + 適用）を合成 Effect にするか Unknown にするか（[art-05.md](03-examples/art-05.md)）。
+`Obligation / Prohibition / Permission / Power` の `Action` は `{ verb, by, to, content, timing, form }` 程度の構造。
+「対抗することができない」「述べることができない」は `Prohibition`（[art-06.md](03-examples/art-06.md)、[art-38.md](03-examples/art-38.md)）。
 
 ## Expr
 
@@ -83,12 +88,41 @@ struct UnknownExpr {
 
 ## Temporal
 
-TODO。03 の art-03 / art-04 / 附則第4条・第6条 / 民法第140・143条 を書いてから。最低限:
+03 の例から必要になった型。計算規則は民法第140〜143条（[minpo-140-143.md](03-examples/minpo-140-143.md)）。
 
-- `Duration { length, unit, from: Event }` — 起算点付き
-- `Instant` — 施行日・公布日・特定日
-- `Range` — 適用期間
-- 「施行前に生じた事項」「なお従前の例による」を表す経過措置ノード
+```rust
+enum Unit { Hour, Day, Week, Month, Year }
+struct Duration { length: u32, unit: Unit }
+
+enum Event {                                    // 起算点となる事象。値は Fact として外から与える
+    Symbol(String),                             // 「契約の日」「更新の日」「通知の日」「期間の満了」「施行日」
+}
+
+struct Period {                                 // 「〜の日から十年」「満了の一年前」
+    from: Event,
+    length: Duration,
+    direction: Direction,                       // Forward | Backward
+}
+
+struct Window { from: Period, to: Period }      // 「一年前から六月前までの間」（第26条・第38条第6項）
+
+enum PeriodValue { Definite(Period), Indefinite }   // 「期間の定めがない」（第26条ただし書き）
+
+enum TimeCond {                                 // condition に出てくる時間述語
+    Before(Event), After(Event),                // 「施行前に生じた」
+    Within(Window),                             // 「〜までの間に」
+    Elapsed(Period),                            // 「通知の日から六月を経過した後」
+}
+
+struct RuleTemporal {                           // Rule 自体の時間属性
+    effective: Option<(Event, Option<Event>)>,  // 施行日〜（廃止日）
+    facts_before_boundary: Option<Event>,       // 経過措置: 施行前の事実にも適用（附則第4条）/ 施行前の事実にだけ適用（附則第6条）
+}
+```
+
+- 施行日は法令内で確定しない（政令委任）。`Event::Symbol("施行日")` として持ち、値は `LegalDocument.enforced_on` から束縛する
+- Backward（遡り）の計算規則は民法に無い → `Unknown(Ambiguous)` 扱い。v0.1 の実装は Forward の 140・141・143 のみ
+- **Fact の発生時点で適用 Rule 集合が変わる**（附則第6条: 施行前設定の借地権は旧法）。Temporal resolver の仕事
 
 ## Reference
 
@@ -111,11 +145,14 @@ enum RefTarget {
 struct Definition {
     id: DefinitionId,
     term: String,
-    scope: StableId,                // 「この法律において」→ law root、「この節において」→ section
-    body: Expr,                     // v0.1 では Unknown(Unparsed) でよい
+    scope: Vec<StableId>,           // 「この法律において」→ [law root]、「この条において」→ [art:6]、
+                                    // 「第三十八条第二項及び第三十九条第三項において同じ」→ 飛び飛び（第22条）
+    body: DefinitionBody,           // Expr | Temporal(Window など。第38条第6項「通知期間」) | Unknown
     provenance: Provenance,
 }
 ```
+
+内側の scope が外側を上書きする（第6条「借地権者（転借地権者を含む。以下この条において同じ。）」が第2条を上書き）。
 
 ## Provenance
 
@@ -134,5 +171,8 @@ struct Provenance {
 
 - [ ] Entity / Predicate の語彙をどう管理するか（自由文字列か、法令ごとの語彙表か）
 - [ ] `SameAs` を残すか、resolver で展開して消すか
+- [ ] `overrides` の粒度。第26条ただし書きは Rule 全体ではなく effect の一部（期間）だけ上書きする
+- [ ] 強行規定（R9）に対する特則（R22）の展開順序。Exception グラフが 2 段になる
+- [ ] 「ときに限り」（必要条件）と「場合において」（条件）を Expr 上で区別するか
 - [ ] Interpretation の `authority`（文理 / 判例 / 行政解釈 / 学説）の粒度
 - [ ] 手続（第41条以降の裁判手続）をどう扱うか。v0.1 では `Unknown(External)` で全部逃がす想定

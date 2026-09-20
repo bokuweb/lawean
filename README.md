@@ -10,7 +10,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | ファイル | 内容 | 状態 |
 |---|---|---|
 | [docs/00-overview.md](docs/00-overview.md) | 目的・非目的・v0.1 のスコープ・全体像 | draft |
-| [docs/01-target-law.md](docs/01-target-law.md) | 最初の対象法律の選定 | 仮決定 |
+| [docs/01-target-law.md](docs/01-target-law.md) | 最初の対象法律の選定 | 確定（借地借家法） |
 | [docs/02-source-ir.md](docs/02-source-ir.md) | e-Gov 法令 XML → Source IR の写像 | draft |
 | [docs/03-examples/](docs/03-examples/) | 対象法の条文と、手書きの期待 Semantic IR（IR 設計のテストコーパス） | 書きかけ |
 | [docs/04-semantic-ir.md](docs/04-semantic-ir.md) | Semantic IR の仕様 | 骨組みのみ |
