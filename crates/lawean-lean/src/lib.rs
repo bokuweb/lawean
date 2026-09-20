@@ -141,6 +141,15 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let uca = uc.remove(0);
     let bca = bind(&r0, &uca, "case-conflict-22/A").unwrap();
     let bcb = bind(&r0, &ucb, "case-conflict-22/B").unwrap();
+    // 他法令への波及（docs/09）の自作改正案: 第38条への項の挿入（現行に対して）、第28条の削除（2022-05-18 版に対して）
+    let u_ins = parse_units(&read("amendments/drafts/insert-38-4.txt"))
+        .unwrap()
+        .remove(0);
+    let b_ins = bind(&r3, &u_ins, "draft/insert-38-4").unwrap();
+    let u_del = parse_units(&read("amendments/drafts/delete-28.txt"))
+        .unwrap()
+        .remove(0);
+    let b_del = bind(&r1, &u_del, "draft/delete-28").unwrap();
     let b73 = bind(&r1, &u73, "504AC0000000048/art73").unwrap();
     // 第74条は第73条が作った id を触るので、e-Gov の版ではなく第73条を束縛した文書に対して束縛する
     let b74 = bind(&b73.doc, &u74, "504AC0000000048/art74").unwrap();
@@ -157,6 +166,8 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Unit_504AC0000000048_art74", "unit_504AC0000000048_art74", "同 第74条を、第73条を当てた後の状態に束縛したもの。第61条の全部改正 = 第73条が作った id に anchor した `insertAfter` と、その id の `delete`。\n第73条が作った id を触るので第73条に依存する（`dependsOn`）", b74.ops),
         ("Unit_case_hane_missing", "unit_case_hane_missing", "失敗例 `hane-missing`（fixtures/cases）: 令和3年 第35条から「同条第三項中「前項」を「第三項」に改め」を落としたもの。`rev_403AC0000000090_20210519` に束縛。溶け込みはするが e-Gov の改正後と一致しない", b35_hane.ops),
         ("Unit_case_conflict_22_A", "unit_case_conflict_22_A", "失敗例 `conflict-22`（fixtures/cases）の第一条: 第22条第1項「書面によって」を「書面又は電磁的記録によって」に。`rev_403AC0000000090_20210519` に束縛", bca.ops),
+        ("Unit_draft_insert_38_4", "unit_draft_insert_38_4", "自作の改正案 `fixtures/amendments/drafts/insert-38-4.txt`（docs/09 計画 3）: 第38条第3項の次に 1 項を挿入し、以降を繰り下げる。現行 `rev_403AC0000000090_20260521` に束縛。施行令の「第三十八条第四項」がずれる", b_ins.ops),
+        ("Unit_draft_delete_28", "unit_draft_delete_28", "自作の改正案 `fixtures/amendments/drafts/delete-28.txt`（docs/09 計画 5）: 第28条を削る。`rev_403AC0000000090_20220518` に束縛。高齢者居住安定確保法第58条の「借地借家法第二十八条」が参照切れになる", b_del.ops),
         ("Unit_case_conflict_22_B", "unit_case_conflict_22_B", "同 第二条: 「書面によって」を「書面（電磁的記録を含む。）によって」に。同じ発射台に束縛。A の後に当てると期待した本文と違うので衝突として残る", bcb.ops),
     ];
     let mut out = Vec::new();

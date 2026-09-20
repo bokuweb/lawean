@@ -21,7 +21,7 @@
 | Consolidate | id の重複なし | `IdentRevision::wf` |
 | Expected | e-Gov の改正後リビジョンと本則が一致するか | `render` の比較 |
 | Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか | 位置 → 本文の突き合わせ |
-| CrossLaw（他法令） | 他法令からの参照切れ・ずれ | `lawean-space::impact` |
+| CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
 
 Order / Conflict / Consolidate は Lean の `Ident.applyUnit` の Rust 写しで判定している。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
 Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`RefsExamples.lean` が「生成した手当て = 令3-37 の実際の置換」を確かめる。

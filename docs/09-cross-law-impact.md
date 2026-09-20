@@ -1,6 +1,6 @@
 # 09. 他法令への波及 — 法令 A の改正は A の中では正しいが、A を参照する法令 B に矛盾を生む
 
-状態: §6 の 1〜5 を実装（`crates/lawean-space`）。**テスト計画 1〜5 がすべて意図どおりに報告される**（§5）。
+状態（Lean は済み 2026-09-21: `lean/Lawean/Space.lean` に法令空間・他法令参照つき本文・`impact` の分類と健全性 / 完全性の定理、`SpaceExamples.lean` に計画 3・5 の実データ）: §6 の 1〜5 を実装（`crates/lawean-space`）。**テスト計画 1〜5 がすべて意図どおりに報告される**（§5）。
 Lean（§4）は未着手。方針は [ADR-0010](adr/0010-amendment-first.md) / [ADR-0011](adr/0011-lean-as-reference-for-consolidation.md)。
 
 ## 1. ユースケース

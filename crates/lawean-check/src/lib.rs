@@ -466,6 +466,10 @@ pub fn run(input: &Input<'_>) -> Report {
                     Ok(imps) => {
                         for i in imps {
                             let r = &i.reference;
+                            // 「同項」「同条」は先行詞に追随するので、先行詞の側の報告で足りる
+                            if r.text.starts_with('同') {
+                                continue;
+                            }
                             let where_ = format!(
                                 "{} の {}「{}」",
                                 r.from_law,
@@ -480,10 +484,14 @@ pub fn run(input: &Input<'_>) -> Report {
                                 ImpactKind::Dangling => {
                                     fails.push(format!("{label}: {where_} が参照切れになる"))
                                 }
-                                ImpactKind::Shifted { moved_to, .. } => fails.push(format!(
-                                    "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま",
-                                    moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0)
-                                )),
+                                ImpactKind::Shifted { moved_to, .. } => {
+                                    let new_ref = render_ref_of(&moved_to.0);
+                                    fails.push(format!(
+                                        "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま。手当て: 「{}」→「{new_ref}」",
+                                        moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
+                                        r.text
+                                    ))
+                                }
                                 ImpactKind::SemanticChange { .. } => {
                                     warns.push(format!("{label}: {where_} の参照先の本文が変わる"))
                                 }
@@ -542,6 +550,32 @@ pub fn run(input: &Input<'_>) -> Report {
         diff,
         suggested_fixes,
     }
+}
+
+/// stable_id（`…/art:38/para:6`）から参照の字句「第三十八条第六項」を作る（他法令側の手当て）
+fn render_ref_of(id: &str) -> String {
+    use lawean_resolve::numeral::to_kanji;
+    let art = id
+        .split("/art:")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .map(|a| {
+            let mut parts = a.split('_').filter_map(|x| x.parse::<u32>().ok());
+            let mut s = format!("第{}条", to_kanji(parts.next().unwrap_or(0)));
+            for b in parts {
+                s.push_str(&format!("の{}", to_kanji(b)));
+            }
+            s
+        })
+        .unwrap_or_default();
+    let para = id
+        .split("/para:")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .and_then(|p| p.parse::<u32>().ok())
+        .map(|p| format!("第{}項", to_kanji(p)))
+        .unwrap_or_default();
+    format!("{art}{para}")
 }
 
 /// 発射台と溶け込み後の差分。id で突き合わせる（発射台の id は残り、新しい項は改正法の id）
