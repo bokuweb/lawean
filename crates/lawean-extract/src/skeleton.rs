@@ -99,6 +99,68 @@ pub fn extract(doc: &LegalDocument) -> Vec<Skeleton> {
     out
 }
 
+/// 定義規定（`Column1 = 用語 / Column2 = 定義`）から Definition を作る。body は `Unknown(Unparsed)` のまま。
+/// scope は導入文の「この法律において」「この章において」「この条において」から決める。無ければ条
+pub fn definitions(doc: &LegalDocument, skeletons: &[Skeleton]) -> Vec<Definition> {
+    let mut out = Vec::new();
+    for g in doc.sentence_groups() {
+        let cols: Vec<&Skeleton> = skeletons
+            .iter()
+            .filter(|s| s.in_column && s.paragraph == *g.paragraph)
+            .collect();
+        if cols.is_empty() {
+            continue;
+        }
+        let intro = skeletons
+            .iter()
+            .find(|s| s.paragraph == *g.paragraph && !s.in_item)
+            .map(|s| s.text.clone())
+            .unwrap_or_default();
+        let para = &g.paragraph.0;
+        let cut = |seg: &str| -> String {
+            match para.find(seg) {
+                Some(i) => para[..i].trim_end_matches('/').to_string(),
+                None => para.clone(),
+            }
+        };
+        let scope = if intro.contains("この法律において") {
+            para.split('/').next().unwrap_or(para).to_string()
+        } else if intro.contains("この章において") {
+            cut("/sec:")
+        } else if intro.contains("この節において") {
+            cut("/art:")
+        } else {
+            cut("/para:")
+        };
+        // 同じ号の col:1 と col:2 を組にする
+        let mut i = 0;
+        while i + 1 < cols.len() {
+            let (term, body) = (cols[i], cols[i + 1]);
+            let item_of = |s: &Skeleton| {
+                s.sentence
+                    .0
+                    .rsplit_once("/col:")
+                    .map(|(a, _)| a.to_string())
+            };
+            if term.sentence.0.ends_with("/col:1/sent:1") && item_of(term) == item_of(body) {
+                let mut d = build::definition(
+                    &format!("D:{}", term.text.trim()),
+                    term.text.trim(),
+                    &[scope.as_str()],
+                    DefinitionBody::Unknown(build::unknown(UnknownKind::Unparsed, &body.text)),
+                )
+                .provenance(&term.sentence.0, Confidence::Medium, "lawean-extract");
+                d.provenance.by = Author::Parser("lawean-extract/v0.1".into());
+                out.push(d);
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// 骨組み Rule の ID は文の stable_id から機械的に決める
 pub fn rule_id(sentence: &StableId) -> RuleId {
     RuleId(format!("S:{}", sentence.0))
@@ -193,7 +255,7 @@ pub fn to_model(doc: &LegalDocument, skeletons: &[Skeleton]) -> SemanticModel {
 
     SemanticModel {
         document: doc.version_id.clone().unwrap_or_default(),
-        definitions: Vec::new(),
+        definitions: definitions(doc, skeletons),
         rules,
         unknowns,
     }

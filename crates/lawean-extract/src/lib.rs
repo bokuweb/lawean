@@ -7,4 +7,4 @@ pub mod effect;
 pub mod skeleton;
 
 pub use effect::EffectKind;
-pub use skeleton::{extract, rule_id, to_model, OverrideTarget, Skeleton};
+pub use skeleton::{definitions, extract, rule_id, to_model, OverrideTarget, Skeleton};

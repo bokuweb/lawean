@@ -151,6 +151,14 @@ fn skeleton_model_validates_against_source() {
         .find(|r| r.id.0.ends_with("art:32/para:1/sent:1"))
         .unwrap();
     assert!(r32.overrides.contains(&Override::Contract));
+    // 第2条の定義が Column ペアから取れる。scope は「この法律において」= 法令全体
+    let d = model
+        .definitions
+        .iter()
+        .find(|d| d.term == "借地権者")
+        .unwrap();
+    assert_eq!(d.scope[0].0, "403AC0000000090");
+    assert!(model.definitions.len() >= 5, "{}", model.definitions.len());
     // 骨組みはすべて Parser 由来・Medium 以下
     assert!(model
         .rules

@@ -1,0 +1,20 @@
+{
+  "id": "msg_sample",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"sentences\": [{\"sentence\": \"sent:1\", \"rules\": [{\"suffix\": \"\", \"subject\": \"D:借地権者\", \"condition\": {\"all_of\": [{\"any_of\": [{\"name\": \"存続期間が満了する\", \"args\": [{\"key\": \"of\", \"kind\": \"definition\", \"value\": \"D:借地権\"}], \"negated\": false}]}, {\"any_of\": [{\"name\": \"更新を請求した\", \"args\": [{\"key\": \"by\", \"kind\": \"definition\", \"value\": \"D:借地権者\"}], \"negated\": false}]}, {\"any_of\": [{\"name\": \"建物がある\", \"args\": [], \"negated\": false}]}]}, \"effect\": {\"kind\": \"deem\", \"head\": \"契約を更新した\", \"args\": [{\"key\": \"conditions\", \"kind\": \"text\", \"value\": \"従前と同一\"}]}, \"temporal\": [], \"unknowns\": [], \"confidence\": \"medium\", \"note\": \"「前条の規定によるもののほか」— 更新後の期間は第4条（main/chap:2/sec:1/art:4）が独立に定める\"}]}, {\"sentence\": \"sent:2\", \"rules\": [{\"suffix\": \"\", \"subject\": \"D:借地権設定者\", \"condition\": {\"all_of\": [{\"any_of\": [{\"name\": \"異議を述べた\", \"args\": [{\"key\": \"by\", \"kind\": \"definition\", \"value\": \"D:借地権設定者\"}, {\"key\": \"timing\", \"kind\": \"unknown\", \"value\": \"遅滞なく\"}], \"negated\": false}]}]}, \"effect\": {\"kind\": \"exception\", \"head\": \"この限りでない\", \"args\": []}, \"temporal\": [], \"unknowns\": [{\"kind\": \"intentional\", \"text\": \"遅滞なく\"}], \"confidence\": \"medium\", \"note\": \"\"}]}]}"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 900,
+    "cache_read_input_tokens": 3000,
+    "cache_creation_input_tokens": 0
+  }
+}
