@@ -393,7 +393,7 @@ impl Binder<'_> {
                 continue;
             }
             let expected = para_text(paragraph_mut(art, i));
-            if replace_in_article(art, Some(i), from, to) == 0 {
+            if replace_in_article_item(art, Some(i), at.item.as_deref(), from, to) == 0 {
                 continue;
             }
             hit += 1;
@@ -521,6 +521,54 @@ impl Binder<'_> {
                     chapter_mut(&mut self.doc, *chapter)?
                         .children
                         .push(Provision::Article(a));
+                }
+                Op::InsertArticleAfter { after, text } => {
+                    // 条の挿入 = 直前の条の最後の項の後ろに新しい項を並べる
+                    let a = parse_article(text)?;
+                    let mut anchor = paragraphs(article_mut(&mut self.doc, after)?)
+                        .last()
+                        .map(|p| id_of(p))
+                        .ok_or_else(|| ApplyError::BadContent("項の無い条の次に加える".into()))?;
+                    let mut a = a;
+                    let mut children = Vec::new();
+                    for c in std::mem::take(&mut a.children) {
+                        let ArticleChild::Paragraph(p) = c else {
+                            children.push(c);
+                            continue;
+                        };
+                        let (id, p) = self.new_para(&a.num, p);
+                        self.ops.push(IdentOp::InsertAfter {
+                            anchor: anchor.clone(),
+                            new_id: id.clone(),
+                            art: a.num.to_num_string(),
+                            text: para_text(&p),
+                        });
+                        anchor = id;
+                        children.push(ArticleChild::Paragraph(p));
+                    }
+                    a.children = children;
+                    if !insert_article_after(&mut self.doc.main_provision, after, a) {
+                        return Err(ApplyError::ArticleNotFound(after.to_num_string()));
+                    }
+                }
+                Op::AppendSentence { at, text } => {
+                    // 後段の追加 = 項の本文の書き換え
+                    let art = article_mut(&mut self.doc, &at.article)?;
+                    let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                    let expected = para_text(paragraph_mut(art, idx));
+                    let p = paragraph_mut(art, idx);
+                    let n = p.sentences.len();
+                    for (k, s) in make_sentences(&text.join("")).into_iter().enumerate() {
+                        let mut s = s;
+                        s.num = Some((n + k + 1).to_string());
+                        p.sentences.push(s);
+                    }
+                    let p = paragraph_mut(art, idx);
+                    self.ops.push(IdentOp::Replace {
+                        id: id_of(p),
+                        expected,
+                        new: para_text(p),
+                    });
                 }
                 Op::ReplaceArticle { article, text } => {
                     // 全部改正 = 旧第1項の後ろに新しい項を並べてから、旧 id を削る。

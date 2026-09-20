@@ -43,13 +43,6 @@ deriving Repr, DecidableEq
 
 abbrev XBody := List XPiece
 
-/-- 条番号の文字列（"38"）を漢数字に。枝番（"42_2"）は「の」で繋ぐ -/
-def artKanji (art : ArtNum) : String :=
-  let k := fun (s : String) => match s.toNat? with | some n => kanji n | none => s
-  match art.splitOn "_" with
-  | [] => ""
-  | a :: rest => rest.foldl (fun acc b => acc ++ "の" ++ k b) (k a)
-
 /-- 他法令参照の描画に要る値: (参照先の条, 参照先の項番号)。参照先が無ければ none -/
 def xrefNums (s : LawSpace) (law : LawId) (target : NodeId) : Option (ArtNum × Nat) :=
   match s.get law with
@@ -62,8 +55,8 @@ def xrefNums (s : LawSpace) (law : LawId) (target : NodeId) : Option (ArtNum × 
 def renderXRef (form : XForm) : Option (ArtNum × Nat) → String
   | some (art, p) =>
     match form with
-    | .article => "第" ++ artKanji art ++ "条"
-    | .paragraph => "第" ++ artKanji art ++ "条第" ++ kanji p ++ "項"
+    | .article => artLabel art
+    | .paragraph => artLabel art ++ "第" ++ kanji p ++ "項"
   | none => "（削除された規定）"
 
 /-- 自法令内の参照の描画に要る値（法令が空間に無ければ none） -/

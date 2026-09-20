@@ -13,6 +13,18 @@ pub enum ParaRef {
 pub struct Loc {
     pub article: ArticleNum,
     pub paragraph: Option<ParaRef>,
+    /// 号（「第三号の二」= `3_2`）。あれば字句の置換をその号（とその下の号）に限る
+    pub item: Option<String>,
+}
+
+impl Loc {
+    pub fn new(article: ArticleNum, paragraph: Option<ParaRef>) -> Self {
+        Loc {
+            article,
+            paragraph,
+            item: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +52,13 @@ pub enum Op {
     },
     /// 「第N章に次の一条を加える」
     AppendArticle { chapter: u32, text: Vec<String> },
+    /// 「第N条の次に次の一条を加える」
+    InsertArticleAfter {
+        after: ArticleNum,
+        text: Vec<String>,
+    },
+    /// 「第N条第M項（各号列記以外の部分）に後段として次のように加える」— 項の文の末尾に文を足す
+    AppendSentence { at: Loc, text: Vec<String> },
     /// 「第N条を次のように改める」
     ReplaceArticle {
         article: ArticleNum,
@@ -70,6 +89,8 @@ impl Op {
             Op::AppendParagraph { .. }
                 | Op::InsertParagraphAfter { .. }
                 | Op::AppendArticle { .. }
+                | Op::InsertArticleAfter { .. }
+                | Op::AppendSentence { .. }
                 | Op::ReplaceArticle { .. }
         )
     }
@@ -79,6 +100,8 @@ impl Op {
             Op::AppendParagraph { text, .. }
             | Op::InsertParagraphAfter { text, .. }
             | Op::AppendArticle { text, .. }
+            | Op::InsertArticleAfter { text, .. }
+            | Op::AppendSentence { text, .. }
             | Op::ReplaceArticle { text, .. } => text.push(line),
             _ => {}
         }

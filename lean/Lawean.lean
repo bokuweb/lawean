@@ -16,3 +16,4 @@ import Lawean.Refs
 import Lawean.RefsExamples
 import Lawean.Space
 import Lawean.SpaceExamples
+import Lawean.Koshoku

@@ -22,10 +22,21 @@ pub fn article_label(n: &ArticleNum) -> String {
 }
 
 fn loc_label(l: &Loc) -> String {
-    match &l.paragraph {
+    let mut s = match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("{}第{}項", article_label(&l.article), to_kanji(*n)),
         None => article_label(&l.article),
+    };
+    if let Some(item) = &l.item {
+        // 「3_2」→「第三号の二」
+        let mut parts = item.split('_').filter_map(|x| x.parse::<u32>().ok());
+        if let Some(first) = parts.next() {
+            s.push_str(&format!("第{}号", to_kanji(first)));
+            for b in parts {
+                s.push_str(&format!("の{}", to_kanji(b)));
+            }
+        }
     }
+    s
 }
 
 /// 1 操作を、文の途中（`last = false`）または文末（`last = true`）の形にする
@@ -78,6 +89,16 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
+        Op::InsertArticleAfter { after, .. } => format!(
+            "{}の次に次の一条を{}",
+            article_label(after),
+            end("加え", "加える")
+        ),
+        Op::AppendSentence { at, .. } => format!(
+            "{}に後段として次のように{}",
+            loc_label(at),
+            end("加え", "加える")
+        ),
         Op::RenumberParagraph {
             article,
             from: ParaRef::Num(p),
@@ -117,6 +138,8 @@ fn content_of(op: &Op) -> &[String] {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
         | Op::AppendArticle { text, .. }
+        | Op::InsertArticleAfter { text, .. }
+        | Op::AppendSentence { text, .. }
         | Op::ReplaceArticle { text, .. } => text,
         _ => &[],
     }

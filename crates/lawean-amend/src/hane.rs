@@ -130,6 +130,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                         Loc {
                             article,
                             paragraph: Some(_),
+                            ..
                         },
                 } => {
                     articles.insert(article.clone());
@@ -208,27 +209,48 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                         let new_sp = sp
                             .filter(|_| id.0.contains(&seg))
                             .and_then(|s| map.get(&s).copied());
+                        // 手当ては参照元（この文）の条・項にある。参照先の条ではない
+                        let src_art =
+                            id.0.split("/art:")
+                                .nth(1)
+                                .and_then(|x| x.split('/').next())
+                                .unwrap_or("")
+                                .to_string();
+                        // この文の条・項に対する置換のうち、参照の字句そのもの（番号まで見る）か、
+                        // 参照を含む字句ごと書き換える・削るもの（「前項の規定により定められた」を削り = 参照ごと消える）
+                        let at_here = |loc: &Loc| {
+                            loc.article.to_num_string() == src_art
+                                && match &loc.paragraph {
+                                    Some(ParaRef::Num(n)) => sp == Some(*n),
+                                    None => true,
+                                }
+                        };
                         let found: Vec<&String> = replaced
                             .iter()
-                            .filter(|(loc, from_text, _)| {
-                                loc.article.to_num_string() == *art
-                                    && from_text == &r.span.text
-                                    && match &loc.paragraph {
-                                        Some(ParaRef::Num(n)) => sp == Some(*n),
-                                        None => true,
-                                    }
-                            })
+                            .filter(|(loc, from_text, _)| at_here(loc) && from_text == &r.span.text)
                             .map(|(_, _, to)| to)
                             .collect();
-                        let handled = found.iter().any(|to| fixes_to(to, new_tp, new_sp));
+                        let rewritten = replaced.iter().any(|(loc, from_text, _)| {
+                            at_here(loc)
+                                && from_text != &r.span.text
+                                && from_text.contains(&r.span.text)
+                        });
+                        let handled =
+                            rewritten || found.iter().any(|to| fixes_to(to, new_tp, new_sp));
                         let fix = new_tp.map(|nt| {
                             render_fix(&r.span.text, &r.span.parsed.kind, tp, nt, new_sp)
                         });
                         let fix_op = match (&fix, sp) {
                             (Some(f), Some(p)) => Some(Op::Replace {
                                 at: Loc {
-                                    article: ArticleNum::parse(art),
+                                    article: ArticleNum::parse(&src_art),
                                     paragraph: Some(ParaRef::Num(p)),
+                                    item: id
+                                        .0
+                                        .split("/item:")
+                                        .nth(1)
+                                        .and_then(|x| x.split('/').next())
+                                        .map(String::from),
                                 },
                                 from: r.span.text.clone(),
                                 to: f.clone(),

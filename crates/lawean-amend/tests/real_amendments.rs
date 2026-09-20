@@ -276,10 +276,60 @@ fn generated_hane_fixes_match_the_real_amendment() {
                     base: 38,
                     branch: vec![]
                 },
-                paragraph: Some(ParaRef::Num(3))
+                paragraph: Some(ParaRef::Num(3)),
+                item: None,
             },
             from: "前項".into(),
             to: "第三項".into(),
         }
     );
+}
+
+// ---------------------------------------------------------------- 公職選挙法（実際に起きた改正漏れ）
+
+/// 平成30年法律第75号（公職選挙法の一部を改正する法律、参議院の特定枠）は第142条の4に第4項を挿入して第6項を第7項に繰り下げたが、
+/// 罰則の第244条第1項第2号の2の「第百四十二条の四第六項」を改めなかった。表示義務違反の罰則が消えた状態が
+/// 施行（2018-10-25）から令和3年法律第51号（2021-06-02）まで続いた（衆議院 第204回国会 質問第120号）。
+/// 改め文は衆議院「制定法律」からの写し（34 文のうち、入れ子の読替え規定の書き換え 1 文と別表 1 文を除く 32 文）
+#[test]
+fn h30_act75_koshoku_senkyo_missed_the_penalty_reference() {
+    let units = parse_units(&fixture("amendments/430AC0100000075.txt")).unwrap();
+    let before = revision("325AC1000000100_20180620_430AC0000000059");
+    let cands = hane_candidates(&before, &units[0]);
+    let unhandled: Vec<&HaneCandidate> = cands.iter().filter(|c| !c.handled).collect();
+    // 唯一の未手当てが、実際に見落とされた第244条の参照
+    assert_eq!(unhandled.len(), 1, "{cands:#?}");
+    let c = unhandled[0];
+    assert!(c.sentence.0.ends_with("/art:244/para:1/item:2_2/sent:1"));
+    assert_eq!(c.text, "第百四十二条の四第六項");
+    assert_eq!(c.new_target_paragraph, Some(7));
+    assert_eq!(c.fix.as_deref(), Some("第百四十二条の四第七項"));
+    // 手当てされている参照（第243条の「第五項」→「第六項」、削られる字句の中の「前項」等）は候補に挙がるが handled
+    assert!(cands.len() > 1);
+    // 生成した手当てを改め文にすると、3 年後に成立した令和3年法律第51号の第一文と一字違わず同じ
+    let fix = lawean_render::render_instruction(&Instruction {
+        text: String::new(),
+        ops: vec![c.fix_op.clone().unwrap()],
+    });
+    let fix_law = fixture("amendments/503AC0000000051.txt");
+    assert!(
+        fix_law.contains(fix.trim()),
+        "generated: {fix}\nreal: {fix_law}"
+    );
+    // 溶け込みは、除いた 1 文（第86条の3第2項）以外は e-Gov の改正後リビジョンと一致する
+    let got = apply_unit(&before, &units[0], "test").unwrap();
+    let want = revision("325AC1000000100_20181025_430AC0100000075");
+    let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&want));
+    assert_eq!(d.len(), 1, "{}", d.join("\n"));
+    assert!(d[0].starts_with("art 86_3"), "{}", d[0]);
+}
+
+/// 令和3年法律第51号（同法の誤りを正す改正）は 2020-12-12 版に当てると 2021-06-02 版に一致する（本則 1167 項）
+#[test]
+fn r3_act51_koshoku_senkyo_fix_reproduces_egov() {
+    let units = parse_units(&fixture("amendments/503AC0000000051.txt")).unwrap();
+    let before = revision("325AC1000000100_20201212_502AC1000000045");
+    let after = revision("325AC1000000100_20210602_503AC0000000051");
+    let got = apply_unit(&before, &units[0], "test").unwrap();
+    assert_same_main(&got, &after);
 }

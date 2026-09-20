@@ -50,7 +50,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::Replace { at, from, to } => {
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?;
-                let n = replace_in_article(art, idx, from, to);
+                let n = replace_in_article_item(art, idx, at.item.as_deref(), from, to);
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
                         at: loc_name(at),
@@ -61,7 +61,13 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::InsertAfterPhrase { at, anchor, text } => {
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?;
-                let n = replace_in_article(art, idx, anchor, &format!("{anchor}{text}"));
+                let n = replace_in_article_item(
+                    art,
+                    idx,
+                    at.item.as_deref(),
+                    anchor,
+                    &format!("{anchor}{text}"),
+                );
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
                         at: loc_name(at),
@@ -121,6 +127,24 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let ch = chapter_mut(doc, *chapter)?;
                 ch.children.push(Provision::Article(a));
             }
+            Op::InsertArticleAfter { after, text } => {
+                let a = parse_article(text)?;
+                article_mut(doc, after)?;
+                if !insert_article_after(&mut doc.main_provision, after, a) {
+                    return Err(ApplyError::ArticleNotFound(after.to_num_string()));
+                }
+            }
+            Op::AppendSentence { at, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let p = paragraph_mut(art, idx);
+                let n = p.sentences.len();
+                for (k, s) in make_sentences(&text.join("")).into_iter().enumerate() {
+                    let mut s = s;
+                    s.num = Some((n + k + 1).to_string());
+                    p.sentences.push(s);
+                }
+            }
             Op::ReplaceArticle { article, text } => {
                 let a = parse_article(text)?;
                 let art = article_mut(doc, article)?;
@@ -154,10 +178,14 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
 // ---------------------------------------------------------------- 位置の解決
 
 pub(crate) fn loc_name(l: &Loc) -> String {
-    match &l.paragraph {
+    let mut s = match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("第{}条第{n}項", l.article.to_num_string()),
         None => format!("第{}条", l.article.to_num_string()),
+    };
+    if let Some(i) = &l.item {
+        s.push_str(&format!("第{i}号"));
     }
+    s
 }
 
 fn find_article<'a>(ps: &'a mut [Provision], num: &ArticleNum) -> Option<&'a mut Article> {
@@ -173,6 +201,44 @@ fn find_article<'a>(ps: &'a mut [Provision], num: &ArticleNum) -> Option<&'a mut
         }
     }
     None
+}
+
+/// 条 `after` を含む列（本則直下か章・節の中）を見つけ、その直後に条を挿入する。見つかれば true
+pub(crate) fn insert_article_after(
+    ps: &mut Vec<Provision>,
+    after: &ArticleNum,
+    a: Article,
+) -> bool {
+    fn container_of<'a>(
+        ps: &'a mut Vec<Provision>,
+        after: &ArticleNum,
+    ) -> Option<&'a mut Vec<Provision>> {
+        if ps
+            .iter()
+            .any(|p| matches!(p, Provision::Article(x) if &x.num == after))
+        {
+            return Some(ps);
+        }
+        for p in ps.iter_mut() {
+            if let Provision::Container(c) = p {
+                if let Some(v) = container_of(&mut c.children, after) {
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+    match container_of(ps, after) {
+        Some(v) => {
+            let i = v
+                .iter()
+                .position(|p| matches!(p, Provision::Article(x) if &x.num == after))
+                .unwrap();
+            v.insert(i + 1, Provision::Article(a));
+            true
+        }
+        None => false,
+    }
 }
 
 pub(crate) fn remove_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
@@ -280,7 +346,8 @@ pub(crate) fn para_index(
 
 // ---------------------------------------------------------------- テキスト操作
 
-fn sentences_mut(p: &mut Paragraph) -> Vec<&mut Sentence> {
+/// 項の中の文。`only_item` があればその号（とその下の号）の文だけ
+fn sentences_mut<'a>(p: &'a mut Paragraph, only_item: Option<&str>) -> Vec<&'a mut Sentence> {
     fn item<'a>(i: &'a mut Item, out: &mut Vec<&'a mut Sentence>) {
         match &mut i.body {
             ItemBody::Sentences(ss) => out.extend(ss.iter_mut()),
@@ -295,19 +362,27 @@ fn sentences_mut(p: &mut Paragraph) -> Vec<&mut Sentence> {
             }
         }
     }
-    let mut out: Vec<&mut Sentence> = p.sentences.iter_mut().collect();
+    let mut out: Vec<&mut Sentence> = if only_item.is_none() {
+        p.sentences.iter_mut().collect()
+    } else {
+        Vec::new()
+    };
     for c in &mut p.children {
         if let ParagraphChild::Item(i) = c {
-            item(i, &mut out);
+            match only_item {
+                Some(n) if i.num.as_deref() != Some(n) => {}
+                _ => item(i, &mut out),
+            }
         }
     }
     out
 }
 
-/// 条（idx=None）または項の中の全出現を置換し、置換数を返す
-pub(crate) fn replace_in_article(
+/// 条（idx=None）または項の中の全出現を置換し、置換数を返す。`item` があればその号の中だけ
+pub(crate) fn replace_in_article_item(
     art: &mut Article,
     idx: Option<usize>,
+    item: Option<&str>,
     from: &str,
     to: &str,
 ) -> usize {
@@ -317,7 +392,7 @@ pub(crate) fn replace_in_article(
         if idx.is_some_and(|j| j != i) {
             continue;
         }
-        for s in sentences_mut(paragraph_mut(art, i)) {
+        for s in sentences_mut(paragraph_mut(art, i), item) {
             for inl in &mut s.text {
                 if let Inline::Text(t) = inl {
                     n += t.matches(from).count();
@@ -389,7 +464,7 @@ fn split_sentences(text: &str) -> Vec<String> {
     out
 }
 
-fn make_sentences(text: &str) -> Vec<Sentence> {
+pub(crate) fn make_sentences(text: &str) -> Vec<Sentence> {
     let parts = split_sentences(text);
     let proviso_at = parts.iter().position(|s| s.starts_with("ただし、"));
     parts
@@ -469,14 +544,8 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
                 .split_once('\u{3000}')
                 .ok_or_else(|| ApplyError::BadContent(l.clone()))?;
             let t = format!("第{t}");
-            let base = lawean_resolve::numeral::kanji_to_u32(
-                t.trim_start_matches('第').trim_end_matches('条'),
-            )
-            .ok_or_else(|| ApplyError::BadContent(l.clone()))?;
-            num = Some(ArticleNum::Single {
-                base,
-                branch: vec![],
-            });
+            // 「第六十八条の三」も読む
+            num = Some(crate::parse::art_num(&t));
             title = Some(vec![Inline::Text(t)]);
             paragraphs.push(parse_paragraph(&[body.to_string()])?);
         } else {

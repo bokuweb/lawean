@@ -450,7 +450,21 @@ pub fn inline_text(inl: &[Inline]) -> String {
     for i in inl {
         match i {
             Inline::Text(t) => s.push_str(t),
+            // Ruby はふりがな（Rt）を落として本体だけ（「禁錮」。e-Gov が後の改正でルビを外しても本文は同じ）
+            Inline::Raw(e) if e.name == "Ruby" => s.push_str(&ruby_base(e)),
             Inline::Raw(e) => s.push_str(&e.text()),
+        }
+    }
+    s
+}
+
+fn ruby_base(e: &crate::xml::Element) -> String {
+    let mut s = String::new();
+    for c in &e.children {
+        match c {
+            crate::xml::Node::Text(t) => s.push_str(t),
+            crate::xml::Node::Element(x) if x.name == "Rt" => {}
+            crate::xml::Node::Element(x) => s.push_str(&x.text()),
         }
     }
     s
