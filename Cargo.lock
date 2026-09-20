@@ -628,6 +628,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-amend"
+version = "0.1.0"
+dependencies = [
+ "lawean-resolve",
+ "lawean-source",
+ "regex",
+ "thiserror",
+]
+
+[[package]]
 name = "lawean-extract"
 version = "0.1.0"
 dependencies = [

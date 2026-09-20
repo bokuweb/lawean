@@ -20,7 +20,7 @@ impl std::fmt::Display for StableId {
 }
 
 /// `Article @Num`。`3` / `121_2`（第百二十一条の二）/ `155:157`（第百五十五条から第百五十七条まで 削除）
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ArticleNum {
     Single {
         base: u32,
