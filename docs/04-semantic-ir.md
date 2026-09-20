@@ -24,13 +24,14 @@ struct Rule {
     subject: Option<EntityRef>,
     condition: Expr,
     effect: Effect,
-    overrides: Vec<RuleId>,         // この Rule が例外・特則として上書きする Rule
+    overrides: Vec<Override>,       // この Rule が例外・特則として上書きする Rule、または契約（「契約の条件にかかわらず」第32条）
     temporal: Option<Temporal>,
     interpretations: Vec<Interpretation>,   // 空なら文理解釈のみ
     provenance: Provenance,
 }
 ```
 
+- `Override::Rule(RuleId) | Override::Contract`。後者は法令が特約に優先することの宣言（第32条第1項）。強行規定（第9条）は逆に「特約を無効にする Rule」なので `Void`
 - `overrides` は**宣言する側**が持つ（ただし書き → 本文、特則 → 原則）。逆向きの `exceptions` は resolver が張る
 - 1 文から複数 Rule が出てよい（[art-04.md](03-examples/art-04.md)）。Provenance は同じ stable_id を指す
 
@@ -51,7 +52,8 @@ struct Rule {
 | `DeemAndApply { deem: (Fact, Fact), apply: RuleId }` | 「A を B とみなして、〜の規定を適用する」 | 第5条第3項・第22条第2項・第26条第3項・第38条第2項。**4 箇所で同型なので合成 Effect にする** |
 | `Apply(Scope)` | 「〜の規定は、〜にも適用する」 | 附則第4条 |
 | `ApplyExternal { law, topic }` | 「なお従前の例による」 | 附則第6条。廃止法令の適用 |
-| `Preserve(Target)` | 「〜の効力を妨げない」 | 附則第4条ただし書き。Void の反対 |
+| `Preserve(Target)` | 「〜の効力を妨げない」「なお同項の効力を有する」 | 附則第4条ただし書き・第10条第2項。Void の反対 |
+| `ApplyMutatis { rules, substitute }` | 「〜について準用する」 | 第13条第3項。主体を置換して適用。`DeemAndApply`（事実の読み替え）との統合は未決 |
 | `Unknown(UnknownExpr)` | 上のどれにも当てはまらない | |
 
 `Obligation / Prohibition / Permission / Power` の `Action` は `{ verb, by, to, content, timing, form }` 程度の構造。
@@ -65,6 +67,7 @@ enum Expr {
     And(Vec<Expr>), Or(Vec<Expr>), Not(Box<Expr>),
     Pred(Predicate),                // 述語 + 引数。引数に EntityRef / Value / Var
     Cmp(Value, CmpOp, Value),       // 期間・金額・数量の比較
+    Time(TimeCond),                 // 時間述語
     Ref(RefTarget),                 // Rule / Definition / Scope / 外部法令
     Unknown(UnknownExpr),
 }
@@ -72,6 +75,8 @@ enum Expr {
 
 - `Not` は**原文に「〜でない」「〜を除き」がある場合だけ**使う。例外は `overrides` で表す（[ADR-0004](adr/0004-exception-not-negation.md)）
 - `Cmp` の `Value` に `RuleValue(RuleId)`（他 Rule の effect が定める値）が要る（[art-04.md](03-examples/art-04.md) の「これより長い」）
+- `Value` には算術（`Add / Sub`）と `Interest { principal, rate, from }` が要る（[art-32.md](03-examples/art-32.md) 「不足額に年一割の利息を付して」）
+- **譲歩表現（「〜ても」「〜にかかわらず」「〜がなくても」）は condition に入れない**（[art-10.md](03-examples/art-10.md) 「登記がなくても」）
 
 ## Unknown
 
@@ -160,8 +165,8 @@ struct Definition {
 struct Provenance {
     source: StableId,               // Source IR の構造パス。テキストオフセットではない
     confidence: Confidence,         // High / Medium / Low
-    by: Author,                     // Human(name) / Llm(model) / Rule(parser_rule_id)
-    note: Option<String>,
+    by: Author,                     // Human(name) / Llm(model) / Parser(rule_id) / Precedent(case_id)
+    note: Option<String>,           // 「登記がなくても」のような、IR に写さなかった譲歩表現などを残す
 }
 ```
 
@@ -173,6 +178,9 @@ struct Provenance {
 - [ ] `SameAs` を残すか、resolver で展開して消すか
 - [ ] `overrides` の粒度。第26条ただし書きは Rule 全体ではなく effect の一部（期間）だけ上書きする
 - [ ] 強行規定（R9）に対する特則（R22）の展開順序。Exception グラフが 2 段になる
-- [ ] 「ときに限り」（必要条件）と「場合において」（条件）を Expr 上で区別するか
+- [ ] 「ときに限り」（必要条件）と「場合において」（条件）を Expr 上で区別するか。「〜場合に限る」を `OnlyIf(cond)` という Effect 修飾にする案（[art-10.md](03-examples/art-10.md)）
+- [ ] `ApplyMutatis`（準用 = 主体の置換）と `DeemAndApply`（みなして適用 = 事実の読み替え）を 1 つの `Substitute` にまとめるか
+- [ ] 増額と減額のように、1 文が対称な 2 Rule を生むとき、分けるか `direction` パラメータにするか（[art-32.md](03-examples/art-32.md)）
+- [ ] 裁判所が主体の Rule（第13条第2項、第4章）を v0.1 で扱うか `Unknown(External)` に逃がすか
 - [ ] Interpretation の `authority`（文理 / 判例 / 行政解釈 / 学説）の粒度
 - [ ] 手続（第41条以降の裁判手続）をどう扱うか。v0.1 では `Unknown(External)` で全部逃がす想定
