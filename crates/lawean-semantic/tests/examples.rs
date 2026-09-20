@@ -27,10 +27,18 @@ fn every_rule_has_provenance_and_proviso_rules_override_something() {
             "{}: no provenance",
             r.id.0
         );
+        // ただし書きは本文の例外（overrides）か、本文が適用された上での追加規定（条件が本文を Ref）のどちらか。
+        // 第26条第1項のただし書きは後者（docs/03-examples/art-26.md）。両方付けると 07 の意味論で矛盾する
         if r.provenance.source.0.ends_with("/sent:2") && r.id.0.contains("proviso") {
+            let refers_main = matches!(&r.condition, Expr::Ref(RefTarget::Rule(_)));
             assert!(
-                !r.overrides.is_empty(),
-                "{}: proviso must override its main sentence",
+                !r.overrides.is_empty() || refers_main,
+                "{}: proviso must override or refer to its main sentence",
+                r.id.0
+            );
+            assert!(
+                !(!r.overrides.is_empty() && refers_main),
+                "{}: proviso must not both override and refer to its main sentence",
                 r.id.0
             );
         }

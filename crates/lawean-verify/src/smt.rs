@@ -197,7 +197,7 @@ pub fn months(d: &Duration) -> i64 {
     }
 }
 
-fn target_name(t: &Target) -> String {
+pub fn target_name(t: &Target) -> String {
     match t {
         Target::Contract(s) => s.clone(),
         Target::RuleEffect(id) => id.0.clone(),

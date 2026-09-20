@@ -650,6 +650,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-lean"
+version = "0.1.0"
+dependencies = [
+ "lawean-amend",
+ "lawean-resolve",
+ "lawean-semantic",
+ "lawean-source",
+ "lawean-verify",
+ "thiserror",
+]
+
+[[package]]
 name = "lawean-llm"
 version = "0.1.0"
 dependencies = [

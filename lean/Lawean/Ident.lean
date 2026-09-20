@@ -18,10 +18,13 @@ namespace Lawean.Ident
 
 abbrev NodeId := String
 
+/-- 条の番号。`"38"`、枝番は `"42_2"`、目次は `"toc"`。描画用で、代数には効かない -/
+abbrev ArtNum := String
+
 /-- 項。`art` は所属する条（描画用で、代数には効かない）。`conflicts` は期待した本文と違ったため当てられなかった新本文 -/
 structure Node where
   id        : NodeId
-  art       : Nat
+  art       : ArtNum
   text      : String
   conflicts : List String := []
 deriving Repr, DecidableEq, Inhabited
@@ -36,7 +39,7 @@ inductive Op where
   /-- id の本文が expected なら new に改める。違えば衝突として記録する -/
   | replace     (id : NodeId) (expected new : String)
   /-- anchor の直後に newId の項を加える -/
-  | insertAfter (anchor newId : NodeId) (art : Nat) (text : String)
+  | insertAfter (anchor newId : NodeId) (art : ArtNum) (text : String)
   /-- id の項を削る -/
   | delete      (id : NodeId)
   /-- 調整規定: 衝突を解消して本文を確定する -/
@@ -103,6 +106,10 @@ def paraNum (r : Revision) (id : NodeId) : Option Nat :=
   match r.nodes.find? (·.id = id) with
   | none => none
   | some n => ((r.nodes.filter (·.art = n.art)).findIdx? (·.id = id)).map (· + 1)
+
+/-- id を捨てた描画: (条, 本文) の列。e-Gov のリビジョン（id は e-Gov が振り直したもの）との一致はこれで見る -/
+def Revision.render (r : Revision) : List (ArtNum × String) :=
+  r.nodes.map fun n => (n.art, n.text)
 
 def AmendUnit.touches (u : AmendUnit) : List NodeId := u.flatMap Op.touches
 def AmendUnit.creates (u : AmendUnit) : List NodeId := u.flatMap Op.creates
