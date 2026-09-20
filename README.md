@@ -20,6 +20,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/07-verification.md](docs/07-verification.md) | Verification IR: overrides の意味論、SMT への写像、最初の証明と検証が見つけたバグ | 実装 |
 | [docs/08-amendment.md](docs/08-amendment.md) | **改正**: 法制執務の実態、改正単位 / シナリオ / リビジョン、改め文の語彙、検査、Lean の役割 | 設計 + 実装中 |
 | [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で検出する。実データは高齢者居住安定確保法・借地借家法施行令 | 実装（Lean は未） |
+| [docs/10-temporal-consistency.md](docs/10-temporal-consistency.md) | **時間の整合性**: 施行日・期間・経過措置の矛盾を誰が担保するか。担保の鎖（人 → 施行日の比較 → Z3 → 経過措置の場合分け）と、担保しないもの、サービスでの置き場所 | 設計（2・3 は実装済み、経過措置は未） |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 | [docs/design-notes.html](docs/design-notes.html) | 方針と設計のやさしい解説（HTML）。最小の Lean 例、異常検出の例、identity patch の解説つき | — |
