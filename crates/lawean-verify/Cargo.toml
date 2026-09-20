@@ -1,0 +1,13 @@
+[package]
+name = "lawean-verify"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Verification IR: compile Semantic IR to SMT-LIB and check properties with z3"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-semantic = { path = "../lawean-semantic" }
+lawean-resolve = { path = "../lawean-resolve" }
+thiserror.workspace = true

@@ -16,6 +16,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/04-semantic-ir.md](docs/04-semantic-ir.md) | Semantic IR の仕様 | v0.1 型を実装 |
 | [docs/05-glossary.md](docs/05-glossary.md) | 法令用語 ↔ IR 用語 | 育成中 |
 | [docs/06-llm-extraction.md](docs/06-llm-extraction.md) | 層 2 の Claude 版。契約と棄却条件は grande 版でも流用 | 保留（ADR-0009） |
+| [docs/07-verification.md](docs/07-verification.md) | Verification IR: overrides の意味論、SMT への写像、最初の証明と検証が見つけたバグ | 実装 |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 
@@ -30,6 +31,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-semantic](crates/lawean-semantic) | Semantic IR の型、手書き用の構築子、Source IR に対する参照整合性の検査。借地借家法 8 条分の手書きデータ入り |
 | [lawean-extract](crates/lawean-extract) | 層 1 の規則ベース抽出（[ADR-0008](docs/adr/0008-extraction-strategy.md)）。文末の効果種別（20 種）、条件節、「〜の規定にかかわらず」→ overrides、「契約の条件にかかわらず」→ Contract、譲歩、参照を文ごとに認識し、条件の中身が `Unknown` の骨組み Rule を作る。借地借家法の平叙文 211 のうち 97% を分類 |
 | [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
+| [lawean-verify](crates/lawean-verify) | Verification IR（[docs/07](docs/07-verification.md)）。Semantic IR を SMT-LIB に落とし z3 で性質を証明・反証。手書き IR で 第3・4・9・22条の性質 6 件（証明 5、意図した反例 1）。**手書き IR のバグを 1 件検出**（第4条ただし書きの「これ」） |
 | [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
 
 ```sh
@@ -37,8 +39,7 @@ cargo test
 cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 3    # 条文を stable_id 付きで表示
 cargo run -p lawean-resolve --example refs -- fixtures/403AC0000000090.xml 41  # 条文中の参照を解決して表示
 cargo run -p lawean-extract --example skeleton -- fixtures/403AC0000000090.xml 22  # 層 1 の抽出結果（骨組み）
-cargo run -p lawean-llm --example extract_paragraph -- fixtures/403AC0000000090.xml main/chap:2/sec:1/art:5/para:1 --dry-run  # 層 2 のリクエスト本体
-ANTHROPIC_API_KEY=... cargo run -p lawean-llm --example extract_paragraph -- fixtures/403AC0000000090.xml main/chap:2/sec:1/art:5/para:1  # 実 API（1 項 ≈ $0.1）
+cargo run -p lawean-verify --example smt -- R3 R4   # 手書き IR の SMT-LIB（要 z3 で cargo test）
 ```
 
 ## 進め方
@@ -50,5 +51,6 @@ ANTHROPIC_API_KEY=... cargo run -p lawean-llm --example extract_paragraph -- fix
 5. ~~Resolved IR: 相対参照（前項・前条）の解決、`overrides` の逆引き、定義語 scope の解決~~
 6. ~~層 1: 文末の効果表現の分類、「〜にかかわらず」3 分類、節境界、骨組み Rule（[ADR-0008](docs/adr/0008-extraction-strategy.md)）~~
 7. 層 2: 規則で述語・引数の候補 → grande（Gemma 4 E4B）で判定（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md)）— **後回し**（[TODO](docs/TODO.md)）
-8. **手書きデータを Z3 に落とし、性質を 1 つ証明する（Verification IR）** ← いまここ。変換できる前提で、IR が検証に使えるかを先に確かめる
-9. 改正 patch（過去版の取得から）
+8. ~~手書きデータを Z3 に落とし、性質を証明する（Verification IR）~~ 6 性質。IR のバグを 1 件検出
+9. Verification IR の拡張: 主体、時間（起算点・暦計算）、第26条の時間窓、Lean へのバックエンド ← 次
+10. 改正 patch（過去版の取得から）

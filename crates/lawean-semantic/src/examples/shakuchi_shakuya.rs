@@ -104,24 +104,42 @@ fn art04() -> Vec<Rule> {
         rule("R4-1")
             .subject(def("D:借地権"))
             .condition(pred("更新する").expr())
-            .effect(set("存続期間", Value::Period(after("更新の日", years(10)))))
+            .effect(set(
+                "更新後の期間",
+                Value::Period(after("更新の日", years(10))),
+            ))
             .provenance(&p(1), Confidence::High, BY),
         rule("R4-1'")
             .subject(def("D:借地権"))
             .condition(and([pred("更新する").expr(), pred("最初の更新").expr()]))
-            .effect(set("存続期間", Value::Period(after("更新の日", years(20)))))
+            .effect(set(
+                "更新後の期間",
+                Value::Period(after("更新の日", years(20))),
+            ))
             .overrides(&["R4-1"])
             .provenance(&p(1), Confidence::High, BY)
             .note("括弧書き「（借地権の設定後の最初の更新にあっては、二十年）」"),
+        // ただし書き「これより長い期間」の「これ」は、上書きされる側の Rule が定める値。
+        // 1 つの Rule で RuleValue(R4-1) と比べると、最初の更新で 15 年と定めた場合に 20 年を下回る
+        // （z3 が反例を出した。docs/07-verification.md）。上書き先ごとに分ける
         rule("R4-2")
             .subject(def("D:借地権"))
-            .condition(cmp(
-                var("当事者が定めた期間"),
-                CmpOp::Gt,
-                rule_value("R4-1"),
-            ))
-            .effect(set("存続期間", var("当事者が定めた期間")))
-            .overrides(&["R4-1", "R4-1'"])
+            .condition(and([
+                pred("更新する").expr(),
+                cmp(var("当事者が定めた期間"), CmpOp::Gt, rule_value("R4-1")),
+            ]))
+            .effect(set("更新後の期間", var("当事者が定めた期間")))
+            .overrides(&["R4-1"])
+            .provenance(&p(2), Confidence::High, BY),
+        rule("R4-2'")
+            .subject(def("D:借地権"))
+            .condition(and([
+                pred("更新する").expr(),
+                pred("最初の更新").expr(),
+                cmp(var("当事者が定めた期間"), CmpOp::Gt, rule_value("R4-1'")),
+            ]))
+            .effect(set("更新後の期間", var("当事者が定めた期間")))
+            .overrides(&["R4-1'"])
             .provenance(&p(2), Confidence::High, BY),
     ]
 }

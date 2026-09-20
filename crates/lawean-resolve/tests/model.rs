@@ -21,6 +21,7 @@ fn exceptions_are_reverse_of_overrides() {
     };
     assert_eq!(ex("R3-1"), ["R3-2"]);
     assert_eq!(ex("R4-1"), ["R4-1'", "R4-2"]);
+    assert_eq!(ex("R4-1'"), ["R4-2'"]);
     assert_eq!(ex("R5-1"), ["R5-1-proviso"]);
     // 強行規定 R9 は定期借地権 R22-1a に上書きされる
     assert_eq!(ex("R9"), ["R22-1a"]);
@@ -33,7 +34,7 @@ fn override_chain_orders_most_specific_first() {
     let rm = ResolvedModel::new(&model);
     let chain = rm.override_chain(&RuleId("R4-1".into()));
     let chain: Vec<&str> = chain.iter().map(|r| r.0.as_str()).collect();
-    assert_eq!(chain, ["R4-2", "R4-1'", "R4-1"]);
+    assert_eq!(chain, ["R4-2'", "R4-2", "R4-1'", "R4-1"]);
 }
 
 #[test]

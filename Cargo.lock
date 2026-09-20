@@ -676,6 +676,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lawean-verify"
+version = "0.1.0"
+dependencies = [
+ "lawean-resolve",
+ "lawean-semantic",
+ "lawean-source",
+ "thiserror",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
