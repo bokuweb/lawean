@@ -369,7 +369,7 @@ pub fn run(input: &Input<'_>) -> Report {
         check(
             Kind::Hane,
             Status::Fail,
-            "ハネ改正の手当てが無い参照がある",
+            "ハネ改正の手当てが無い、または番号が違う参照がある",
             hane_fail,
         )
     });
