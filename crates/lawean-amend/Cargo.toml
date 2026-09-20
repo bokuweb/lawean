@@ -11,3 +11,7 @@ lawean-source = { path = "../lawean-source" }
 lawean-resolve = { path = "../lawean-resolve" }
 regex.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+lawean-semantic = { path = "../lawean-semantic" }
+lawean-extract = { path = "../lawean-extract" }

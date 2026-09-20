@@ -6,7 +6,7 @@ use lawean_source::xml::{Element, Node};
 use lawean_source::*;
 use std::collections::BTreeMap;
 
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ApplyError {
     #[error("第{0}条が無い")]
     ArticleNotFound(String),

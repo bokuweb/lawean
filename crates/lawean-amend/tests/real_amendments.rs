@@ -147,3 +147,86 @@ fn removing_the_fixups_makes_hane_unhandled() {
     assert_eq!(cands.len(), 2);
     assert!(cands.iter().all(|c| !c.handled));
 }
+
+/// 令和4年法律第48号の段階施行: 第73条（2023-02-20）→ 第74条（2026-05-21）の順で現行に一致する
+#[test]
+fn reiwa4_act48_stages_in_enforcement_order_reach_current_law() {
+    let units = parse_units(&fixture("amendments/504AC0000000048_art73-74.txt")).unwrap();
+    let base = revision("403AC0000000090_20220525_504AC0000000048");
+    let stages = vec![
+        Stage {
+            label: "第73条".into(),
+            unit: units[0].clone(),
+            enforcement: Enforcement::Fixed("2023-02-20".into()),
+        },
+        Stage {
+            label: "第74条".into(),
+            unit: units[1].clone(),
+            enforcement: Enforcement::Fixed("2026-05-21".into()),
+        },
+    ];
+    let (doc, log) = run_sequence(&base, &stages);
+    assert!(log.iter().all(|s| s.outcome.is_ok()), "{log:?}");
+    assert_same_main(&doc.unwrap(), &current());
+}
+
+/// 施行日が未確定だとしたら: 2 段の順序 2 通りのうち成功するのは 1 通りだけ。
+/// 「第74条が先」は第61条が無くて失敗する = 調整規定が必要になるケースを機械的に検出できる
+#[test]
+fn undetermined_dates_expose_the_order_dependency() {
+    let units = parse_units(&fixture("amendments/504AC0000000048_art73-74.txt")).unwrap();
+    let base = revision("403AC0000000090_20220525_504AC0000000048");
+    let stages = vec![
+        Stage {
+            label: "第73条".into(),
+            unit: units[0].clone(),
+            enforcement: Enforcement::Undetermined {
+                note: "政令で定める日".into(),
+            },
+        },
+        Stage {
+            label: "第74条".into(),
+            unit: units[1].clone(),
+            enforcement: Enforcement::Undetermined {
+                note: "政令で定める日".into(),
+            },
+        },
+    ];
+    let report = explore(&base, &stages);
+    assert_eq!(report.outcomes.len(), 2);
+    assert_eq!(report.successes, 1);
+    let failed = report.outcomes.iter().find(|o| o.result.is_err()).unwrap();
+    assert_eq!(failed.order, ["第74条", "第73条"]);
+    assert_eq!(
+        failed.result.as_ref().unwrap_err().1,
+        ApplyError::ArticleNotFound("61".into())
+    );
+}
+
+/// 触る条が違う改正単位は順序に依らず合流する（Lean の applyOp_comm の実データ版）:
+/// 令和3年法律第37号 第35条（第22・38・39条）と 令和4年法律第48号 第73条（目次・第42・61条）
+#[test]
+fn units_touching_different_articles_are_confluent() {
+    let a35 = parse_units(&fixture("amendments/503AC0000000037_art35.txt"))
+        .unwrap()
+        .remove(0);
+    let a73 = parse_units(&fixture("amendments/504AC0000000048_art73-74.txt"))
+        .unwrap()
+        .remove(0);
+    let base = revision("403AC0000000090_20210519_503AC0000000037");
+    let stages = vec![
+        Stage {
+            label: "令3-35".into(),
+            unit: a35,
+            enforcement: Enforcement::Undetermined { note: "".into() },
+        },
+        Stage {
+            label: "令4-73".into(),
+            unit: a73,
+            enforcement: Enforcement::Undetermined { note: "".into() },
+        },
+    ];
+    let report = explore(&base, &stages);
+    assert_eq!(report.successes, 2, "{:?}", report.outcomes);
+    assert!(report.confluent);
+}

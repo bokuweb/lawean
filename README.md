@@ -62,6 +62,6 @@ cargo run -p lawean-amend --example amend -- fixtures/amendments/503AC0000000037
    2. ~~apply と e-Gov リビジョンとの一致~~ 3 件とも一致
    3. ~~発射台・ハネの検査~~
    4. ~~Lean: patch 代数と可換性の十分条件~~ [lean/](lean/)。`applyOp_comm` を証明
-   5. 3 段施行のシナリオ検査 ← 次
-   6. リビジョンへの Verification IR の適用
-10. Verification IR の拡張: 主体、時間（起算点・暦計算）、第26条の時間窓
+   5. ~~3 段施行のシナリオ検査~~ 順序依存と合流を実データで検出
+   6. ~~リビジョンへの意味層の適用~~ Semantic IR はリビジョンに束縛される（改正前では validate が落ちる）
+10. 次の候補: 条の挿入（条ずれ、令和5年法律第53号）と参照索引の更新定理 / 他法令へのハネ / Verification IR の拡張（主体、暦計算、時間窓）/ 層 2（grande）。[TODO](docs/TODO.md)

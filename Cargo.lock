@@ -631,7 +631,9 @@ dependencies = [
 name = "lawean-amend"
 version = "0.1.0"
 dependencies = [
+ "lawean-extract",
  "lawean-resolve",
+ "lawean-semantic",
  "lawean-source",
  "regex",
  "thiserror",
