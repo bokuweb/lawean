@@ -20,6 +20,7 @@
 | [0012](0012-structured-authoring.md) | 既存法令は一回だけ構造化（frontier model 可）、改正は構造化記述で書いて改め文と条文を生成。逆変換を一級に | accepted |
 | [0013](0013-identity-patches.md) | 改正単位は identity で書く。独立なら可換（`applyUnit_comm`）、衝突は値、依存は半順序。CRDT は中核に採らない | accepted、Rust の束縛は未 |
 | [0014](0014-proofs-at-build-time-editor-runs-verified-code.md) | 証明は開発時に一度。エディタ（ブラウザ）は検証済み `applyUnit` を WASM で実行するだけ。証明用サーバーは置かない | accepted |
+| [0015](0015-service-architecture.md) | 省庁向けエディタはサービス。証明はブラウザで走る検証済み関数、サーバーはデータ・保存・協調編集のみ。証跡は決定性による再現記録。0011 の `consolidates` は開発時の回帰テスト | accepted |
 
 ## テンプレート
 

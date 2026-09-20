@@ -32,7 +32,10 @@
 - [ ] 3 段施行の順序依存を `applyUnit … = none` の定理に
 - [ ] Rust `apply_unit` と Lean `applyUnit` の一致をテスト（同じ Op 列）
 - [ ] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（[ADR-0014](adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。エディタから呼ぶ判定関数
-- [ ] WASM 化の経路を決める: Lean → C → Emscripten か、Rust → wasm32 + 一致テストか（ADR-0014）
+- [ ] WASM 化の経路を決める: Lean → C → Emscripten か、Rust → wasm32 + 一致テストか（ADR-0014）。[ADR-0015](adr/0015-service-architecture.md) は Lean → C を推す
+- [ ] 証跡の形式（[ADR-0015](adr/0015-service-architecture.md) §5）: 発射台リビジョンのハッシュ、改正単位、結果のハッシュ、WASM のバージョン。ハッシュ対象の正規化を Rust / Lean / WASM で揃える
+- [ ] エディタの各判定に裏付けの定理名を添える（`applyUnit_comm` / `scheduleOk` 等）
+- [ ] Z3 の WASM ビルドで自法令内の性質検査をブラウザで閉じられるか測る。法令空間（他法令への波及）はサーバー側
 - [ ] （後）Semantic IR の Lean 化: `applies_R` を Bool 関数、期間を Int、07 の 6 性質を `omega` / `decide` で
 
 ## identity patch（[ADR-0013](adr/0013-identity-patches.md)）
