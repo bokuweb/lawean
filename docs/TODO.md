@@ -16,6 +16,24 @@
 
 - [ ] 手書き例 8 条分（`lawean-semantic/examples`）を正解にして、規則 + grande の出力との一致率を測る
 
+## Lean を溶け込みの正にする（[ADR-0011](adr/0011-lean-as-reference-for-consolidation.md)）
+
+- [ ] `lawean-lean` crate: Source IR → `def rev_… : Revision`、改め文の `Op` 列 → `def unit_… : AmendUnit` を `.lean` として出力（空白・全角数字の正規化を Rust 側と揃える）
+- [ ] `lean/Lawean/Data/` に出力を置き、`theorem consolidates_r3_37_art35 : applyUnit rev_20210519 unit_r3_37_art35 = some rev_20220518 := by native_decide`
+- [ ] Lean の `Revision` に目次と条の挿入・繰り下げを足す
+- [ ] 3 段施行の順序依存を `applyUnit … = none` の定理に
+- [ ] Rust `apply_unit` と Lean `applyUnit` の一致をテスト（同じ Op 列）
+- [ ] （後）Semantic IR の Lean 化: `applies_R` を Bool 関数、期間を Int、07 の 6 性質を `omega` / `decide` で
+
+## 他法令への波及（[docs/09](09-cross-law-impact.md)）
+
+- [ ] 法令名 → law_id の対応表、`cross_refs(B, A)`
+- [ ] `mapping_u` の条への拡張（条ずれ）
+- [ ] `impact(space, u)`: 参照切れ・ずれ・意味変化・時期不整合
+- [ ] 高齢者居住安定確保法 第52・57条の Semantic IR を手書き（A の R30・R28・R32 を外部参照）
+- [ ] テスト計画 1〜5（改正案の fixture を自作）
+- [ ] Lean: `LawSpace` と §4 の定理形
+
 ## 改正（[docs/08](08-amendment.md)）
 
 - [ ] Lean と Rust の対応: Rust の apply を Lean の定義に対してテストで突き合わせる（同じ Op 列を両方で実行して比較）。将来的には Lean から C へ抽出して Rust から呼ぶ

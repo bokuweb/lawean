@@ -16,6 +16,7 @@
 | [0008](0008-extraction-strategy.md) | 自然文 → IR の抽出は 3 層。定型は規則、評価概念は人 | accepted（層 2 の手段は 0009 で変更） |
 | [0009](0009-layer2-decisions-via-grande.md) | 層 2 の判定は grande（Gemma 4 E4B）。生成 LLM は中核から外す | accepted、実装は後回し |
 | [0010](0010-amendment-first.md) | 主役は改正。patch 代数を Lean で定義し、Z3 は反例オラクル | accepted |
+| [0011](0011-lean-as-reference-for-consolidation.md) | 溶け込みの正は Lean の `applyUnit`。Rust は実データを Lean に出力する前処理 | accepted、実装は未 |
 
 ## テンプレート
 

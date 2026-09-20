@@ -19,6 +19,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/06-llm-extraction.md](docs/06-llm-extraction.md) | 層 2 の Claude 版。契約と棄却条件は grande 版でも流用 | 保留（ADR-0009） |
 | [docs/07-verification.md](docs/07-verification.md) | Verification IR: overrides の意味論、SMT への写像、最初の証明と検証が見つけたバグ | 実装 |
 | [docs/08-amendment.md](docs/08-amendment.md) | **改正**: 法制執務の実態、改正単位 / シナリオ / リビジョン、改め文の語彙、検査、Lean の役割 | 設計 + 実装中 |
+| [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で証明する設計。実データは高齢者居住安定確保法・借地借家法施行令 | 設計 |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 
@@ -64,4 +65,6 @@ cargo run -p lawean-amend --example amend -- fixtures/amendments/503AC0000000037
    4. ~~Lean: patch 代数と可換性の十分条件~~ [lean/](lean/)。`applyOp_comm` を証明
    5. ~~3 段施行のシナリオ検査~~ 順序依存と合流を実データで検出
    6. ~~リビジョンへの意味層の適用~~ Semantic IR はリビジョンに束縛される（改正前では validate が落ちる）
-10. 次の候補: 条の挿入（条ずれ、令和5年法律第53号）と参照索引の更新定理 / 他法令へのハネ / Verification IR の拡張（主体、暦計算、時間窓）/ 層 2（grande）。[TODO](docs/TODO.md)
+10. **Lean を溶け込みの正にする**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）: 実リビジョンと改め文を Lean に出力し `consolidates` を `native_decide` で ← 次
+11. **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）: 借地借家法の改正案が高齢者居住安定確保法・施行令に矛盾を生むことの検出と証明
+12. その他: 条ずれ（令和5年法律第53号）/ Verification IR の拡張 / 層 2（grande）。[TODO](docs/TODO.md)
