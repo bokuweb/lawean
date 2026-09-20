@@ -10,3 +10,4 @@ repository = "https://github.com/bokuweb/lawean"
 [workspace.dependencies]
 roxmltree = "0.20"
 thiserror = "2"
+regex = "1"

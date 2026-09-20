@@ -13,6 +13,7 @@
 | [0005](0005-no-single-interpretation.md) | IR に「唯一の正しい解釈」を持たせない | accepted |
 | [0006](0006-source-and-semantic-separated.md) | 文章構造と意味構造を別ツリーで持つ | accepted |
 | [0007](0007-stable-id-and-version-id.md) | ID は `stable_id + version_id` | accepted |
+| [0008](0008-extraction-strategy.md) | 自然文 → IR の抽出は 3 層。定型は規則、非定型は LLM + 検証、評価概念は人 | proposed |
 
 ## テンプレート
 

@@ -40,12 +40,13 @@ IR の命名の揺れを防ぐための対応表。英語名は Rust の型名�
 | 推定 | 〜と推定する | `Effect::Presume` | 0002 |
 | 無効 | 〜は、無効とする | `Effect::Void` | |
 | 例外 | ただし、〜 / この限りでない / 適用しない | `Rule.overrides` + `Effect::Exception` | 0004 |
-| 特則 | 〜の規定にかかわらず | `Rule.overrides` | 0004 |
 | 準用 | 〜について準用する | `Effect::ApplyMutatis` | |
 | 対抗 | 〜をもって第三者に対抗することができる | `Effect::Power`（暫定） | 0003 |
 | 足りる | 〜をもって足りる | `Effect::Permission` | |
 | 限る | 〜場合に限る / 〜ときに限り | condition（必要条件）。`OnlyIf` 案あり | |
-| 譲歩 | 〜ても / 〜がなくても / 〜にかかわらず（契約） | condition に入れない。`Provenance.note` または `Override::Contract` | | |
+| 特則 | 〜の規定にかかわらず | `Override::Rule` | 0004 |
+| 契約への優先 | 契約の条件 / 特約 / 定め にかかわらず | `Override::Contract` | |
+| 譲歩 | 〜ても / 〜がなくても / 〜かどうかにかかわらず / 〜の有無にかかわらず | condition に入れない。`Provenance.note` | | |
 | 読み替え | 〜を〜とみなして〜を適用する | `Effect::DeemAndApply` | |
 | 同様 | 前項と同様とする | `Effect::SameAs`（仮） | |
 | 強行規定 | 〜に反する特約で〜に不利なものは無効 | 通常の `Rule` + `Void` | |

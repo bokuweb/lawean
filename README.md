@@ -26,10 +26,12 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 |---|---|
 | [lawean-source](crates/lawean-source) | Source IR。e-Gov 法令 XML の lossless なパース・出力。`fixtures/` の 2 法令で往復テスト済み |
 | [lawean-semantic](crates/lawean-semantic) | Semantic IR の型、手書き用の構築子、Source IR に対する参照整合性の検査。借地借家法 8 条分の手書きデータ入り |
+| [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
 
 ```sh
 cargo test
-cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 3   # 条文を stable_id 付きで表示
+cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 3    # 条文を stable_id 付きで表示
+cargo run -p lawean-resolve --example refs -- fixtures/403AC0000000090.xml 41  # 条文中の参照を解決して表示
 ```
 
 ## 進め方
@@ -38,6 +40,7 @@ cargo run -p lawean-source --example dump -- fixtures/403AC0000000090.xml 3   # 
 2. ~~e-Gov XML → Source IR のパーサを書く。意味解析はしない（02）~~
 3. ~~対象法から条文を 10〜20 抜き、期待する Semantic IR を手書きする（03）~~ 15 例
 4. ~~03 で裏付けられた分だけ Semantic IR を仕様化し、実装する（04）~~ 型と手書きデータまで
-5. Resolved IR: 相対参照（前項・前条）の解決、`overrides` の逆引き、定義語 scope の解決 ← 次
-6. 手書きデータを Z3 / Lean に落とす最小の Verification IR
-7. 改正 patch（過去版の取得から）
+5. ~~Resolved IR: 相対参照（前項・前条）の解決、`overrides` の逆引き、定義語 scope の解決~~
+6. 層 1 の続き: 文末の効果表現の分類、「〜にかかわらず」3 分類、節境界（[ADR-0008](docs/adr/0008-extraction-strategy.md)）← 次
+7. 手書きデータを Z3 / Lean に落とす最小の Verification IR
+8. 改正 patch（過去版の取得から）

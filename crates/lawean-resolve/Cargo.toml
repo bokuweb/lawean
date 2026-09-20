@@ -1,0 +1,12 @@
+[package]
+name = "lawean-resolve"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Resolved IR: reference, definition-scope and override resolution over Source/Semantic IR"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-semantic = { path = "../lawean-semantic" }
+regex.workspace = true
