@@ -31,6 +31,8 @@
 - [ ] Lean の `Revision` に目次と条の挿入・繰り下げを足す
 - [ ] 3 段施行の順序依存を `applyUnit … = none` の定理に
 - [ ] Rust `apply_unit` と Lean `applyUnit` の一致をテスト（同じ Op 列）
+- [ ] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（[ADR-0014](adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。エディタから呼ぶ判定関数
+- [ ] WASM 化の経路を決める: Lean → C → Emscripten か、Rust → wasm32 + 一致テストか（ADR-0014）
 - [ ] （後）Semantic IR の Lean 化: `applies_R` を Bool 関数、期間を Int、07 の 6 性質を `omega` / `decide` で
 
 ## identity patch（[ADR-0013](adr/0013-identity-patches.md)）

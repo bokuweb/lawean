@@ -19,3 +19,5 @@ cd lean && lake build
 
 Rust 側（`crates/lawean-amend`）は番号ベースの定義の「実装が豊かな版」（本文の文分割・XML との往復・ハネ検出）。意味論の対応は
 `Op` の種類と「番号は直前の状態で解釈する」規約で揃えている。Rust の apply を Lean の定義から生成／検証する段階には至っていない（[TODO](../docs/TODO.md)）。
+
+証明は `lake build` で一度だけ検査する。エディタ（ブラウザ）側は検証済みの `applyUnit` を WASM で実行するだけで、実行時に Lean を動かす必要はない（[ADR-0014](../docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。
