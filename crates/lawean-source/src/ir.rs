@@ -70,6 +70,72 @@ impl ArticleNum {
     }
 }
 
+impl LegalDocument {
+    /// 文書内の全構造ノードの stable_id（文書自身・本則・附則・編章節条項号文・欄）
+    pub fn stable_ids(&self) -> Vec<&StableId> {
+        let mut out = vec![&self.stable_id];
+        fn sents<'a>(ss: &'a [Sentence], out: &mut Vec<&'a StableId>) {
+            out.extend(ss.iter().map(|s| &s.stable_id));
+        }
+        fn item<'a>(i: &'a Item, out: &mut Vec<&'a StableId>) {
+            out.push(&i.stable_id);
+            match &i.body {
+                ItemBody::Sentences(ss) => sents(ss, out),
+                ItemBody::Columns(cs) => {
+                    for c in cs {
+                        out.push(&c.stable_id);
+                        sents(&c.sentences, out);
+                    }
+                }
+                ItemBody::Mixed(_) | ItemBody::None => {}
+            }
+            for c in &i.children {
+                if let ItemChild::Subitem(s) = c {
+                    item(s, out);
+                }
+            }
+        }
+        fn para<'a>(p: &'a Paragraph, out: &mut Vec<&'a StableId>) {
+            out.push(&p.stable_id);
+            sents(&p.sentences, out);
+            for c in &p.children {
+                if let ParagraphChild::Item(i) = c {
+                    item(i, out);
+                }
+            }
+        }
+        fn prov<'a>(p: &'a Provision, out: &mut Vec<&'a StableId>) {
+            match p {
+                Provision::Container(c) => {
+                    out.push(&c.stable_id);
+                    c.children.iter().for_each(|c| prov(c, out));
+                }
+                Provision::Article(a) => {
+                    out.push(&a.stable_id);
+                    for c in &a.children {
+                        if let ArticleChild::Paragraph(p) = c {
+                            para(p, out);
+                        }
+                    }
+                }
+                Provision::Raw(_) => {}
+            }
+        }
+        self.main_provision.iter().for_each(|p| prov(p, &mut out));
+        for s in &self.suppl_provisions {
+            out.push(&s.stable_id);
+            for c in &s.children {
+                match c {
+                    SupplChild::Provision(p) => prov(p, &mut out),
+                    SupplChild::Paragraph(p) => para(p, &mut out),
+                    SupplChild::Raw(_) => {}
+                }
+            }
+        }
+        out
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LegalDocument {
     pub stable_id: StableId,

@@ -1,6 +1,10 @@
 # 04. Semantic IR
 
-状態: **骨組みのみ**。[03-examples/](03-examples/) で裏付けられた分だけここに書く。
+状態: **v0.1 の型を実装**（[crates/lawean-semantic/src/ir.rs](../crates/lawean-semantic/src/ir.rs) が正。この文書は設計意図と論点）。
+[03-examples/](03-examples/) のうち第2・3・4・5・6・9・22・26条を手書き IR データ
+（[examples/shakuchi_shakuya.rs](../crates/lawean-semantic/src/examples/shakuchi_shakuya.rs)）にして、
+Source IR に対する参照整合性（stable_id / RuleId / DefinitionId）を `validate` で検査している。
+semantic parser（自然文 → IR）はまだ無い。
 構想段階の型スケッチ（`bokuweb/life` の `idea/legal-ir/03-ir-design.md`）は素材であって仕様ではない。
 
 ## トップレベル
