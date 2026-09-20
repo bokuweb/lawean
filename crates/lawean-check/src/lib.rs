@@ -76,6 +76,8 @@ pub struct Report {
     pub after: Vec<(String, String)>,
     /// 発射台との差分（変わった・増えた・消えた項）
     pub diff: Vec<String>,
+    /// 生成したハネの手当て（改め文の形。番号は改正前で、繰り下げの文より前に置く）。手当てが足りないときだけ
+    pub suggested_fixes: Vec<String>,
 }
 
 impl Report {
@@ -164,6 +166,7 @@ pub fn run(input: &Input<'_>) -> Report {
     let mut conflict_fail = Vec::new();
     let mut hane_fail = Vec::new();
     let mut hane_ok = 0usize;
+    let mut suggested: Vec<lawean_amend::Op> = Vec::new();
     let mut stopped = false;
 
     for (i, (label, unit)) in input.units.iter().enumerate() {
@@ -181,8 +184,18 @@ pub fn run(input: &Input<'_>) -> Report {
             if c.handled {
                 hane_ok += 1;
             } else {
+                let expected = match &c.fix {
+                    Some(f) => format!("正しい手当ては「{}」→「{f}」", c.text),
+                    None => {
+                        "参照先が削られるので、参照を消すか別の規定に向ける（人が決める）".into()
+                    }
+                };
+                let found = match &c.found_to {
+                    Some(t) => format!("改め文にあるのは「{t}」（番号違い）"),
+                    None => "改め文に手当てが無い".into(),
+                };
                 hane_fail.push(format!(
-                    "{label}: {} の「{}」は {} を指すが、改正後は{}。手当てが無いか、改めた先の番号が違う",
+                    "{label}: {} の「{}」は {} を指すが、改正後は{}。{expected}。{found}",
                     c.sentence
                         .0
                         .rsplit("/main/")
@@ -195,6 +208,9 @@ pub fn run(input: &Input<'_>) -> Report {
                         None => "削られる".into(),
                     }
                 ));
+                if let Some(op) = c.fix_op {
+                    suggested.push(op);
+                }
             }
         }
         let amend_id = format!("unit{}", i + 1);
@@ -506,12 +522,25 @@ pub fn run(input: &Input<'_>) -> Report {
 
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let diff = id_diff(&base_rev, &cur_rev);
+    let suggested_fixes = if suggested.is_empty() {
+        vec![]
+    } else {
+        vec![
+            lawean_render::render_instruction(&lawean_amend::Instruction {
+                text: String::new(),
+                ops: suggested,
+            })
+            .trim()
+            .to_string(),
+        ]
+    };
     Report {
         ok,
         units: units_out,
         checks,
         after: cur_rev.render(),
         diff,
+        suggested_fixes,
     }
 }
 
@@ -717,6 +746,7 @@ pub fn run_texts(
                 )],
                 after: vec![],
                 diff: vec![],
+                suggested_fixes: vec![],
             }
         }
     };
@@ -734,6 +764,7 @@ pub fn run_texts(
                 )],
                 after: vec![],
                 diff: vec![],
+                suggested_fixes: vec![],
             }
         }
     };

@@ -95,6 +95,9 @@ fn main() {
             println!("    {d}");
         }
     }
+    for f in &report.suggested_fixes {
+        println!("suggested fix (改め文、番号は改正前): {f}");
+    }
     if !report.diff.is_empty() {
         println!("diff:");
         for d in &report.diff {

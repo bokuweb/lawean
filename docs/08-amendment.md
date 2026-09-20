@@ -81,7 +81,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 `lean/` に patch 代数を定義する。Rust の `LegalDocument` を単純化した `Revision`（条 → 項 → 文のテキスト、参照索引）と `AmendUnit`、`apply`。証明したいメタ定理:
 
 - **可換性の十分条件**: 2 つの改正単位が触る条・項が交わらず、どちらも番号を動かさないなら `apply (apply r a) b = apply (apply r b) a`
-- **ハネの完全性**: 条・項を挿入する操作の後、挿入点より後ろを指す相対参照は必ず索引の更新対象に入る
+- **ハネの完全性**: 条・項を挿入する操作の後、挿入点より後ろを指す相対参照は必ず索引の更新対象に入る → **証明済み**（`lean/Lawean/Refs.lean`）。参照を id で持つ本文 `Body` を描画する `renderBody` は参照先の番号と距離にしか依存しない（`renderBody_congr`）ので、本文が同じなのに描画が変われば必ずどれかの参照の番号が動いている（`hane_complete`）。手当ては描画の差そのもの（`haneFixes`、`haneFixes_sound`）。実データ: 令3-37 第35条の第38条について、生成した手当てが実際の改め文の置換と一字違わず一致する（`RefsExamples.lean`）
 - **apply の決定性**: 同じ Revision と AmendUnit から同じ結果
 
 これらは全ての法令・改正について成り立つ命題で、SMT では書けない。個々の改正法の検査（発射台・一致）は `decide` または Rust 側の実行で済む。
