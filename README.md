@@ -3,7 +3,8 @@
 日本法向け Legal IR と「法令コンパイラ」。
 
 e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（Semantic IR）を別々に持つ中間表現へ変換し、
-その上で参照解決・矛盾検出（SMT）・性質の証明（Lean）・改正の波及解析を行うことを目指す。
+その上で **改正法（改め文）を patch として適用・検査**し、施行シナリオごとのリビジョンについて参照解決・矛盾検出・性質の証明を行う。
+成立する法律の約 8 割は一部改正法であり、審査の負担と誤りはそこに集中している（[docs/08](docs/08-amendment.md) §1）。
 
 ## ドキュメント
 
@@ -17,6 +18,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/05-glossary.md](docs/05-glossary.md) | 法令用語 ↔ IR 用語 | 育成中 |
 | [docs/06-llm-extraction.md](docs/06-llm-extraction.md) | 層 2 の Claude 版。契約と棄却条件は grande 版でも流用 | 保留（ADR-0009） |
 | [docs/07-verification.md](docs/07-verification.md) | Verification IR: overrides の意味論、SMT への写像、最初の証明と検証が見つけたバグ | 実装 |
+| [docs/08-amendment.md](docs/08-amendment.md) | **改正**: 法制執務の実態、改正単位 / シナリオ / リビジョン、改め文の語彙、検査、Lean の役割 | 設計 + 実装中 |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 
@@ -52,5 +54,11 @@ cargo run -p lawean-verify --example smt -- R3 R4   # 手書き IR の SMT-LIB�
 6. ~~層 1: 文末の効果表現の分類、「〜にかかわらず」3 分類、節境界、骨組み Rule（[ADR-0008](docs/adr/0008-extraction-strategy.md)）~~
 7. 層 2: 規則で述語・引数の候補 → grande（Gemma 4 E4B）で判定（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md)）— **後回し**（[TODO](docs/TODO.md)）
 8. ~~手書きデータを Z3 に落とし、性質を証明する（Verification IR）~~ 6 性質。IR のバグを 1 件検出
-9. Verification IR の拡張: 主体、時間（起算点・暦計算）、第26条の時間窓、Lean へのバックエンド ← 次
-10. 改正 patch（過去版の取得から）
+9. **改正**（[ADR-0010](docs/adr/0010-amendment-first.md)、[docs/08](docs/08-amendment.md) §6）← いまここ
+   1. 改め文パーサ（令和3年法律第37号 第35条、令和4年法律第48号 第73・74条）
+   2. apply と e-Gov リビジョンとの一致
+   3. 発射台・ハネの検査
+   4. Lean: patch 代数と可換性の十分条件
+   5. 3 段施行のシナリオ検査
+   6. リビジョンへの Verification IR の適用
+10. Verification IR の拡張: 主体、時間（起算点・暦計算）、第26条の時間窓
