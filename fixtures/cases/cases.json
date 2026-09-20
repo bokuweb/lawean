@@ -8,9 +8,15 @@
     "amendment": "amendments/503AC0000000037_art35.txt",
     "expected": "revisions/403AC0000000090_20220518_503AC0000000037.xml",
     "taisho": "taisho/503AC0000000037_art35.txt",
-    "other_laws": ["laws/413AC0000000026_20220518_503AC0000000037.xml", "laws/504CO0000000187.xml"],
+    "other_laws": [
+      "laws/413AC0000000026_20220518_503AC0000000037.xml",
+      "laws/504CO0000000187.xml"
+    ],
     "enforced": "2022-05-18",
-    "expect": { "ok": true, "fail": [] },
+    "expect": {
+      "ok": true,
+      "fail": []
+    },
     "note": "実際に成立・施行された改正。第38条の項の繰り下げに伴う「前項」のハネ 2 箇所も改め文が手当てしている。新旧対照表は本則の変わった項について手で起こしたもの"
   },
   {
@@ -24,7 +30,10 @@
     "taisho": null,
     "other_laws": [],
     "enforced": "2023-02-20",
-    "expect": { "ok": true, "fail": [] },
+    "expect": {
+      "ok": true,
+      "fail": []
+    },
     "note": "章の末尾に条を加える改正。2022-05-25 版は本則が 2022-05-18 版と同じなので発射台にそれを使う"
   },
   {
@@ -38,7 +47,10 @@
     "taisho": null,
     "other_laws": [],
     "enforced": "2026-05-21",
-    "expect": { "ok": true, "fail": [] },
+    "expect": {
+      "ok": true,
+      "fail": []
+    },
     "note": "第74条は第73条が作った第61条を全部改正するので第73条に依存する。この順（施行順）なら通る"
   },
   {
@@ -52,7 +64,10 @@
     "taisho": null,
     "other_laws": [],
     "enforced": "2023-02-20",
-    "expect": { "ok": true, "fail": [] },
+    "expect": {
+      "ok": true,
+      "fail": []
+    },
     "note": "触る項が交わらないので独立。Lean の applyUnit_comm が全発射台について保証する（Consolidate.lean）"
   },
   {
@@ -66,7 +81,12 @@
     "taisho": null,
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["base"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "base"
+      ]
+    },
     "note": "第38条第3項の「前項」はすでに「第三項」に改められているので字句が無い。改正の競合（他法が先に同じ条を改正した）で起きる型"
   },
   {
@@ -80,7 +100,12 @@
     "taisho": null,
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["order"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "order"
+      ]
+    },
     "note": "第61条は第73条が作る条なので、第74条の「第六十一条を次のように改める」は先には当たらない。施行日が未確定なら調整規定が要る（docs/08 §6）"
   },
   {
@@ -94,8 +119,34 @@
     "taisho": null,
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["hane", "expected"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "hane",
+        "expected"
+      ]
+    },
     "note": "溶け込み自体は成功するが、旧第3項（新第5項）の「前項」が新第4項（電磁的方法の提供）を指してしまう。e-Gov の改正後とも一致しない"
+  },
+  {
+    "id": "hane-wrong-number",
+    "kind": "failure",
+    "title": "ハネの手当ての番号違い: 「前項」を「第四項」に改めた（正しくは第三項）",
+    "source": "令和3年 第35条の 1 箇所を書き換えたもの",
+    "base": "revisions/403AC0000000090_20210519_503AC0000000037.xml",
+    "amendment": "amendments/failures/503AC0000000037_art35_hane_wrong.txt",
+    "expected": "revisions/403AC0000000090_20220518_503AC0000000037.xml",
+    "taisho": null,
+    "other_laws": [],
+    "enforced": null,
+    "expect": {
+      "ok": false,
+      "fail": [
+        "hane",
+        "expected"
+      ]
+    },
+    "note": "手当てはあるが、改正後の番号（旧第2項 → 新第3項）と合わない。ハネの検査は置換先の番号まで見る"
   },
   {
     "id": "wrong-ref",
@@ -108,7 +159,12 @@
     "taisho": null,
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["base"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "base"
+      ]
+    },
     "note": "第38条には第十一項が無い"
   },
   {
@@ -122,7 +178,12 @@
     "taisho": "amendments/failures/503AC0000000037_art35_taisho_wrong.txt",
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["taisho"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "taisho"
+      ]
+    },
     "note": "溶け込みと e-Gov との一致は通る。新旧対照表の第38条第5項「前項の規定による説明」と第39条第3項「第二項に規定する事由」が溶け込み後と食い違う"
   },
   {
@@ -136,7 +197,12 @@
     "taisho": null,
     "other_laws": [],
     "enforced": null,
-    "expect": { "ok": false, "fail": ["conflict"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "conflict"
+      ]
+    },
     "note": "どちらも発射台には当たるが、先に当てた方が字句を変えるので後の方は当たらない。黙って片方を勝たせず、衝突として出す（Lean の Node.conflicts）。解消は調整規定"
   },
   {
@@ -148,9 +214,16 @@
     "amendment": "amendments/drafts/delete-28.txt",
     "expected": null,
     "taisho": null,
-    "other_laws": ["laws/413AC0000000026_20220518_503AC0000000037.xml"],
+    "other_laws": [
+      "laws/413AC0000000026_20220518_503AC0000000037.xml"
+    ],
     "enforced": "2030-01-01",
-    "expect": { "ok": false, "fail": ["cross_law"] },
+    "expect": {
+      "ok": false,
+      "fail": [
+        "cross_law"
+      ]
+    },
     "note": "借地借家法の中だけ見れば溶け込む。法令空間で見ると参照切れ"
   }
 ]

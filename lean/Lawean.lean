@@ -11,3 +11,4 @@ import Lawean.SemExamples
 import Lawean.Properties
 import Lawean.Frame
 import Lawean.FrameExamples
+import Lawean.Cases

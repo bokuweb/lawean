@@ -182,7 +182,7 @@ pub fn run(input: &Input<'_>) -> Report {
                 hane_ok += 1;
             } else {
                 hane_fail.push(format!(
-                    "{label}: {} の「{}」は {} を指すが、改正後は{}。手当てが無い",
+                    "{label}: {} の「{}」は {} を指すが、改正後は{}。手当てが無いか、改めた先の番号が違う",
                     c.sentence
                         .0
                         .rsplit("/main/")
