@@ -65,6 +65,8 @@ structure Rule where
   effect    : Effect
   /-- この Rule が例外・特則として上書きする Rule -/
   overrides : List RuleId := []
+  /-- この Rule を上書きする Rule（`overrides` の逆引き）。Rust が層化順で計算して出す。`Model.wf` が整合を検査する -/
+  exceptions : List RuleId := []
   /-- Provenance.stable_id。改正 × 意味の frame 定理で使う -/
   source    : String := ""
   /-- 確度 0..100 -/
@@ -148,7 +150,7 @@ end
 
 /-- 1 つの Rule の applies: 条件が成り立ち、かつ例外がどれも適用されない -/
 def applies1 (m : Model) (w : World) (env : Env) (r : Rule) : Bool :=
-  evalE m w env r.cond && (m.exceptionsOf r.id).all fun x => !(env.get x)
+  evalE m w env r.cond && r.exceptions.all fun x => !(env.get x)
 
 /-- 層化された順に applies を積む -/
 def run (m : Model) (w : World) : Env :=
@@ -187,23 +189,37 @@ def consistent (m : Model) (w : World) : Bool :=
 
 -- 層化の検査 ------------------------------------------------------------
 
-/-- 式が参照する Rule -/
-partial def Expr.refs : Expr → List RuleId
-  | .and es | .or es => es.flatMap Expr.refs
-  | .not e => e.refs
-  | .ref r => [r]
-  | _ => []
+mutual
+  /-- 式が参照する Rule -/
+  def Expr.refs : Expr → List RuleId
+    | .and es => refsAll es
+    | .or es => refsAll es
+    | .not e => e.refs
+    | .ref r => [r]
+    | _ => []
+  def refsAll : List Expr → List RuleId
+    | [] => []
+    | e :: es => e.refs ++ refsAll es
+end
 
-/-- Rule の並びが評価順として正しいか: 各 Rule の例外と参照先が、その Rule より前に積まれている -/
-def Model.stratified (m : Model) : Bool :=
-  let rec go (seen : List RuleId) : List Rule → Bool
-    | [] => true
-    | r :: rest =>
-      (m.exceptionsOf r.id).all seen.contains && r.cond.refs.all seen.contains && go (r.id :: seen) rest
-  go [] m.rules
+/-- Rule の並びが評価順として正しいか: 各 Rule の例外と参照先が、その Rule より前（`seen`）に積まれている -/
+def stratifiedFrom (seen : List RuleId) : List Rule → Bool
+  | [] => true
+  | r :: rest =>
+    r.exceptions.all (fun x => decide (x ∈ seen)) && r.cond.refs.all (fun x => decide (x ∈ seen)) &&
+    stratifiedFrom (seen ++ [r.id]) rest
+
+def Model.stratified (m : Model) : Bool := stratifiedFrom [] m.rules
 
 /-- id に重複が無いか -/
+def idsNodup : List Rule → Bool
+  | [] => true
+  | r :: rest => !decide (r.id ∈ rest.map (·.id)) && idsNodup rest
+
+/-- id に重複が無く、`exceptions` が `overrides` の逆引きと一致し、層化されている -/
 def Model.wf (m : Model) : Bool :=
-  (m.rules.map (·.id)).eraseDups.length = m.rules.length && m.stratified
+  idsNodup m.rules &&
+  m.rules.all (fun r => r.exceptions == m.exceptionsOf r.id) &&
+  m.stratified
 
 end Lawean.Sem

@@ -1,6 +1,6 @@
 # 10. 法令の意味を Lean に載せる — 計画
 
-状態: M1 済み（`lean/Lawean/Sem.lean`、`SemExamples.lean`）。M2 以降は §6。[ADR-0015](adr/0015-lean-as-semantic-backend.md)（2026-09-20）
+状態: M1・M2 済み（`lean/Lawean/Sem.lean`、`SemTheorems.lean`、`Properties.lean`、`Data/Sem_403AC0000000090_hand.lean`）。M3 以降は §6。[ADR-0015](adr/0015-lean-as-semantic-backend.md)（2026-09-20）
 
 ## 1. 何を作るか
 
@@ -107,9 +107,15 @@ theorem art3_ge_30 : ∀ w, consistent model w → 360 ≤ w.ints "存続期間"
 | 反例 | **Z3**（`lawean-verify`、sat モデル）。または有界域で `decide` の否定 | 第3条 = 30 年（偽） |
 | 非線形（利息） | 当面 Z3 か補題。Lean は `nlinarith` 相当が core に無い | 第32条 |
 
-`∀ w : World` は関数上の量化なので `decide` できない。性質が触る名前だけを引数に取る世界の構築子（`w3 (contract duration : Int) : World := { ints := fun n => if n = "a:契約で定めた期間" then contract else …, bools := fun _ => false }`）を置き、
-その引数について量化する。M1 で確かめた結果: `simp [consistent, run, applies1, evalE, evalV, holds, …] at h` で評価器が線形算術まで展開され、`omega` で閉じる（公理は `propext` のみ、`native_decide` 不要）。
-反例は **Z3（または人）が見つけ、Lean は証人として検証する**（`⟨480, 480, by native_decide, by decide⟩`）。有界域の探索を Lean でやる必要は無かった。
+`∀ w : World` は関数上の量化のまま扱える（M2 で確かめた。Z3 と同じ強さ）。ただし **Model 全体を `simp` で展開してはいけない**: 20 Rule でも `run` の展開は Rule 数の 2 乗で膨らみ、400 万 heartbeats でも終わらなかった。
+代わりにメタ定理で局所化する（`SemTheorems.lean`）:
+
+- `applies_spec`: wf な Model では `applies m w r.id = (evalE … r.cond && r.exceptions.all (!applies m w ·))`。層化された順に積むと各 Rule の値は最終表に対する `applies1` と一致する、を `run` の不変量で証明
+- `consistent_rule`: `consistent m w → r ∈ m.rules → applies m w r.id → holds m w r.effect`
+
+性質の証明は、関係する Rule だけを `consistent_rule` で取り出し、`applies_spec` で開き、`simp only [評価器の定義]` で線形算術に落として `omega`。
+6 性質すべて 1 秒以内、公理は `propext` / `Classical.choice` / `Quot.sound` のみ（`M.wf` も `decide` で済む）。
+反例は **Z3（または人）が見つけ、Lean は証人として検証する**（`⟨w, by native_decide, by decide⟩`）。有界域の探索を Lean でやる必要は無かった。
 
 同じ性質を Z3 にも出す（`lawean-verify::Property` から Lean の `theorem` 文を生成）。両方が同じ結論なら実装ミスの検出になる。
 
@@ -138,14 +144,22 @@ theorem art3_ge_30 : ∀ w, consistent model w → 360 ≤ w.ints "存続期間"
 | # | やること | 完了の印 |
 |---|---|---|
 | ~~M1~~ | `Sem.lean`（型・評価器・`consistent`）と第3条の手書きデータ。性質 2 件 | 済み。≥ 30 年は `simp` + `omega`、= 30 年の反例は証人を `native_decide`。Z3 と同じ結論 |
-| M2 | `lawean-lean` で手書き 8 条を層化して出力（`ResolvedModel` の上書き・参照グラフをトポロジカルソート）。[07](07-verification.md) の 6 性質を `Properties.lean` に | 6 件が Lean と Z3 で一致。`#print axioms` が `propext` / `ofReduceBool` のみ |
+| ~~M2~~ | `lawean-lean::sem` が手書き 8 条を層化して出力。[07](07-verification.md) の 6 性質を `Properties.lean` に | 済み。6 件が Lean と Z3 で一致。公理は `propext` / `Classical.choice` / `Quot.sound`（`ofReduceBool` は反例の証人だけ）。**層化が手書き IR のバグを 1 件検出**（§8） |
 | M3 | `Frame.lean`。令3-37 第35条で frame 定理を実データに当てる。`drafts/widen-30.txt`（第30条を広げる案）で閉包に入る例 | 「触らない条の性質は保たれる」が定理に。触る案は再検証が要ると Lean が言う |
 | M4 | Lean → C。`Ident.applyUnit` と `Sem.applies` を C に出して Rust / WASM から呼ぶ | `ident::apply_unit`（Rust の写し）を削除。三者一致テストが二者に減る |
 | M5 | 層 2 の出力を同じ経路に（[11](11-layer2.md)）。確度と Unknown を前提に持つ性質 | 手書きでない IR で M2 の性質が通る（または Unknown が前提に出る） |
 
 M1〜M3 は Rust 側の変更が小さい。M4 はツールチェーン（Lean の C 出力 + `leanc` / Emscripten）の作業。
 
-## 7. やらないこと
+## 7. 検証が見つけた IR のバグ
+
+[07](07-verification.md) の第4条に続いて 2 件目。第26条第1項のただし書き `R26-1-proviso` は「本文で更新された契約の期間は定めが無いものとする」で、
+手書き IR は `condition: Ref(R26-1)` と `overrides: [R26-1]` の**両方**を付けていた（[art-26.md](03-examples/art-26.md)「部分的な上書き」のつもり）。
+07 の意味論では `applies(R26-1) = cond ∧ ¬applies(proviso)`、`applies(proviso) = applies(R26-1)` となり、cond が真の世界が存在しない（第26条第1項が成り立つ模型が無い）。
+Z3 は第26条を触る性質が無かったので気づかず、Lean 出力の層化（上書き・参照グラフのトポロジカルソート）が循環として検出した。
+修正: `overrides` を外す（ただし書きは例外ではなく、本文が適用された上での追加規定）。`lawean-semantic/tests/examples.rs` の「ただし書きは必ず overrides」も、「overrides か Ref のどちらか一方」に改めた。
+
+## 8. やらないこと
 
 - 条を Lean のコードにする（浅い埋め込み）。ADR-0015
 - 手続法の状態遷移。[00](00-overview.md) の非目的のまま

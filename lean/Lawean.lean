@@ -6,4 +6,6 @@ import Lawean.Ident
 import Lawean.IdentExamples
 import Lawean.Consolidate
 import Lawean.Sem
+import Lawean.SemTheorems
 import Lawean.SemExamples
+import Lawean.Properties

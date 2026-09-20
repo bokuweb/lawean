@@ -40,7 +40,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
 | [lawean-amend](crates/lawean-amend) | **改正**（[docs/08](docs/08-amendment.md)）。改め文パーサ（閉じた語彙 11 種）、Source IR への apply、発射台・順序・ハネの検査。実際の改正 3 件で e-Gov の改正後リビジョンと一致。`ident`: 番号ベースの `Op` を発射台の stable_id に束縛して identity patch にする（繰り下げは消え、字句置換は本文全体の `replace` に、全部改正は `delete` + `insertAfter`）。Lean の `Ident.applyUnit` の写しで前検査 |
 | [lean/](lean/) | patch 代数（`Revision` / `Op` / `applyOp`）とメタ定理。触る条が違う 2 操作の可換性 `applyOp_comm` を証明。**identity patch**（[ADR-0013](docs/adr/0013-identity-patches.md)）: 対象を stable_id で指し、独立な 2 改正単位の可換性 `applyUnit_comm`、衝突は値、依存は半順序（`scheduleOk`）。**`Consolidate.lean`**: 実データ（`Data/`）を `Ident.applyUnit` に通し、e-Gov の改正後リビジョンとの一致・依存・独立・衝突を `native_decide` で検査 |
-| [lawean-lean](crates/lawean-lean) | **Lean への出力**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）。e-Gov のリビジョンを `def rev_… : Revision`、発射台に束縛した改め文を `def unit_… : AmendUnit` として `lean/Lawean/Data/` に出す。番号 → stable_id の束縛は `lawean-amend::ident::bind` |
+| [lawean-lean](crates/lawean-lean) | **Lean への出力**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)、[ADR-0015](docs/adr/0015-lean-as-semantic-backend.md)）。e-Gov のリビジョンを `def rev_… : Revision`、発射台に束縛した改め文を `def unit_… : AmendUnit`、Semantic IR を層化して `def sem_… : Model` として `lean/Lawean/Data/` に出す。番号 → stable_id の束縛は `lawean-amend::ident::bind` |
 | [lawean-space](crates/lawean-space) | **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）。法令空間、法令をまたぐ参照の解決、改正による条・項の移動と本文変化の追跡、参照切れ・ずれ・意味変化・時期不整合の報告、上書きの循環検出。テスト計画 1〜5 が実データ + 自作改正案で通る |
 | [lawean-render](crates/lawean-render) | **逆変換**（[ADR-0012](docs/adr/0012-structured-authoring.md)）。`Op` → 改め文（実改正 2 件で parse ∘ render = id）、Semantic IR → 日本語（原文と並べてレビュー） |
 | [lawean-verify](crates/lawean-verify) | Verification IR（[docs/07](docs/07-verification.md)）。Semantic IR を SMT-LIB に落とし z3 で性質を証明・反証。手書き IR で 第3・4・9・22条の性質 6 件（証明 5、意図した反例 1）。**手書き IR のバグを 1 件検出**（第4条ただし書きの「これ」） |
@@ -79,7 +79,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 11. ~~Lean を溶け込みの正にする~~（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)）: 実リビジョン 4 版と束縛した改め文 3 件を Lean に出力し、`consolidates_…` を `Ident.applyUnit` + `native_decide` で。第73→74条の依存、第35条と第73条の独立（`applyUnit_comm` の実データ版）、発射台のずれが衝突として残ることも定理に
 12. ~~他法令への波及~~（[docs/09](docs/09-cross-law-impact.md)）: 借地借家法の改正案が高齢者居住安定確保法・施行令に生む参照ずれ・時期の区間・上書きの循環を検出、Z3 で反例
 13. ~~identity patch~~（[ADR-0013](docs/adr/0013-identity-patches.md)）: 割り込み（未確定施行日・整備法）で発射台がずれても同じ項に当たるよう、改正単位を stable_id で書く。独立なら可換を Lean で証明。Rust の束縛 `ident::bind` も実データ 3 件で通る
-14. **法令の意味を Lean に**（[ADR-0015](docs/adr/0015-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← 次。M1: `Sem.lean` の評価器と第3条 → M2: 手書き 8 条と 07 の 6 性質を Lean で → M3: 改正 × 意味の frame 定理を令3-37 で → M4: Lean → C（Rust の写しを消す）
+14. **法令の意味を Lean に**（[ADR-0015](docs/adr/0015-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ M3: 改正 × 意味の frame 定理を令3-37 で → M4: Lean → C（Rust の写しを消す）
 15. **層 2**（[docs/11](docs/11-layer2.md)）: 形態素解析 + 格助詞で候補 → grande で判定。docs/10 の M1〜M3 と並行、M5 で合流
 16. `Ident` に条の挿入（条ずれ、令和5年法律第53号）と参照の id 化。`checkUnit`（[ADR-0014](docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）
 17. その他: [TODO](docs/TODO.md)

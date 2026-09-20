@@ -21,9 +21,10 @@ def art3 : Model :=
         { id := "R3-1",
           cond := .tt,
           effect := .set "a:存続期間" (.int 360),
+          exceptions := ["R3-2"],
           source := "403AC0000000090/main/chap:2/sec:1/art:3/para:1/sent:1" } ] }
 
-example : art3.wf = true := by native_decide
+example : art3.wf = true := by decide
 
 /-- 性質が触る変数だけを持つ世界。他は 0 / false -/
 def w3 (contract duration : Int) : World :=
@@ -45,12 +46,11 @@ example : consistent art3 (w3 480 360) = false := by native_decide
 -- 性質 ------------------------------------------------------------
 
 /-- **第3条: 契約期間が何であれ 存続期間 ≥ 30 年**（docs/07 の 1 件目、Z3 では証明）。
-評価器を展開して線形算術に落とし omega -/
+評価器を展開して線形算術に落とし omega。Model が小さいので全部展開できる（大きい Model では `Properties.lean` の局所的なやり方） -/
 theorem art3_ge_30 : ∀ contract duration : Int,
     consistent art3 (w3 contract duration) = true → 360 ≤ duration := by
   intro x y h
-  simp [consistent, run, applies1, evalE, evalV, holds, Model.exceptionsOf, Env.get, art3, w3,
-        CmpOp.eval, List.foldl, List.all, List.filter, List.find?] at h
+  simp [consistent, run, applies1, evalE, evalV, holds, Env.get, art3, w3, CmpOp.eval, List.foldl, List.all, List.find?] at h
   omega
 
 /-- **第3条: 存続期間 = 30 年（常に）は偽**（docs/07 の 2 件目、Z3 が反例を出した）。

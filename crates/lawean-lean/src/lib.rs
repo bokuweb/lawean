@@ -4,11 +4,15 @@
 //! 出すもの:
 //! - `def rev_… : Revision` — e-Gov のリビジョンの本則を id ベースの項の列にしたもの（`ident::from_document`）
 //! - `def unit_… : AmendUnit` — 改め文を発射台に束縛した id ベースの操作列（`ident::bind`）
+//! - `def sem_… : Model` — Semantic IR を層化した Rule の列にしたもの（`sem::emit_model`、docs/10）
 //!
 //! 本文の正規化は Rust の `para_text`（空白を除いた平文）だけで、Lean 側では何もしない。
 //! 定理（`lean/Lawean/Consolidate.lean`）は手で書く。ここは定理の中で使う名前を決めるだけ。
 
+pub mod sem;
+
 use lawean_amend::ident::{IdentOp, IdentRevision};
+pub use sem::{emit_model, stratify, SemError};
 use std::fmt::Write;
 
 /// Lean の文字列リテラル。空白は `para_text` で除いてあるので、逃がすのは `\` と `"` だけ
@@ -147,5 +151,16 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     for (file, name, doc, ops) in &units {
         out.push((format!("{file}.lean"), emit_unit(doc, name, ops)));
     }
+    // 手書き Semantic IR（docs/03-examples の 8 条）。層 2 の出力も同じ経路に乗せる
+    let hand = lawean_semantic::examples::shakuchi_shakuya::model();
+    out.push((
+        "Sem_403AC0000000090_hand.lean".into(),
+        emit_model(
+            "借地借家法 `403AC0000000090_20260521_504AC0000000048` の手書き Semantic IR（`lawean-semantic/src/examples/shakuchi_shakuya.rs`、docs/03-examples の第2〜6・9・22・26条）。\nRule は層化された順（例外 → 原則、参照先 → 参照元）",
+            "sem_403AC0000000090_hand",
+            &hand,
+        )
+        .unwrap(),
+    ));
     out
 }

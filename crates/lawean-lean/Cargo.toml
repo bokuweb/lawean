@@ -9,3 +9,7 @@ description = "Emit real revisions and bound amendment units as Lean data, so le
 [dependencies]
 lawean-source = { path = "../lawean-source" }
 lawean-amend = { path = "../lawean-amend" }
+lawean-semantic = { path = "../lawean-semantic" }
+lawean-resolve = { path = "../lawean-resolve" }
+lawean-verify = { path = "../lawean-verify" }
+thiserror.workspace = true
