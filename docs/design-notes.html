@@ -1,0 +1,836 @@
+<title>lawean 設計ノート</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F4F5F7; --surface:#FFFFFF; --ink:#1A1D24; --muted:#5B6270; --line:#D8DBE1;
+  --accent:#2F5D8A; --accent-soft:#E4EDF6; --law:#B23A2E; --law-soft:#F7E6E3;
+  --ok:#2E7D5B; --ok-soft:#E1F1EA; --code-bg:#F0F2F5; --kw:#8A3FA0; --str:#2E7D5B; --cmt:#7A8290; --tac:#2F5D8A;
+  --serif:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --sans:"Noto Sans JP","Hiragino Sans","Hiragino Kaku Gothic ProN",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#15181D; --surface:#1E2229; --ink:#E4E6EA; --muted:#9AA1AC; --line:#2F343D;
+    --accent:#7FAEE0; --accent-soft:#1F2E3F; --law:#E58A7C; --law-soft:#3A2522;
+    --ok:#6FC39C; --ok-soft:#1E3329; --code-bg:#181B21; --kw:#C990DC; --str:#7FCFA6; --cmt:#7C8593; --tac:#7FAEE0;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#15181D; --surface:#1E2229; --ink:#E4E6EA; --muted:#9AA1AC; --line:#2F343D;
+  --accent:#7FAEE0; --accent-soft:#1F2E3F; --law:#E58A7C; --law-soft:#3A2522;
+  --ok:#6FC39C; --ok-soft:#1E3329; --code-bg:#181B21; --kw:#C990DC; --str:#7FCFA6; --cmt:#7C8593; --tac:#7FAEE0;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.85;margin:0}
+.wrap{max-width:780px;margin:0 auto;padding-inline:20px;padding-block:24px 96px}
+h1,h2,h3{font-family:var(--serif);font-weight:700;line-height:1.35;text-wrap:balance;margin:0}
+h1{font-size:2rem;letter-spacing:.01em}
+h2{font-size:1.5rem;margin-top:3.2rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+h3{font-size:1.15rem;margin-top:2rem;color:var(--accent)}
+h4.sub{font-family:var(--sans);font-size:1rem;font-weight:700;margin:1.8rem 0 0;padding-left:10px;border-left:3px solid var(--law)}
+p{margin:.9rem 0;max-width:68ch}
+ul,ol{padding-left:1.4em;max-width:68ch}
+li{margin:.35rem 0}
+a{color:var(--accent)}
+strong{font-weight:700}
+.eyebrow{font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-family:var(--mono)}
+.hero{padding-block:24px 8px}
+.hero p.lead{font-size:1.08rem;color:var(--ink)}
+.hero .meta{font-size:.85rem;color:var(--muted);margin-top:.4rem}
+nav.toc{display:flex;flex-wrap:wrap;gap:8px;margin:1.6rem 0 .4rem}
+nav.toc a{font-size:.82rem;text-decoration:none;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 12px}
+nav.toc a:hover,nav.toc a:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+.note{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);padding:12px 16px;margin:1.2rem 0;border-radius:4px}
+.note.law{border-left-color:var(--law)}
+.note p{margin:.3rem 0}
+code{font-family:var(--mono);font-size:.88em;background:var(--code-bg);padding:.1em .4em;border-radius:3px}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow-x:auto;margin:1rem 0;line-height:1.6}
+pre code{background:none;padding:0;font-size:.84rem;white-space:pre}
+.kw{color:var(--kw);font-weight:600}.str{color:var(--str)}.cmt{color:var(--cmt);font-style:italic}.tac{color:var(--tac)}.out{color:var(--muted)}
+.callouts{display:grid;gap:8px;margin:.6rem 0 1.4rem;max-width:68ch}
+.callouts div{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start;font-size:.95rem}
+.callouts b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-family:var(--mono);font-size:.78rem;font-weight:600;margin-top:.3em}
+table{border-collapse:collapse;width:100%;font-size:.92rem;margin:1rem 0}
+.tablewrap{overflow-x:auto}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:700;color:var(--muted);font-size:.82rem;letter-spacing:.04em;background:var(--surface)}
+td code{white-space:nowrap}
+/* pipeline */
+.pipe{display:grid;gap:0;margin:1.4rem 0;position:relative}
+.stage{display:grid;grid-template-columns:34px 1fr;gap:12px;position:relative;padding-bottom:18px}
+.stage::before{content:"";position:absolute;left:16px;top:34px;bottom:0;width:2px;background:var(--line)}
+.stage:last-child::before{display:none}
+.stage .dot{width:34px;height:34px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);display:grid;place-items:center;font-family:var(--mono);font-size:.8rem;font-weight:600;color:var(--accent)}
+.stage.law .dot{border-color:var(--law);color:var(--law)}
+.stage .box{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 14px}
+.stage .box h4{margin:0;font-family:var(--sans);font-size:1rem;font-weight:700}
+.stage .box p{margin:.3rem 0 0;font-size:.93rem;color:var(--muted);max-width:none}
+.stage .box .tool{font-family:var(--mono);font-size:.76rem;color:var(--accent);margin-top:.35rem}
+.stage.law .box .tool{color:var(--law)}
+/* principle cards */
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:1rem 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.card .n{font-family:var(--mono);font-size:.74rem;color:var(--muted)}
+.card h4{margin:0;font-size:.98rem;font-family:var(--sans);font-weight:700}
+.card p{margin:0;font-size:.9rem;color:var(--muted);max-width:none}
+.tag{display:inline-block;font-size:.72rem;font-family:var(--mono);padding:1px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin-right:6px}
+.tag.law{background:var(--law-soft);color:var(--law)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:1rem 0}
+.role{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.role h4{margin:0 0 .3rem;font-family:var(--serif);font-size:1.1rem}
+.role ul{padding-left:1.2em;margin:0;font-size:.9rem}
+.role li{margin:.2rem 0}
+dl.gloss{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;max-width:68ch;font-size:.95rem}
+dl.gloss dt{font-weight:700;font-family:var(--serif)}
+dl.gloss dd{margin:0;color:var(--muted)}
+@media (max-width:520px){
+  dl.gloss{grid-template-columns:1fr} dl.gloss dd{margin-bottom:.5rem}
+  h1{font-size:1.7rem} h2{font-size:1.3rem}
+}
+@media (prefers-reduced-motion:no-preference){ html{scroll-behavior:smooth} }
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">bokuweb / lawean · design notes</div>
+  <h1>lawean 設計ノート</h1>
+  <p class="lead">日本の法律を「読める・検査できるデータ」にして、その上で<strong>改正法（改め文）を patch として適用し、壊れていないか機械で確かめる</strong>プロジェクトです。このページはここまでの方針と設計を、法律にもLeanにも詳しくない人向けにやさしく説明します。後半に、Lean で書いた最小の patch 代数と証明の例を載せています。</p>
+  <p class="meta">2026-09-20 時点の docs / ADR-0001〜0013 / lean / crates をもとに作成。Lean のコードはすべてリポジトリの toolchain でコンパイル済み。</p>
+  <nav class="toc" aria-label="目次">
+    <a href="#what">一言でいうと</a>
+    <a href="#why">なぜ改正が主役か</a>
+    <a href="#pipeline">全体像</a>
+    <a href="#principles">設計原則</a>
+    <a href="#roles">Rust / Lean / Z3 の分担</a>
+    <a href="#crates">crate 地図</a>
+    <a href="#lean">最小の Lean 例</a>
+    <a href="#anomaly">異常を検出する例</a>
+    <a href="#ident">identity で書き直す</a>
+    <a href="#next">次の一歩</a>
+    <a href="#gloss">用語</a>
+  </nav>
+</header>
+
+<section id="what">
+<h2>一言でいうと</h2>
+<p>lawean は<strong>法令コンパイラ</strong>です。コンパイラがソースコードを中間表現（IR）に変換し、最適化や型検査を IR の上で行うのと同じように、法令の XML を中間表現に変換し、その上で参照の解決・矛盾の検出・性質の証明を行います。</p>
+<p>ただし「法律をプログラムにする」のではありません。法律の文章はそのまま残し（Source IR）、その横に「この文は誰に何を義務づけているか」という意味の層（Semantic IR）を並べ、両者を出典（Provenance）で結びます。分からない部分は無理に構造化せず、<code>Unknown</code> として残します。</p>
+<div class="note law">
+<p><strong>入力</strong>: e-Gov 法令 XML と、改正法の本文（改め文）。</p>
+<p><strong>出力</strong>: 「この改め文は溶け込むか」「施行順によって結果が変わらないか」「項の挿入で『前項』がずれていないか」「他の法律の参照が壊れないか」「改正後の法律に矛盾がないか」の検査結果。反例があれば反例も。</p>
+</div>
+</section>
+
+<section id="why">
+<h2>なぜ「改正」が主役なのか</h2>
+<p>最初の構想は「1 バージョンの法律を IR にして検証する」でした。しかし法制執務の一次資料を調べると、負担と誤りは<strong>改正</strong>に集中していると分かり、v0.2 で主役を改正に置き直しました（<a href="#adr10">ADR-0010</a>）。</p>
+<div class="tablewrap"><table>
+<thead><tr><th>事実</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>成立する法律の約 8 割は一部改正法（令和7年通常国会: 75 本中、新規は 14 本）</td><td>実務の大半は改め文で書かれる</td></tr>
+<tr><td>改め文が機械的に溶け込まず照会になる比率が毎年 2〜3.7%</td><td>原因は施行日の書き分け、溶け込み順、表記の不一致など。patch の部分性と順序依存そのもの</td></tr>
+<tr><td>審査は目視。「前項」のずれ（ハネ改正）は人が探している</td><td>e-LAWS が自法令内の相対参照を出せない</td></tr>
+<tr><td>デジタル庁の実証は「改正単位 / 改正シナリオ / 法令リビジョン」というデータ構造に到達したが、複数の施行順序ごとの溶け込みは「技術的にハードルが高い」と後回し</td><td>ここを patch 代数で扱うのが lawean の狙い</td></tr>
+</tbody></table></div>
+<p>改め文の語彙は閉じています（改める / 加える / 削る / 〜とし / 繰り下げる / 次のように改める）。だから規則でパースでき、「発射台が違う」「溶け込み順で対象が消える」は<strong>patch の適用が失敗する</strong>こととして機械的に検出できます。</p>
+</section>
+
+<section id="pipeline">
+<h2>全体像</h2>
+<p>青は「既存の法律を取り込む」流れ、赤は「改正を patch として扱う」流れです。中心は Semantic IR で、Lean・Z3・Rust はその上のバックエンドとして差し替え可能に設計しています。</p>
+
+<div class="pipe">
+  <div class="stage"><div class="dot">1</div><div class="box">
+    <h4>Source IR — 原文の構造</h4>
+    <p>e-Gov 法令 XML を、条・項・号・文の木として lossless に読み込みます。意味解析はしません。XML に書き戻しても同じになる（往復テスト済み）ので、改正はまずここに patch として当てます。</p>
+    <div class="tool">lawean-source</div>
+  </div></div>
+  <div class="stage"><div class="dot">2</div><div class="box">
+    <h4>Semantic IR — 法的な意味</h4>
+    <p>Rule / Definition / Condition / Obligation / Prohibition / Permission / Exception / Unknown の 8 種類のノードで「誰が・いつ・何を」を表します。各ノードは Provenance で Source IR の位置に結ばれ、確度を持ちます。</p>
+    <div class="tool">lawean-semantic · lawean-extract（層 1: 規則ベース） · lawean-llm（ブートストラップ用）</div>
+  </div></div>
+  <div class="stage"><div class="dot">3</div><div class="box">
+    <h4>Resolved IR — 参照を解いたグラフ</h4>
+    <p>「前項」「同条」「第N条第M項」「附則第N条」「他法令」を実際の位置に解決し、「〜にかかわらず」（overrides）の逆引きや定義語の有効範囲を張ります。借地借家法の参照 233 件を未解決 0 で解決。</p>
+    <div class="tool">lawean-resolve</div>
+  </div></div>
+  <div class="stage"><div class="dot">4</div><div class="box">
+    <h4>Verification IR — 性質の証明と反例</h4>
+    <p>Semantic IR を SMT-LIB に落とし、z3 で「この期間は必ず 1 年以上か」のような性質を証明・反証します。手書き IR のバグを 1 件見つけました（第4条ただし書きの「これ」の指し先）。</p>
+    <div class="tool">lawean-verify（z3）</div>
+  </div></div>
+  <div class="stage law"><div class="dot">5</div><div class="box">
+    <h4>改正 — 改め文を patch にする</h4>
+    <p>改め文をパースして操作の列（Op）にし、施行期日ごとに改正単位（AmendUnit）にまとめ、Source IR に apply します。対象が無ければ失敗 = 発射台の不一致。実際の改正 3 件で e-Gov の改正後リビジョンと一致しました。</p>
+    <div class="tool">lawean-amend · lean/（patch 代数とメタ定理）</div>
+  </div></div>
+  <div class="stage law"><div class="dot">6</div><div class="box">
+    <h4>他法令への波及</h4>
+    <p>法律 A の改正が、A を参照する法律 B に参照切れ・ずれ・意味変化・時期不整合を生まないかを、施行時点の「法令空間」で検査します。実データは高齢者居住安定確保法と借地借家法施行令。</p>
+    <div class="tool">lawean-space</div>
+  </div></div>
+  <div class="stage law"><div class="dot">7</div><div class="box">
+    <h4>逆変換 — 人が読める形に戻す</h4>
+    <p>Op から改め文を生成し（parse ∘ render = id を往復テストで保証）、Semantic IR を日本語に戻して原文と並べます。IR は人が読める中間物が無いとレビューできません。</p>
+    <div class="tool">lawean-render</div>
+  </div></div>
+</div>
+</section>
+
+<section id="principles">
+<h2>設計原則（ADR）</h2>
+<p>判断は ADR（Architecture Decision Record）として残しています。3 つのグループに分けて紹介します。</p>
+
+<h3>IR の形についての原則</h3>
+<div class="grid">
+  <div class="card"><span class="n">ADR-0001</span><h4>Opaque ではなく Unknown</h4><p>「変換器が理解できなかった」と「法律が意図的に曖昧にしている（正当事由、相当）」を区別する。前者は減らすべき負債、後者は仕様。</p></div>
+  <div class="card"><span class="n">ADR-0002</span><h4>「みなす」と「推定する」を分ける</h4><p>みなす＝反証を許さない公理。推定する＝反証がない限り。混ぜると証明の意味が変わる。</p></div>
+  <div class="card"><span class="n">ADR-0003</span><h4>「できる」を Permission と Power に分ける</h4><p>してもよい（許容）と、すると法律関係が変わる（形成権）は別物。借地借家法は Power だらけ。</p></div>
+  <div class="card"><span class="n">ADR-0004</span><h4>例外を Not に潰さない</h4><p>ただし書きや特則は別の Rule にして <code>overrides</code> で関係を宣言する。改正は「ただし書きを削る」単位で起きるから。</p></div>
+  <div class="card"><span class="n">ADR-0005</span><h4>唯一の正しい解釈を持たない</h4><p>解釈が分かれる箇所だけ複数の Interpretation を持つ。検証は「解釈 A のもとで性質 P」の形。</p></div>
+  <div class="card"><span class="n">ADR-0006</span><h4>文章構造と意味構造を別に持つ</h4><p>1 文から複数 Rule、複数項で 1 Rule など対応は多対多。Provenance でのみ結ぶ。</p></div>
+  <div class="card"><span class="n">ADR-0007</span><h4>ID は stable_id + version_id</h4><p>条番号は改正で動くので ID にしない。version_id は e-Gov の law_revision_id をそのまま使う。</p></div>
+</div>
+
+<h3>抽出（自然文から IR へ）についての原則</h3>
+<div class="grid">
+  <div class="card"><span class="n">ADR-0008</span><h4>層 1 は規則、層 2 は判定</h4><p>文末の効果表現（20 種）や「〜にかかわらず」は規則で確実に取れる。条件の中身は Unknown の骨組みにしておく。平叙文 211 のうち 97% を分類。</p></div>
+  <div class="card"><span class="n">ADR-0009</span><h4>層 2 の判定は生成 LLM ではなく grande</h4><p>改正のたびに再抽出すると同じ入力から同じ IR が出ない。判定はローカルの小さなモデル（Gemma 4 E4B）で行う方針。現在は後回し。</p></div>
+</div>
+
+<h3 id="adr10">改正についての原則</h3>
+<div class="grid">
+  <div class="card"><span class="n">ADR-0010</span><h4>主役は改正。patch 代数は Lean で</h4><p>改め文 → 改正単位 → 施行シナリオごとのリビジョン → 検査を本線にする。Lean で証明するのは「全ての法令・全ての改正について成り立つ」メタ定理。Z3 は反例オラクル。</p></div>
+  <div class="card"><span class="n">ADR-0011</span><h4>溶け込みの正は Lean の applyUnit</h4><p>Rust は XML → Source IR → 改め文パースまでを担い、結果を Lean のデータとして出力する。個々の改正の検査は <code>native_decide</code> で行う。定理と実装の間の穴を実データで塞ぐ。実装はこれから。</p></div>
+  <div class="card"><span class="n">ADR-0012</span><h4>既存法令は一回だけ構造化、改正は構造化記述で書く</h4><p>改正案を IR への patch として書き、改め文と溶け込み後の条文を生成する。自然言語の改め文は生成物。逆変換を一級の機能にする。</p></div>
+  <div class="card"><span class="n">ADR-0013</span><h4>改正単位は identity で書く</h4><p>割り込みで発射台がずれても同じ項に当たるよう、対象を stable_id で指す。独立なら可換（Lean で証明）、衝突は値、依存は半順序。CRDT は中核に採らない。<a href="#ident">解説</a></p></div>
+</div>
+</section>
+
+<section id="roles">
+<h2>Rust / Lean / Z3 の分担</h2>
+<p>三つのツールがそれぞれ得意なことだけを担当します。意味論を二重に持たないことが方針です。</p>
+<div class="roles">
+  <div class="role"><h4>Rust</h4><ul>
+    <li>XML の読み書き（lossless）</li>
+    <li>改め文のパース、参照の解決</li>
+    <li>ハネ検出、シナリオ列挙などの高速な前検査</li>
+    <li>将来は Lean にデータを出力する前処理</li>
+  </ul></div>
+  <div class="role"><h4>Lean 4</h4><ul>
+    <li>patch 代数の定義（Revision / Op / applyOp）</li>
+    <li>メタ定理: 可換性の十分条件、項の挿入がどこをずらすか、独立な改正単位の可換性（identity patch）</li>
+    <li>個々の改正の溶け込みを <code>native_decide</code> で検査（ADR-0011）</li>
+    <li>Mathlib 不要、core のみ</li>
+  </ul></div>
+  <div class="role"><h4>Z3</h4><ul>
+    <li>期間・金額・条件の矛盾検出</li>
+    <li>性質が成り立たないときの<strong>反例</strong>を出す</li>
+    <li>「この施行順だと第二条が消える」を書いている途中に返す用途</li>
+  </ul></div>
+</div>
+<div class="note">
+<p><strong>なぜ Lean と Z3 の両方か。</strong> Z3 は「この具体的な法律のこの性質」を速く判定し反例も出せますが、「全ての法律・全ての改正について」という命題は書けません。Lean はそれが書けて証明できますが、反例を自動で出すのは苦手です。役割が違うので両方置いています。</p>
+</div>
+</section>
+
+<section id="crates">
+<h2>crate 地図</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>crate</th><th>役割</th><th>状態</th></tr></thead>
+<tbody>
+<tr><td><code>lawean-source</code></td><td>Source IR。e-Gov XML の lossless なパース・出力</td><td><span class="tag ok">実装</span>往復テスト済み</td></tr>
+<tr><td><code>lawean-semantic</code></td><td>Semantic IR の型、構築子、参照整合性の検査。借地借家法 8 条分の手書きデータ</td><td><span class="tag ok">実装</span></td></tr>
+<tr><td><code>lawean-resolve</code></td><td>Resolved IR。参照の認識と解決、overrides の逆引き、定義語の scope</td><td><span class="tag ok">実装</span>参照 233 件を未解決 0</td></tr>
+<tr><td><code>lawean-extract</code></td><td>層 1 の規則ベース抽出。骨組み Rule を作る</td><td><span class="tag ok">実装</span>97% 分類</td></tr>
+<tr><td><code>lawean-llm</code></td><td>層 2 の Claude 版。ブートストラップとレビュー補助用</td><td><span class="tag">保留</span>実 API 未実行</td></tr>
+<tr><td><code>lawean-verify</code></td><td>Verification IR。SMT-LIB に落として z3 で証明・反証</td><td><span class="tag ok">実装</span>性質 6 件、IR のバグ 1 件検出</td></tr>
+<tr><td><code>lawean-amend</code></td><td>改め文パーサ（語彙 11 種）、apply、発射台・順序・ハネの検査</td><td><span class="tag law">実装</span>実改正 3 件で e-Gov と一致</td></tr>
+<tr><td><code>lean/</code></td><td>patch 代数とメタ定理。番号ベースの <code>applyOp_comm</code> と、identity ベースの <code>applyUnit_comm</code>（ADR-0013）を証明</td><td><span class="tag law">実装</span>公理は propext と Quot.sound のみ</td></tr>
+<tr><td><code>lawean-space</code></td><td>他法令への波及。法令空間、法令をまたぐ参照、参照切れ・ずれ・意味変化・時期不整合、上書きの循環</td><td><span class="tag law">実装</span>テスト計画 1〜5 が通る</td></tr>
+<tr><td><code>lawean-render</code></td><td>逆変換。Op → 改め文、Semantic IR → 日本語</td><td><span class="tag law">実装</span>往復 parse ∘ render = id</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="lean">
+<h2>最小の Lean 例 — patch 代数と可換性の証明</h2>
+<p>ここからは <code>lean/</code> にある patch 代数を、操作を 3 種類（字句の置換、項の追加、項の挿入）に絞って書き直したものです。全体で 220 行ほどで、Lean 4.15 の core だけで動きます（このページを作るときに実際にコンパイルして確かめました。公理は <code>propext</code> だけです）。</p>
+<p>読むときの合言葉は 3 つです。</p>
+<ul>
+  <li><strong>リビジョン</strong>は「条の列」、条は「項の列」、項は「番号と本文」。それだけ。</li>
+  <li><strong>操作は失敗しうる</strong>。対象の条や語句が無ければ <code>none</code>。これが「発射台の不一致」の正体。</li>
+  <li><strong>定理は具体的な法律についてではなく、全ての法律について</strong>言う。</li>
+</ul>
+<p>1〜4 で道具をそろえ、<a href="#anomaly">5</a> で 3 種類の事故（発射台の不一致、施行順序への依存、ハネ改正）を検出し、6 で「全ての法律について」の定理を証明します。</p>
+
+<h3>1. データ: 法律を「番号と文字列の入れ子」にする</h3>
+<pre><code class="lean">/-- 項 = 番号 + 本文 -/
+structure Para where
+  num  : Nat
+  text : String
+deriving Repr, DecidableEq
+
+/-- 条 = 番号 + 項の列 -/
+structure Article where
+  num   : Nat
+  paras : List Para
+deriving Repr, DecidableEq
+
+/-- 法令の 1 リビジョン（本則のみ） -/
+structure Revision where
+  articles : List Article
+deriving Repr, DecidableEq</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>structure</code> は Rust の struct と同じです。フィールドの名前と型を並べます。</span></div>
+  <div><b>2</b><span><code>deriving Repr, DecidableEq</code> で「表示できる」「等しいか判定できる」を自動で導出します。後で <code>native_decide</code> が「等しい」と機械的に判定するために <code>DecidableEq</code> が要ります。</span></div>
+  <div><b>3</b><span>文の構造や号は持ちません。改め文の操作は「字句を置き換える」「項を出し入れする」なので、patch 代数の議論にはこの粒度で足ります。本物の Source IR（Rust 側）はもっと豊かです。</span></div>
+</div>
+
+<h3>2. 操作: 改め文の語彙を型にする</h3>
+<pre><code class="lean">/-- 改め文の操作。番号は「この操作の直前」の状態で読む -/
+inductive Op where
+  /-- 第N条中「A」を「B」に改める -/
+  | replace         (art : Nat) (from_ to : String)
+  /-- 第N条に次の一項を加える -/
+  | appendPara      (art : Nat) (text : String)
+  /-- 第N条第M項の次に次の一項を加える（後続の項は 1 つ繰り下がる） -/
+  | insertParaAfter (art : Nat) (after : Nat) (text : String)
+deriving Repr, DecidableEq
+
+/-- 操作が触る条 -/
+def Op.article : Op → Nat
+  | .replace a _ _         => a
+  | .appendPara a _        => a
+  | .insertParaAfter a _ _ => a</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>inductive</code> は Rust の enum です。改め文の 1 文「第二十二条中『書面』を『電磁的記録』に改める」が <code>.replace 22 "書面" "電磁的記録"</code> になります。</span></div>
+  <div><b>2</b><span><code>Op.article</code> は「この操作はどの条を触るか」。あとで可換性の条件（触る条が違う）に使います。</span></div>
+  <div><b>3</b><span><code>insertParaAfter</code> が「項の挿入」です。第38条第1項の次に一項を加えると、旧第2項は第3項に繰り下がります。これがハネ改正の原因になる操作です。本物の <code>lean/</code> にはさらに <code>deletePara</code>（項の削除と繰り上げ）があり、<code>replace</code> は項も指定できます。</span></div>
+</div>
+
+<h3>3. apply: 失敗を <code>Option</code> で表す</h3>
+<pre><code class="lean">/-- s に sub が含まれるか -/
+def contains (s sub : String) : Bool := (s.splitOn sub).length > 1
+
+/-- k より後ろの項番号を 1 つ繰り下げる -/
+def shiftAfter (k : Nat) (ps : List Para) : List Para :=
+  ps.map fun p => if p.num > k then { p with num := p.num + 1 } else p
+
+/-- 操作を 1 つの条に当てる。対象が無ければ none = 発射台の不一致 -/
+def Op.onArticle : Op → Article → Option Article
+  | .replace _ from_ to, a =>
+      if a.paras.any (fun p => contains p.text from_) then
+        some { a with paras := a.paras.map fun p => { p with text := p.text.replace from_ to } }
+      else
+        none
+  | .appendPara _ text, a =>
+      some { a with paras := a.paras ++ [{ num := a.paras.length + 1, text }] }
+  | .insertParaAfter _ k text, a =>
+      if a.paras.any (·.num = k) then
+        let shifted := shiftAfter k a.paras
+        some { a with paras := shifted.filter (·.num ≤ k) ++ [{ num := k + 1, text }] ++ shifted.filter (·.num > k) }
+      else
+        none
+
+/-- 番号 n の条だけを f で書き換える。条が無ければ none -/
+def updateArticle (n : Nat) (f : Article → Option Article) : List Article → Option (List Article)
+  | [] => none
+  | a :: rest =>
+      if a.num = n then (f a).map (· :: rest)
+      else (updateArticle n f rest).map (a :: ·)
+
+/-- 1 操作の溶け込み -/
+def applyOp (r : Revision) (op : Op) : Option Revision :=
+  (updateArticle op.article op.onArticle r.articles).map Revision.mk
+
+/-- 改正単位（操作の列）の溶け込み。途中で失敗したら全体が none -/
+def applyUnit (r : Revision) (u : List Op) : Option Revision :=
+  u.foldlM applyOp r</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>Option Article</code> は「成功なら <code>some 条</code>、失敗なら <code>none</code>」。Rust の <code>Option</code> と同じです。<code>String.replace</code> は語句が無くても黙って成功するので、<code>contains</code> で先に確かめて、無ければ <code>none</code> にします。</span></div>
+  <div><b>2</b><span><code>insertParaAfter</code> は、まず <code>shiftAfter</code> で挿入点より後ろの項番号を 1 つ繰り下げ、その隙間に新しい項を差し込みます。挿入点の項が無ければ <code>none</code>。</span></div>
+  <div><b>3</b><span><code>updateArticle</code> は条の列を先頭から見て、番号が一致した条だけを <code>f</code> で書き換えます。最後まで見つからなければ <code>none</code>。</span></div>
+  <div><b>4</b><span><code>applyUnit</code> の <code>foldlM</code> は「失敗を伝播する fold」です。3 つの操作のうち 2 つ目で <code>none</code> が出たら、全体が <code>none</code>。これが「改正単位はまとめて溶け込むか失敗するか」の意味です。</span></div>
+</div>
+
+<h3>4. 実行してみる: <code>#eval</code> と <code>native_decide</code></h3>
+<pre><code class="lean">/-- 改正前: 第22条（1 項）と第38条（2 項） -/
+def rev : Revision :=
+  { articles :=
+      [ { num := 22, paras := [{ num := 1, text := "書面によって契約をするとき" }] },
+        { num := 38, paras := [{ num := 1, text := "p1" }, { num := 2, text := "p2" }] } ] }
+
+/-- 改正単位: 第22条中「書面」を「電磁的記録」に改め、第38条に一項を加える -/
+def unit : List Op :=
+  [ .replace 22 "書面" "電磁的記録",
+    .appendPara 38 "p3" ]
+
+#eval applyUnit rev unit
+<span class="out">-- some { articles := [{ num := 22, paras := [{ num := 1, text := "電磁的記録によって契約をするとき" }] },
+--                     { num := 38, paras := [{ num := 1, text := "p1" }, { num := 2, text := "p2" },
+--                                            { num := 3, text := "p3" }] }] }</span>
+
+/-- 溶け込み結果はこの通り -/
+example : applyUnit rev unit =
+    some { articles :=
+      [ { num := 22, paras := [{ num := 1, text := "電磁的記録によって契約をするとき" }] },
+        { num := 38, paras := [{ num := 1, text := "p1" }, { num := 2, text := "p2" }, { num := 3, text := "p3" }] } ] } := by
+  native_decide
+
+/-- 発射台の不一致: 無い字句を改めると失敗する -/
+example : applyOp rev (.replace 38 "無い字句" "x") = none := by native_decide
+
+/-- 触る条が違う 2 操作は、順序を入れ替えても同じ結果になる（この具体例） -/
+example :
+    (applyOp rev (.replace 22 "書面" "電磁的記録")).bind (applyOp · (.appendPara 38 "p3")) =
+    (applyOp rev (.appendPara 38 "p3")).bind (applyOp · (.replace 22 "書面" "電磁的記録")) := by
+  native_decide</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>#eval</code> は「実行して表示」。REPL の print です。</span></div>
+  <div><b>2</b><span><code>example : 命題 := by native_decide</code> は「この命題をコンパイルして実行し、<code>true</code> になることを確かめる」証明です。等しさが <code>DecidableEq</code> で判定できるからこれで済みます。ADR-0011 で「実際の改正が e-Gov のリビジョンと一致する」ことを検査するのも、まさにこの形です。</span></div>
+  <div><b>3</b><span>2 つ目の例が「発射台の不一致」の最小形です。<a href="#anomaly">次の節</a>で、改正済みの版に同じ改め文を当てる形で詳しく見ます。</span></div>
+  <div><b>4</b><span>3 つ目は可換性の具体例。<code>.bind</code> は「前が成功したら次を当てる」。ここでは <code>native_decide</code> で確かめていますが、これは <code>rev</code> という 1 つの法律についてしか言っていません。次の節で「全ての法律について」に格上げします。</span></div>
+</div>
+
+<h3 id="anomaly">5. 異常を検出する例 — 3 つの典型的な事故</h3>
+<p>ここが「法令コンパイラ」の本題です。同じ <code>applyUnit</code> を使って、法制執務で実際に起きている 3 種類の事故を <code>native_decide</code> で機械的に検出します。どれも「異常なら <code>none</code> か、空でないリストが返る」という形にしてあります。</p>
+
+<h4 class="sub">異常 1 · 発射台の不一致</h4>
+<p>「発射台」は改め文を当てる元の版のことです。未施行の改正を見落として、すでに改正済みの版に同じ改め文を当ててしまうと、改めるはずの語句がもう無いので失敗します。</p>
+<pre><code class="lean">/-- 改正後の版に、同じ改正単位をもう一度当てると失敗する（「書面」がもう無い） -/
+example : (applyUnit rev unit).bind (applyUnit · unit) = none := by native_decide</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>applyUnit rev unit</code> で 1 回溶け込ませた結果に、<code>.bind</code> でもう一度同じ <code>unit</code> を当てています。2 回目は第22条に「書面」が無いので <code>replace</code> が <code>none</code> を返し、改正単位全体が <code>none</code> になります。</span></div>
+  <div><b>2</b><span>現実には「令和3年改正を反映した版に、令和3年改正の改め文をもう一度当てた」形で起き、<code>lawean-amend</code> のテストでも同じ現象を e-Gov の実データで再現しています。</span></div>
+</div>
+
+<h4 class="sub">異常 2 · 施行順序への依存</h4>
+<p>1 つの改正法が段階的に施行されることがあります。令和4年法律第48号は 3 段施行で、第73条が第61条を新設し、第74条がその第61条を全部改正します。第74条が先に施行される順序では、改める対象がまだ存在しません。</p>
+<pre><code class="lean">/-- 1 段目: 第38条に第3項を加える -/
+def stage1 : List Op := [ .appendPara 38 "p3" ]
+/-- 2 段目: その第3項の字句を改める -/
+def stage2 : List Op := [ .replace 38 "p3" "p3'" ]
+
+/-- 1 段目 → 2 段目の順なら溶け込む -/
+example : applyUnit rev (stage1 ++ stage2) ≠ none := by native_decide
+/-- 2 段目が先に施行されると、改める対象がまだ無いので失敗する -/
+example : applyUnit rev (stage2 ++ stage1) = none := by native_decide
+
+/-- 両方の順序で成功するのに結果が違う = 合流しない -/
+def a : Op := .replace 22 "書面" "電磁的記録"
+def b : Op := .replace 22 "電磁的記録" "電子"
+example : applyUnit rev [a, b] ≠ applyUnit rev [b, a] := by native_decide
+
+/-- 順序を全部試す: 2 つの改正単位の全順序で成功し、結果が一致するか（合流） -/
+def confluent (r : Revision) (u v : List Op) : Bool :=
+  match applyUnit r (u ++ v), applyUnit r (v ++ u) with
+  | some x, some y => x = y
+  | _, _ => false
+
+example : confluent rev [ .replace 22 "書面" "電磁的記録" ] [ .appendPara 38 "p3" ] = true := by native_decide
+example : confluent rev stage1 stage2 = false := by native_decide
+example : confluent rev [a] [b] = false := by native_decide</code></pre>
+<div class="callouts">
+  <div><b>1</b><span>順序依存には 2 種類あります。片方の順序で<strong>失敗する</strong>（<code>stage2 ++ stage1</code>）か、両方成功するのに<strong>結果が違う</strong>（<code>[a, b]</code> と <code>[b, a]</code>。「書面」→「電磁的記録」→「電子」と連鎖するか、しないか）か。前者は調整規定が要り、後者はどちらの意図なのか起案者に聞く必要があります。</span></div>
+  <div><b>2</b><span><code>confluent</code> は「両順序で成功し結果が一致する」を 1 つの <code>Bool</code> にまとめた検査です。<code>lawean-amend</code> の <code>scenario::explore</code> は、施行日が未確定の改正単位について順序の全パターンでこれを走らせます。</span></div>
+  <div><b>3</b><span>そして <a href="#adr10">ADR-0010</a> の要点がここです。触る条が違う 2 単位は <code>applyOp_comm</code> により<strong>証明済みで可換</strong>なので、列挙から省けます。最初の <code>confluent … = true</code> の例（第22条と第38条）はまさにそのケースで、実は試すまでもなく true です。</span></div>
+</div>
+
+<h4 class="sub">異常 3 · ハネ改正（項の挿入で参照がずれる）</h4>
+<p>令和3年法律第37号 第35条は借地借家法第38条に項を挿入しました。すると後ろの項は繰り下がりますが、本文の「第二項」「前項」といった参照は自動では動きません。手当てする改め文（「前項」を「第三項」に改める）を添え忘れると、参照先が別の項になります。e-LAWS はこれを出せないので、いまは人が目視で探しています。</p>
+<pre><code class="lean">/-- 改正前の第38条: 第3項が「第二項」を絶対番号で参照している -/
+def art38 : Article :=
+  { num := 38, paras :=
+      [ { num := 1, text := "定期建物賃貸借は書面によってする" },
+        { num := 2, text := "あらかじめ書面を交付して説明する" },
+        { num := 3, text := "第二項の規定に違反したときは無効とする" } ] }
+
+def rev38 : Revision := { articles := [art38] }
+
+/-- 第1項の次に一項を加える（電磁的記録の項） -/
+def insert38 : List Op := [ .insertParaAfter 38 1 "電磁的記録によることができる" ]
+
+-- 挿入後、旧第2項は第3項に、旧第3項は第4項になる。しかし本文の「第二項」はそのまま
+#eval (applyUnit rev38 insert38).map fun r => r.articles.map fun a => a.paras.map fun p => (p.num, p.text)
+<span class="out">-- some [[(1, "定期建物賃貸借は書面によってする"), (2, "電磁的記録によることができる"),
+--        (3, "あらかじめ書面を交付して説明する"), (4, "第二項の規定に違反したときは無効とする")]]</span>
+
+/-- 「第N項」という絶対参照を数値にする（最小: 一〜五だけ） -/
+def refsIn (text : String) : List Nat :=
+  [("第一項", 1), ("第二項", 2), ("第三項", 3), ("第四項", 4), ("第五項", 5)].filterMap
+    fun (w, n) => if contains text w then some n else none
+
+/-- 第 k 項の後ろに挿入したとき、挿入点より後ろを指す絶対参照はすべてずれる。
+    返り値は (参照している項の新番号, 指していた旧番号, 本来指すべき新番号) -/
+def haneCandidates (k : Nat) (a : Article) : List (Nat × Nat × Nat) :=
+  (shiftAfter k a.paras).flatMap fun p =>
+    (refsIn p.text).filterMap fun n =>
+      if n > k then some (p.num, n, n + 1) else none
+
+/-- 検出: 新第4項（旧第3項）の「第二項」は、本来「第三項」を指すべき -/
+example : haneCandidates 1 art38 = [(4, 2, 3)] := by native_decide
+
+/-- 手当て: 改め文に「第二項」→「第三項」の置換を添える -/
+def insert38Fixed : List Op :=
+  [ .insertParaAfter 38 1 "電磁的記録によることができる",
+    .replace 38 "第二項の規定" "第三項の規定" ]
+
+/-- 手当て済みかの判定: 候補の項の本文に、旧番号の参照がもう残っていない -/
+def unhandled (k : Nat) (a : Article) (u : List Op) : List (Nat × Nat × Nat) :=
+  match applyUnit { articles := [a] } u with
+  | none => haneCandidates k a
+  | some r =>
+    (haneCandidates k a).filter fun (pnum, old, _) =>
+      r.articles.any fun a' => a'.paras.any fun p => p.num = pnum ∧ (refsIn p.text).contains old
+
+example : unhandled 1 art38 insert38 = [(4, 2, 3)] := by native_decide   -- 未手当て → 異常
+example : unhandled 1 art38 insert38Fixed = [] := by native_decide        -- 手当て済み → 異常なし</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>#eval</code> の出力を見ると、挿入自体は正しく溶け込んでいます。番号は 1〜4 で連続し、旧第3項は第4項になりました。それでも本文の「第二項」はそのまま。<strong>構文上は成功しているのに意味がずれている</strong>のがハネ改正で、だから apply の成否だけでは捕まりません。</span></div>
+  <div><b>2</b><span><code>haneCandidates</code> は、繰り下げ後の各項の本文から絶対参照を拾い、挿入点より後ろを指すものを候補にします。結果の <code>(4, 2, 3)</code> は「新第4項にある『第二項』は、本来『第三項』を指すべき」と読みます。</span></div>
+  <div><b>3</b><span><code>unhandled</code> は、改正単位を実際に当てたあとの本文に旧番号の参照が残っているかを見ます。<code>insert38</code> だけなら残っている（異常）、<code>insert38Fixed</code> のように置換を添えれば空（手当て済み）。<code>lawean-amend</code> の <code>hane_candidates</code> は令和3年改正の「前項」2 箇所を候補に出し、両方とも手当て済みと判定しました。手当てを外すと未手当てと出ます。</span></div>
+  <div><b>4</b><span>この検出が「漏れない」ことの根拠が、次の節の <code>shiftAfter_gt</code> です。挿入点より後ろの項は必ず繰り下げ後の列に残るので、そこにある参照は必ず <code>haneCandidates</code> の目に入ります。</span></div>
+</div>
+
+<div class="note law">
+<p><strong>3 つに共通する形。</strong> 異常は「<code>none</code>」「両順序の結果が違う」「候補リストが空でない」のどれかで表れます。どれも <code>DecidableEq</code> で判定できるので、<code>native_decide</code> の 1 行で検査でき、CI で回せます。Rust 側の <code>lawean-amend</code> は同じ検査をより豊かなモデル（文分割、相対参照、XML 往復）で行っています。ADR-0011 の狙いは、実データを Lean に出力して<strong>この形の検査を Lean 側で行う</strong>ことです。</p>
+</div>
+
+<h3>6. メタ定理: 触る条が違えば順序を入れ替えてよい</h3>
+<p>施行順序が未確定の改正が 2 つあると、順序のパターンを全部試す必要があります。でも「触る条が違う操作は可換」と証明できていれば、そのペアの列挙は省けます。これが <code>applyOp_comm</code> の価値です。</p>
+<pre><code class="lean">/-- 「条の書き換えは条番号を変えない」という性質 -/
+def KeepsNum (f : Article → Option Article) : Prop :=
+  ∀ a a', f a = some a' → a'.num = a.num
+
+/-- どの操作も条番号を変えない -/
+theorem onArticle_keepsNum (op : Op) : KeepsNum op.onArticle := by
+  intro a a' h
+  cases op with
+  | replace _ from_ to =>
+    simp only [Op.onArticle] at h
+    split at h
+    · cases h; rfl
+    · cases h
+  | appendPara _ text =>
+    simp only [Op.onArticle] at h
+    cases h; rfl
+  | insertParaAfter _ k text =>
+    simp only [Op.onArticle] at h
+    split at h
+    · cases h; rfl
+    · cases h
+
+/-- 番号の違う条への 2 つの書き換えは、条番号を変えない限り可換 -/
+theorem updateArticle_comm (n₁ n₂ : Nat) (h : n₁ ≠ n₂)
+    (f g : Article → Option Article) (hf : KeepsNum f) (hg : KeepsNum g) :
+    ∀ (as_ : List Article),
+      (updateArticle n₁ f as_).bind (updateArticle n₂ g) =
+      (updateArticle n₂ g as_).bind (updateArticle n₁ f) := by
+  intro as_
+  induction as_ with
+  | nil => simp [updateArticle]
+  | cons a rest ih =>
+    <span class="cmt">-- 先頭の条 a が n₁ か、n₂ か、どちらでもないかで 3 通りに分けて、
+    -- それぞれ f a / g a が成功したかでさらに分ける。
+    -- 「どちらでもない」場合だけ帰納法の仮定 ih を使う。（本文は省略。全文は lean/Lawean/Theorems.lean）</span>
+    ...
+
+/-- 主定理: 触る条が違う 2 操作は可換。全ての法令・全ての操作について成り立つ -/
+theorem applyOp_comm (r : Revision) (o₁ o₂ : Op) (h : o₁.article ≠ o₂.article) :
+    (applyOp r o₁).bind (applyOp · o₂) = (applyOp r o₂).bind (applyOp · o₁) := by
+  rw [applyOp_bind, applyOp_bind,
+    updateArticle_comm o₁.article o₂.article h _ _
+      (onArticle_keepsNum o₁) (onArticle_keepsNum o₂) r.articles]
+
+/-- ハネの完全性の基礎: 挿入点より後ろの項は必ず 1 つ繰り下がる -/
+theorem shiftAfter_gt (k : Nat) (ps : List Para) (p : Para) (hp : p ∈ ps) (hk : p.num > k) :
+    ({ p with num := p.num + 1 } : Para) ∈ shiftAfter k ps := by
+  unfold shiftAfter
+  exact List.mem_map.mpr ⟨p, hp, by simp [hk]⟩
+
+#print axioms applyOp_comm
+<span class="out">-- 'applyOp_comm' depends on axioms: [propext]</span>
+#print axioms shiftAfter_gt
+<span class="out">-- 'shiftAfter_gt' depends on axioms: [propext, Quot.sound]</span></code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>KeepsNum f</code> は「f が条を書き換えても条番号は変わらない」という約束です。<code>Prop</code> は命題の型。<code>∀ a a', f a = some a' → a'.num = a.num</code> と読みます。</span></div>
+  <div><b>2</b><span>なぜこの約束が要るのか。もし <code>f</code> が第22条を第38条に改番したら、次に「第38条を書き換える」操作の意味が変わり、順序を入れ替えられません。改め文の操作はどれも条番号を触らないので、この約束を <code>onArticle_keepsNum</code> で証明しておきます。</span></div>
+  <div><b>3</b><span><code>updateArticle_comm</code> が本体です。条の列に対する帰納法で、「先頭がどちらの番号か」と「書き換えが成功したか」で場合分けし、各場合を <code>simp</code> で閉じます。定理の主張は <code>∀ (as_ : List Article)</code> なので、条が何本あっても、本文が何であっても成り立ちます。</span></div>
+  <div><b>4</b><span><code>applyOp_comm</code> は主定理を Revision の言葉に言い直したものです。仮定は <code>o₁.article ≠ o₂.article</code>（触る条が違う）だけ。証明は <code>rw</code> で 2 行。重い仕事は下の補題がしています。</span></div>
+  <div><b>5</b><span><code>shiftAfter_gt</code> は「項 p が挿入点より後ろにあるなら、繰り下げ後の列に番号 +1 の p が必ずいる」。<a href="#anomaly">異常 3</a> の <code>haneCandidates</code> が <code>shiftAfter</code> 後の列を全部見る限り、ずれた参照を見落とさないことの根拠です。</span></div>
+  <div><b>6</b><span><code>#print axioms</code> で、この定理が <code>sorry</code>（証明の穴）に依存していないことを確かめます。<code>propext</code> と <code>Quot.sound</code> は Lean の標準的な公理です。</span></div>
+</div>
+
+<div class="note">
+<p><strong>native_decide と theorem の違いをひとことで。</strong> <code>native_decide</code> は「この法律・この改正で試したら等しかった」。<code>theorem applyOp_comm</code> は「どんな法律でも、どんな 2 操作でも、触る条が違えば等しい」。前者は個別の改正の検査（Rust の実行でも代替できる）、後者は SMT では書けない、Lean にしかできない仕事です。</p>
+</div>
+
+<h3>7. 本物の <code>lean/</code> との違い</h3>
+<ul>
+  <li>操作が 4 種類（<code>replace</code> は項を指定でき、<code>deletePara</code> が項の削除と繰り上げを行う）。</li>
+  <li><code>shiftAfter_le</code>（挿入点以前の項は動かない）もあります。ハネの検出（<code>haneCandidates</code>）は Rust 側にあり、相対参照（前項・前二項）の距離の変化まで見ます。このページの Lean 版は絶対参照だけの最小版です。</li>
+  <li><code>Examples.lean</code> には借地借家法第38条への項の挿入（令和3年法律第37号 第35条）を簡略化した実行例があります。</li>
+  <li>まだ無いもの: 条の挿入と条ずれ、目次、<code>deletePara</code> や <code>appendPara</code> を含む可換性、参照索引の更新の定理。<a href="#next">次の一歩</a>を参照。</li>
+</ul>
+</section>
+
+<section id="ident">
+<h2>identity で書き直す — 割り込みがあっても可換にする（ADR-0013）</h2>
+<p>ここまでの patch 代数には弱点が 1 つあります。操作が「第38条第2項」という<strong>番号</strong>で対象を指すことです。番号は改正で動きます。未確定の施行日（「政令で定める日」）や、他法令の整備法が先に同じ法律を改正する<strong>割り込み</strong>があると、発射台がずれて別の項を指してしまい、可換になりようがありません。</p>
+<p>そこで対象を stable_id（identity）で指す層を作りました。Pijul や Darcs のパッチ理論と同じ構図で、4 つの約束からできています。</p>
+<div class="grid">
+  <div class="card"><span class="n">約束 1</span><h4>対象は id で指す</h4><p>番号は状態に持たず、描画時に計算する。新しい id は改正法 ID と位置から決定的に振る。</p></div>
+  <div class="card"><span class="n">約束 2</span><h4>独立なら可換（定理）</h4><p>触る id が交わらない 2 操作、2 改正単位は順序を入れ替えてよい。Lean で証明済み。</p></div>
+  <div class="card"><span class="n">約束 3</span><h4>衝突は失敗ではなく値</h4><p>期待した本文と違えば、当てられなかった新本文を項に積む。溶け込みは成功し、検査が衝突を報告する。解消は調整規定。</p></div>
+  <div class="card"><span class="n">約束 4</span><h4>依存は半順序</h4><p>相手が作った id を触るなら依存する。施行順序はその線形拡張でなければならず、検査できる。</p></div>
+</div>
+<div class="note">
+<p><strong>CRDT との違い。</strong> 収束型 CRDT（Yjs、Automerge）も位置を一意 ID で表しますが、衝突をタイムスタンプなどで黙って解決します。法令では順序依存そのものが検出したい異常で、解消は人が調整規定を書くことです。だから「独立なら可換、衝突は値として残る」構造を選び、収束型 CRDT は中核に採りません。複数の起案者が同時に編集するエディタが要るなら、その層に限定して置きます。</p>
+</div>
+
+<h3>1. データと操作: 番号を捨てて id にする</h3>
+<pre><code class="lean">abbrev NodeId := String
+
+/-- 項。conflicts は期待した本文と違ったため当てられなかった新本文 -/
+structure Node where
+  id        : NodeId
+  art       : Nat              -- 所属する条（描画用で、代数には効かない）
+  text      : String
+  conflicts : List String := []
+deriving Repr, DecidableEq, Inhabited
+
+/-- 法令の 1 リビジョン = 文書順の項の列。番号は持たない -/
+structure Revision where
+  nodes : List Node
+deriving Repr, DecidableEq, Inhabited
+
+inductive Op where
+  /-- id の本文が expected なら new に改める。違えば衝突として記録する -/
+  | replace     (id : NodeId) (expected new : String)
+  /-- anchor の直後に newId の項を加える -/
+  | insertAfter (anchor newId : NodeId) (art : Nat) (text : String)
+  /-- id の項を削る -/
+  | delete      (id : NodeId)
+  /-- 調整規定: 衝突を解消して本文を確定する -/
+  | resolve     (id : NodeId) (text : String)
+deriving Repr, DecidableEq
+
+/-- 操作が読む・書く id -/
+def Op.touches : Op → List NodeId
+  | .replace id _ _       => [id]
+  | .insertAfter a n _ _  => [a, n]
+  | .delete id            => [id]
+  | .resolve id _         => [id]</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><code>Node</code> に番号がありません。「第3項」は <code>paraNum</code> が同じ条の中の位置から計算します。項を挿入しても、他の項の id は変わらないので参照は壊れません。</span></div>
+  <div><b>2</b><span><code>replace</code> が <code>expected</code>（期待する旧本文）を持つのが要点です。Pijul の context に相当し、他の改正が先に本文を変えていたことを検出する手がかりになります。</span></div>
+  <div><b>3</b><span><code>Op.touches</code> は「この操作が読む・書く・作る id」。独立性と依存の判定はこれだけで決まります。</span></div>
+</div>
+
+<h3>2. apply: 1 つの汎用操作に落とす</h3>
+<pre><code class="lean">/-- 見つかった項を、0 個以上の項の列に置き換える -/
+def Op.edit : Op → Node → List Node
+  | .replace _ expected new, x =>
+      if x.text = expected then [{ x with text := new }]
+      else [{ x with conflicts := x.conflicts ++ [new] }]     -- 衝突は値
+  | .insertAfter _ n art text, x => [x, { id := n, art, text }]
+  | .delete _, _ => []
+  | .resolve _ text, x => [{ x with text, conflicts := [] }]
+
+/-- 最初に id が k の要素を見つけ、g で要素の列に置き換える。無ければ none -/
+def editAt (k : NodeId) (g : Node → List Node) : List Node → Option (List Node)
+  | [] => none
+  | x :: xs => if x.id = k then some (g x ++ xs) else (editAt k g xs).map (x :: ·)
+
+def applyOp (r : Revision) (op : Op) : Option Revision :=
+  (editAt op.key op.edit r.nodes).map Revision.mk
+
+def applyUnit (r : Revision) (u : AmendUnit) : Option Revision :=
+  u.foldlM applyOp r
+
+/-- 番号は描画時に計算する: 同じ条の中での位置 + 1 -/
+def paraNum (r : Revision) (id : NodeId) : Option Nat := ...
+
+/-- b は a に依存する: a が作った id を b が触る -/
+def dependsOn (b a : AmendUnit) : Bool := b.touches.any (a.creates.contains ·)
+
+/-- 施行順序が依存の半順序の線形拡張か -/
+def scheduleOk : List AmendUnit → Bool
+  | [] => true
+  | u :: rest => (rest.all fun v => !(dependsOn u v)) && scheduleOk rest</code></pre>
+<div class="callouts">
+  <div><b>1</b><span>4 種類の操作がすべて「id が k の項を見つけて、0 個以上の項に置き換える」という 1 つの形（<code>editAt</code>）に落ちます。置換は 1 個、挿入は 2 個、削除は 0 個。証明はこの 1 つの形についてやれば済みます。</span></div>
+  <div><b>2</b><span>id が無ければ <code>none</code>。これは「発射台に無いものを触っている」で、依存先がまだ施行されていないときに出ます。</span></div>
+  <div><b>3</b><span><code>scheduleOk</code> は「先に施行される単位が、後の単位に依存していない」を順に確かめます。未確定の施行日で順序が複数あるなら、独立でないペアについてだけ試せばよいことが次の定理から出ます。</span></div>
+</div>
+
+<h3>3. 定理: 独立なら可換</h3>
+<pre><code class="lean">/-- 独立: 触る id が交わらない -/
+def Independent (a b : Op) : Prop := ∀ i ∈ a.touches, i ∉ b.touches
+def IndependentUnits (u v : AmendUnit) : Prop := ∀ a ∈ u, ∀ b ∈ v, Independent a b
+
+/-- 鍵の違う 2 つの書き換えは、互いの鍵を作らない限り可換 -/
+theorem editAt_comm (k₁ k₂ : NodeId) (h : k₁ ≠ k₂) (g₁ g₂ : Node → List Node)
+    (h₁ : ∀ x, x.id = k₁ → ∀ y ∈ g₁ x, y.id ≠ k₂)
+    (h₂ : ∀ x, x.id = k₂ → ∀ y ∈ g₂ x, y.id ≠ k₁) :
+    ∀ (l : List Node), (editAt k₁ g₁ l).bind (editAt k₂ g₂) = (editAt k₂ g₂ l).bind (editAt k₁ g₁)
+
+/-- 独立な 2 操作は可換。全ての法令・全ての操作について -/
+theorem applyOp_comm (r : Revision) (a b : Op) (h : Independent a b) :
+    (applyOp r a).bind (applyOp · b) = (applyOp r b).bind (applyOp · a)
+
+/-- 独立な 2 改正単位は可換。施行順序が未確定でも、独立なら順序の列挙は要らない -/
+theorem applyUnit_comm (r : Revision) (u v : AmendUnit) (h : IndependentUnits u v) :
+    applyUnit r (u ++ v) = applyUnit r (v ++ u)
+
+#print axioms applyUnit_comm
+<span class="out">-- 'Lawean.Ident.applyUnit_comm' depends on axioms: [propext, Quot.sound]</span></code></pre>
+<div class="callouts">
+  <div><b>1</b><span>前の節の <code>applyOp_comm</code> は「触る条が違えば」でしたが、こちらは「触る id が交わらなければ」。同じ条の中でも項が違えば可換です。番号ベースでは項の挿入が後ろの番号を動かすので言えなかったことです。</span></div>
+  <div><b>2</b><span><code>editAt_comm</code> の仮定 <code>h₁</code> は「g₁ が k₂ という id を作らない」。挿入が相手の鍵と同じ id を作ると順序が効くので、この仮定が要ります。<code>Op.touches</code> に作る id も含めてあるのはこのためです。</span></div>
+  <div><b>3</b><span><code>applyUnit_comm</code> は改正単位（操作の列）どうし。証明は「1 操作は独立な単位を素通りできる」補題を経由して、列の帰納法で組み立てます。</span></div>
+  <div><b>4</b><span><code>Independent</code> には <code>Decidable</code> インスタンスを付けてあるので、具体的な 2 単位については <code>by decide</code> で仮定を満たし、定理をそのまま使えます。</span></div>
+</div>
+
+<h3>4. 実行例: 割り込み、依存、衝突</h3>
+<pre><code class="lean">/-- 改正前。id は {条}/{項} を stable_id の代わりに使う -/
+def rev0 : Revision :=
+  { nodes :=
+      [ { id := "22/1", art := 22, text := "書面によって契約をするとき" },
+        { id := "38/1", art := 38, text := "定期建物賃貸借は書面によってする" },
+        { id := "38/2", art := 38, text := "あらかじめ書面を交付して説明する" },
+        { id := "38/3", art := 38, text := "前項の規定に違反したときは無効とする" } ] }
+
+/-- 令和3年法律第37号 第35条: 第38条第1項の次に一項を加える -/
+def r3_37 : AmendUnit := [ .insertAfter "38/1" "r3-37/38/1a" 38 "電磁的記録によることができる" ]
+/-- 令和4年法律第48号 第73条: 第61条を新設（1 段目） -/
+def r4_48_73 : AmendUnit := [ .insertAfter "38/3" "r4-48/61/1" 61 "民事訴訟法の特例（旧）" ]
+/-- 同 第74条: 第61条を全部改正（3 段目）。第73条が作った id を触るので依存する -/
+def r4_48_74 : AmendUnit := [ .replace "r4-48/61/1" "民事訴訟法の特例（旧）" "民事訴訟法の特例（新）" ]
+
+-- 割り込み: 発射台 rev0 に対して書いた改正案
+def draft : AmendUnit := [ .replace "38/3" "前項の規定に違反したときは無効とする" "第二項の規定に違反したときは無効とする" ]
+
+/-- 令和3年改正が先に割り込んで旧第3項が第4項に繰り下がっても、id で指しているので同じ項に当たる -/
+example : (applyUnit rev0 (r3_37 ++ draft)).map (fun r => (r.nodes.find? (·.id = "38/3")).map (·.text)) =
+    some (some "第二項の規定に違反したときは無効とする") := by native_decide
+
+/-- 番号は描画時に計算する: 割り込み前は第3項、割り込み後は第4項 -/
+example : paraNum rev0 "38/3" = some 3 := by native_decide
+example : (applyUnit rev0 r3_37).bind (paraNum · "38/3") = some 4 := by native_decide
+
+-- 独立なら可換: 定理を decide で適用する（発射台 r は任意）
+example (r : Revision) : applyUnit r (r3_37 ++ r4_48_73) = applyUnit r (r4_48_73 ++ r3_37) :=
+  applyUnit_comm r r3_37 r4_48_73 (by decide)
+
+-- 依存と施行順序
+example : dependsOn r4_48_74 r4_48_73 = true := by native_decide
+example : scheduleOk [r4_48_73, r4_48_74] = true := by native_decide
+example : scheduleOk [r4_48_74, r4_48_73] = false := by native_decide     -- 違反
+example : applyUnit rev0 (r4_48_74 ++ r4_48_73) = none := by native_decide  -- 無理に当てると依存先が無い
+
+-- 衝突: 2 つの改正法が同じ項を別々に改める
+def amendA : AmendUnit := [ .replace "22/1" "書面によって契約をするとき" "電磁的記録によって契約をするとき" ]
+def amendB : AmendUnit := [ .replace "22/1" "書面によって契約をするとき" "書面又は電子契約によって契約をするとき" ]
+
+/-- どちらの順でも溶け込みは成功するが、後から当てた方が衝突として残る。黙って片方を勝たせない -/
+example : (applyUnit rev0 (amendA ++ amendB)).map (·.conflicts) =
+    some [("22/1", "電磁的記録によって契約をするとき", ["書面又は電子契約によって契約をするとき"])] := by
+  native_decide
+
+/-- 調整規定 = 両方に依存する patch。衝突を解消して本文を確定する -/
+def adjust : AmendUnit := [ .resolve "22/1" "書面、電磁的記録又は電子契約によって契約をするとき" ]
+example : (applyUnit rev0 (amendA ++ amendB ++ adjust)).map (·.hasConflict) = some false := by native_decide</code></pre>
+<div class="callouts">
+  <div><b>1</b><span><strong>割り込み。</strong> <code>draft</code> は発射台 <code>rev0</code> に対して書かれ、その後に令和3年改正が割り込みます。番号ベースなら「第38条第3項」は繰り下がった別の項（旧第2項）を指してしまいますが、id で指しているので旧第3項に正しく当たります。番号は <code>paraNum</code> が 3 から 4 に描き直します。</span></div>
+  <div><b>2</b><span><strong>独立なら可換。</strong> 令和3年 第35条と令和4年 第73条は触る id が交わりません。<code>by decide</code> で独立性を判定し、<code>applyUnit_comm</code> をそのまま使っています。発射台 <code>r</code> は任意なので、これは全ての版について言えています。</span></div>
+  <div><b>3</b><span><strong>依存。</strong> 第74条は第73条が作った id を触るので依存します。<code>scheduleOk</code> が逆順を拒み、無理に当てれば依存先の id が無くて <code>none</code>。前の節で「片方の順序で失敗する」と言っていたものが、依存という型に変わりました。</span></div>
+  <div><b>4</b><span><strong>衝突。</strong> 同じ項を 2 つの改正法が別々に改めると、後から当てた方の新本文が <code>conflicts</code> に残ります。どちらの順でも溶け込みは成功し、どちらの順でも <code>hasConflict</code> が真になる。順序によって結果が違うことを黙殺せず、「ここに調整規定が要る」と言える形です。<code>resolve</code> を添えると衝突は消えます。</span></div>
+</div>
+
+<div class="note law">
+<p><strong>何が残るか。</strong> 順序依存が消えるわけではありません。依存（相手が作ったものを触る）と衝突（同じものを触る）は本質的に順序があり、そこが人が調整規定を書く場所です。変わるのは、それ以外の大多数が定理で片付き、順序が要る場所だけが型に現れることです。ハネ改正の手当ても、参照を id で持てば「探す」ものから「生成する」ものに変わります（ADR-0012 の向き）。番号ベースの改め文はこの層への表層構文として残し、発射台に対して番号を id に束縛する工程が Rust 側の次の仕事です。</p>
+</div>
+</section>
+
+<section id="next">
+<h2>次の一歩 — Lean を溶け込みの「正」にする（ADR-0011）</h2>
+<p>いまの状態には穴が 1 つあります。定理は Lean の中の抽象モデルについて成り立っていますが、実データに対して走っている apply は Rust 側で、両者が同じである保証は「同じ規約で書いた」という言明だけです。</p>
+<p>そこで次は、Rust が e-Gov のリビジョンと改め文を Lean のデータとして出力し、個々の改正を Lean で検査します。</p>
+<pre><code class="lean">-- Rust（lawean-lean crate、これから作る）が生成するファイルのイメージ
+def rev_20210519 : Revision := { articles := [ ... 実データ ... ] }
+def unit_r3_37_art35 : List Op := [ ... 改め文をパースした Op 列 ... ]
+def rev_20220518 : Revision := { articles := [ ... e-Gov の改正後リビジョン ... ] }
+
+/-- 令和3年法律第37号 第35条は、2021-05-19 版に溶け込んで 2022-05-18 版になる -/
+theorem consolidates_r3_37_art35 :
+    applyUnit rev_20210519 unit_r3_37_art35 = some rev_20220518 := by
+  native_decide
+
+/-- 令和4年法律第48号は、第74条を先に施行すると第61条が無くて失敗する -/
+theorem order_dependent_r4_48 :
+    applyUnit rev_20220518 unit_r4_48_art74 = none := by
+  native_decide</code></pre>
+<p>こうすると <code>applyOp_comm</code> などの定理が「その実データに載っている <code>applyUnit</code>」について言えるようになります。<code>native_decide</code> はコンパイル実行なので、100KB 級の法令でも実用になる見込みです。やることは次の通り。</p>
+<ol>
+  <li>Source IR から Lean の <code>Revision</code> を、Op 列から <code>List Op</code> を出力する crate を作る。空白や全角数字の正規化を Rust と揃える。</li>
+  <li>Lean の <code>Revision</code> に目次と、条の挿入・繰り下げ（条ずれ）を足す。</li>
+  <li>3 段施行の順序依存を <code>applyUnit … = none</code> の定理にする。</li>
+  <li>Rust の <code>apply_unit</code> と Lean の <code>applyUnit</code> を同じ Op 列で走らせて一致をテストする。</li>
+  <li>CI の <code>lake build</code> で実データの定理を検査する。</li>
+  <li>ADR-0013 の続き: Rust で番号ベースの改め文を発射台に対して stable_id に束縛する。Source IR の参照を id 参照にし、番号とハネ手当てを描画で生成する。</li>
+</ol>
+</section>
+
+<section id="gloss">
+<h2>用語ミニ集</h2>
+<dl class="gloss">
+  <dt>改め文</dt><dd>改正法の本文。「第二十二条中『書面』を『電磁的記録』に改める」のように、既存の法律への差分を自然言語で書いたもの。lawean では Op の列にパースする。</dd>
+  <dt>溶け込み</dt><dd>改め文を既存の法律に適用して、改正後の条文を作ること。lawean では <code>applyUnit</code>。</dd>
+  <dt>発射台</dt><dd>改め文を適用する元のリビジョン。未施行の改正があると、どの版に対して書くかで結果が変わる。間違うと <code>none</code>。</dd>
+  <dt>ハネ改正</dt><dd>項を挿入・削除したせいで、他の場所の「前項」「第三項」がずれること。手当てする改め文が要る。</dd>
+  <dt>改正単位</dt><dd>施行期日を共有する改正規定のまとまり。Op の列。</dd>
+  <dt>改正シナリオ</dt><dd>複数の改正単位の適用順。施行日が未確定だと複数ある。全順序で結果が一致する（合流する）かを検査する。</dd>
+  <dt>リビジョン</dt><dd>ある時点で施行されている法令の版。e-Gov の law_revision_id と 1 対 1。</dd>
+  <dt>Provenance</dt><dd>Semantic IR の各ノードが、原文のどこから、誰（人 / 規則 / LLM）によって、どの確度で作られたかの記録。</dd>
+  <dt>独立 / 依存 / 衝突</dt><dd>identity patch の 3 分類。独立 = 触る id が交わらない（可換）。依存 = 相手が作った id を触る（順序あり、施行順序の検査対象）。衝突 = 同じ id を両方が書き換える（値として残り、調整規定で解消）。</dd>
+  <dt>法令空間</dt><dd>ある時点で施行されている全法令のリビジョンの集まり。他法令への波及はこの上で検査する。</dd>
+</dl>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var kws = /\b(structure|inductive|where|deriving|def|theorem|example|abbrev|by|intro|cases|with|induction|simp|only|rw|at|split|rfl|exact|have|fun|if|then|else|some|none|match|do|let|import|namespace|end|open|unfold|Prop|Nat|String|Bool|List|Option)\b/g;
+  var blocks = document.querySelectorAll('code.lean');
+  for (var i = 0; i < blocks.length; i++) {
+    var el = blocks[i];
+    var html = el.innerHTML;
+    // protect existing spans (outputs / notes)
+    var keep = [];
+    html = html.replace(/<span[^>]*>[\s\S]*?<\/span>/g, function(m){ keep.push(m); return '@@K' + (keep.length-1) + '@@'; });
+    // doc comments and line comments
+    html = html.replace(/\/-[\s\S]*?-\//g, function(m){ return '<span class="cmt">' + m + '</span>'; });
+    html = html.replace(/(^|\n)(\s*--[^\n]*)/g, function(m, a, b){ return a + '<span class="cmt">' + b + '</span>'; });
+    // strings
+    html = html.replace(/"[^"\n]*"/g, function(m){ return '<span class="str">' + m + '</span>'; });
+    // keywords outside spans: split on span tags
+    var parts = html.split(/(<span[^>]*>[\s\S]*?<\/span>)/g);
+    for (var j = 0; j < parts.length; j++) {
+      if (parts[j].indexOf('<span') === 0) continue;
+      parts[j] = parts[j].replace(kws, '<span class="kw">$1</span>')
+                         .replace(/(#eval|#print axioms|native_decide)/g, '<span class="tac">$1</span>');
+    }
+    html = parts.join('');
+    html = html.replace(/@@K(\d+)@@/g, function(m, n){ return keep[+n]; });
+    el.innerHTML = html;
+  }
+})();
+</script>

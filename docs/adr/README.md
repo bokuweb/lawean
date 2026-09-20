@@ -18,6 +18,7 @@
 | [0010](0010-amendment-first.md) | 主役は改正。patch 代数を Lean で定義し、Z3 は反例オラクル | accepted |
 | [0011](0011-lean-as-reference-for-consolidation.md) | 溶け込みの正は Lean の `applyUnit`。Rust は実データを Lean に出力する前処理 | accepted、実装は未 |
 | [0012](0012-structured-authoring.md) | 既存法令は一回だけ構造化（frontier model 可）、改正は構造化記述で書いて改め文と条文を生成。逆変換を一級に | accepted |
+| [0013](0013-identity-patches.md) | 改正単位は identity で書く。独立なら可換（`applyUnit_comm`）、衝突は値、依存は半順序。CRDT は中核に採らない | accepted、Rust の束縛は未 |
 
 ## テンプレート
 

@@ -86,6 +86,11 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 
 これらは全ての法令・改正について成り立つ命題で、SMT では書けない。個々の改正法の検査（発射台・一致）は `decide` または Rust 側の実行で済む。
 
+**identity patch（[ADR-0013](adr/0013-identity-patches.md)）**: 番号ベースの `Op` では可換性が「触る条が違う」までしか言えず、未確定施行日や整備法の割り込みで発射台がずれると別の項を指す。
+`lean/Lawean/Ident.lean` は対象を stable_id で指す `Op` を定義し、触る id が交わらない（独立な）2 操作 / 2 改正単位の可換性 `applyOp_comm` / `applyUnit_comm` を証明した。
+衝突（期待した本文と違う）は `Node.conflicts` に値として残り、調整規定 `resolve` で解消する。依存（相手が作った id を触る）は半順序で、施行順序はその線形拡張であることを `scheduleOk` で検査する。
+番号は描画時に計算する（`paraNum`）ので、ハネ改正の手当ては探すものではなく生成するものになる。番号ベースの `Op` は改め文の表層構文として残し、発射台に対する束縛（Rust、未実装）で id に落とす。
+
 ## 6. 進め方（優先順）
 
 1. ~~改め文パーサ（Rust）。第35条・第73/74条の実データを ops に分解できること~~

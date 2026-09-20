@@ -33,6 +33,15 @@
 - [ ] Rust `apply_unit` と Lean `applyUnit` の一致をテスト（同じ Op 列）
 - [ ] （後）Semantic IR の Lean 化: `applies_R` を Bool 関数、期間を Int、07 の 6 性質を `omega` / `decide` で
 
+## identity patch（[ADR-0013](adr/0013-identity-patches.md)）
+
+- [x] Lean: `Ident.lean`（id ベースの `Op`、衝突を値に、`dependsOn` / `scheduleOk`、`paraNum`）と `applyOp_comm` / `applyUnit_comm`
+- [ ] Rust: `lawean-amend` の番号 `Op` を発射台リビジョンに対して stable_id に束縛する `bind`（「「A」を「B」に改める」の複数箇所は id ごとに展開、全部改正は delete + insert）
+- [ ] Source IR の参照を id 参照にし、番号を描画で出す。ハネ手当ての改め文を生成し、成立した改め文との差分で検査する
+- [ ] id の決定性: 改正法 ID + 位置から振る規則を Rust と Lean で揃える
+- [ ] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査
+- [ ] `Ident` の `Revision` にも目次と条を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う
+
 ## 他法令への波及（[docs/09](09-cross-law-impact.md)）
 
 - [x] 法令名 → law_id の対応表、`cross_refs(B, A)`
