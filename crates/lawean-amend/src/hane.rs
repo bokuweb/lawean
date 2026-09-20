@@ -7,6 +7,7 @@
 
 use crate::apply::paragraph_mapping;
 use crate::op::*;
+use lawean_resolve::numeral::to_kanji;
 use lawean_resolve::{resolve_sentence_with, Antecedent, Index, RefKind, Resolution};
 use lawean_source::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,8 +22,33 @@ pub struct HaneCandidate {
     pub target: StableId,
     /// 改正後に指すべき項（削られた項なら None）
     pub new_target_paragraph: Option<u32>,
-    /// この改正単位の Replace で手当てされているか
+    /// この改正単位の Replace で、改正後の正しい項を指すように手当てされているか
+    /// （置換先が「第N項」の N か、距離の合う「前N項」「次項」であること）
     pub handled: bool,
+}
+
+/// 置換先 `to` が改正後の項 `new_tp` を正しく指すか。「第N項」か、参照元（改正後 `new_sp`）からの距離が合う相対形
+fn fixes_to(to: &str, new_tp: Option<u32>, new_sp: Option<u32>) -> bool {
+    let Some(nt) = new_tp else {
+        // 削られた項への参照は、参照そのものを消すか別の規定に向ける。ここでは判定しない
+        return true;
+    };
+    if to.contains(&format!("第{}項", to_kanji(nt))) {
+        return true;
+    }
+    match new_sp {
+        Some(ns) if ns > nt => {
+            let d = ns - nt;
+            let rel = if d == 1 {
+                "前項".to_string()
+            } else {
+                format!("前{}項", to_kanji(d))
+            };
+            to == rel || to.ends_with(&rel)
+        }
+        Some(ns) if nt == ns + 1 => to == "次項" || to.ends_with("次項"),
+        _ => false,
+    }
 }
 
 fn para_of(id: &str) -> Option<u32> {
@@ -32,7 +58,7 @@ fn para_of(id: &str) -> Option<u32> {
 /// 改正単位が項の番号を動かす条について、影響を受ける参照を列挙する
 pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandidate> {
     let mut articles: BTreeSet<ArticleNum> = BTreeSet::new();
-    let mut replaced: Vec<(Loc, String)> = Vec::new();
+    let mut replaced: Vec<(Loc, String, String)> = Vec::new();
     for ins in &unit.instructions {
         for op in &ins.ops {
             match op {
@@ -50,7 +76,9 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                 } => {
                     articles.insert(article.clone());
                 }
-                Op::Replace { at, from, .. } => replaced.push((at.clone(), from.clone())),
+                Op::Replace { at, from, to } => {
+                    replaced.push((at.clone(), from.clone(), to.clone()))
+                }
                 _ => {}
             }
         }
@@ -117,13 +145,18 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                             continue;
                         }
                         let sp = para_of(&id.0);
-                        let handled = replaced.iter().any(|(loc, from_text)| {
+                        // 参照元の新しい項番号（同じ条なら）。相対形の手当てを認めるのに使う
+                        let new_sp = sp
+                            .filter(|_| id.0.contains(&seg))
+                            .and_then(|s| map.get(&s).copied());
+                        let handled = replaced.iter().any(|(loc, from_text, to_text)| {
                             loc.article.to_num_string() == *art
                                 && from_text == &r.span.text
                                 && match &loc.paragraph {
                                     Some(ParaRef::Num(n)) => sp == Some(*n),
                                     None => true,
                                 }
+                                && fixes_to(to_text, new_tp, new_sp)
                         });
                         out.push(HaneCandidate {
                             sentence: id.clone(),

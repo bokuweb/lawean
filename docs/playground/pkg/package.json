@@ -1,0 +1,19 @@
+{
+  "name": "lawean-wasm",
+  "type": "module",
+  "description": "lawean-check for the browser playground (wasm-bindgen)",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bokuweb/lawean"
+  },
+  "files": [
+    "lawean_wasm_bg.wasm",
+    "lawean_wasm.js"
+  ],
+  "main": "lawean_wasm.js",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

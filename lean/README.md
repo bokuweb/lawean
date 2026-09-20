@@ -14,13 +14,14 @@ cd lean && lake build
 | `Lawean/Examples.lean` | 第38条の項の挿入を `applyUnit` で実行（`native_decide`）、可換性の具体例、発射台不一致の例。`#print axioms` は `propext` のみ |
 | `Lawean/Ident.lean` | **identity patch**（[ADR-0013](../docs/adr/0013-identity-patches.md)）。対象を stable_id で指す `Op`（`replace` は期待本文つき / `insertAfter` / `delete` / `resolve`）、`editAt` による apply、衝突を値として持つ `Node.conflicts`、`paraNum`（番号は描画時に計算）、`dependsOn` / `scheduleOk`（依存の半順序と施行順序）。**`applyOp_comm` / `applyUnit_comm`: 触る id が交わらない 2 操作 / 2 改正単位は可換** |
 | `Lawean/Consolidate.lean` | **実データ**（ADR-0011）。`Data/` の 4 リビジョン・3 改正単位について、`consolidates_…`（束縛した改め文を発射台に当てると e-Gov の改正後リビジョンと `render` が一致）、`wf`（id の重複・衝突なし）、第73→74条の `dependsOn` / `scheduleOk` と逆順の `= none`、第35条と第73条の `IndependentUnits`（→ `applyUnit_comm` で全発射台について可換）、改正済みの版に当て直すと衝突が 2 つ残ること。すべて `native_decide` |
-| `Lawean/Data/*.lean` | **自動生成**（`cargo run -p lawean-lean --example gen`、手で編集しない）。`rev_403AC0000000090_YYYYMMDD : Revision`（借地借家法の本則 131〜133 項 + 目次）、`unit_<改正法ID>_artN : AmendUnit`（発射台に束縛した改め文）、`sem_403AC0000000090_hand : Model` と Rule ごとの `def «R3-1» : Rule`（層化済みの Semantic IR）。Rust のテストが最新かを検査する |
+| `Lawean/Data/*.lean` | **自動生成**（`cargo run -p lawean-lean --example gen`、手で編集しない）。`rev_403AC0000000090_YYYYMMDD : Revision`（借地借家法の本則 131〜133 項 + 目次）、`unit_<改正法ID>_artN : AmendUnit`（発射台に束縛した改め文）、`unit_case_… : AmendUnit`（失敗例）、`sem_403AC0000000090_hand : Model` と Rule ごとの `def «R3-1» : Rule`（層化済みの Semantic IR）。Rust のテストが最新かを検査する |
 | `Lawean/Sem.lean` | **法令の意味**（ADR-0016、docs/10）。Semantic IR のデータ型（`Value` / `Expr` / `Effect` / `Rule` / `Model`）、世界 `World`（自由変数の割り当て）、評価器 `applies`（層化された順に例外 → 原則で積む。燃料なし）、`consistent`（世界が法令の模型か）、`Model.stratified` / `wf` |
 | `Lawean/SemTheorems.lean` | 評価器のメタ定理。`applies_spec`（wf な Model では applies はその Rule の条件と例外だけで決まる。`run` の不変量で証明）、`consistent_rule`。性質の証明を Model 全体の展開なしに局所化する |
 | `Lawean/Properties.lean` | **法令の内容の性質**（docs/10 M2）。`Data/Sem_403AC0000000090_hand.lean`（Rust が出した手書き 8 条）について docs/07 の 6 性質: 第3条 ≥ 30 年、= 30 年の反例、第4条 ≥ 10 年 / 最初の更新 ≥ 20 年、第22条 × 第9条、第9条 + 補題。すべて `omega`、公理は `propext` / `Classical.choice` / `Quot.sound` |
 | `Lawean/Frame.lean` | **改正 × 意味の frame 定理**（docs/10 §4）。`closed S`（依存で閉じた Rule 集合）、`Sub S m`（同じレコードで入っている）、`applies_agree`（閉じた S の applies は両 Model で一致）、`consistentOn_agree`、`transfer`（S だけから証明した性質は、S を同じレコードで含む別の Model に再証明なしで移る） |
 | `Lawean/FrameExamples.lean` | 令3-37 第35条の前後で第3・4・9条の 5 性質を `transfer` で移送。`modified_…`（Rust が計算した本文の変わった項）と S が交わらないことを `decide`。架空の第3条改正で `Sub` が壊れ、再検証すると破れる例 |
 | `Lawean/SemExamples.lean` | 第3条だけの小さな Model で、評価器を全部展開する素朴な証明と反例の検証 |
+| `Lawean/Cases.lean` | **失敗例**（docs/12、`fixtures/cases`）。`hane-missing`: 溶け込むが e-Gov と第38条の 1 項だけ違う。`conflict-22`: どちらの順でも第22条第1項が衝突として残り、`resolve` で解消できる |
 | `Lawean/IdentExamples.lean` | 令和3年 第35条・令和4年 第73/74条の形で、割り込み（発射台がずれても同じ項に当たる）、独立なら可換（定理を `decide` で適用）、依存と施行順序の違反、同じ項への 2 改正の衝突と調整規定による解消を `native_decide` で検査 |
 
 番号ベース（`Basic` / `Apply`）は改め文の表層構文として残す。ADR-0013 以降の本線は `Ident` で、番号 → id の束縛は Rust 側（`lawean-amend::ident::bind`）が行い、結果を `Data/` に出す。

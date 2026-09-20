@@ -129,6 +129,18 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let u73 = u.remove(0);
 
     let b35 = bind(&r0, &u35, "503AC0000000037/art35").unwrap();
+    // 失敗例（fixtures/cases、docs/12）: 束縛はできるが溶け込み後が違う / 衝突するもの
+    let u35_hane = parse_units(&read(
+        "amendments/failures/503AC0000000037_art35_hane_missing.txt",
+    ))
+    .unwrap()
+    .remove(0);
+    let b35_hane = bind(&r0, &u35_hane, "case-hane-missing").unwrap();
+    let mut uc = parse_units(&read("amendments/failures/conflict-22.txt")).unwrap();
+    let ucb = uc.remove(1);
+    let uca = uc.remove(0);
+    let bca = bind(&r0, &uca, "case-conflict-22/A").unwrap();
+    let bcb = bind(&r0, &ucb, "case-conflict-22/B").unwrap();
     let b73 = bind(&r1, &u73, "504AC0000000048/art73").unwrap();
     // 第74条は第73条が作った id を触るので、e-Gov の版ではなく第73条を束縛した文書に対して束縛する
     let b74 = bind(&b73.doc, &u74, "504AC0000000048/art74").unwrap();
@@ -143,6 +155,9 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Unit_503AC0000000037_art35", "unit_503AC0000000037_art35", "デジタル社会形成整備法（令和3年法律第37号）第35条（`fixtures/amendments/503AC0000000037_art35.txt`）を `rev_403AC0000000090_20210519` に束縛したもの。\n繰り下げ・「第P項を第Q項とし」は id の世界では操作にならないので消え、「前項」の手当ては本文全体の `replace` になる", b35.ops.clone()),
         ("Unit_504AC0000000048_art73", "unit_504AC0000000048_art73", "民事訴訟法等改正法（令和4年法律第48号）第73条（`fixtures/amendments/504AC0000000048_art73-74.txt`）を `rev_403AC0000000090_20220518` に束縛したもの。目次・第42条第1項・第61条の新設", b73.ops),
         ("Unit_504AC0000000048_art74", "unit_504AC0000000048_art74", "同 第74条を、第73条を当てた後の状態に束縛したもの。第61条の全部改正 = 第73条が作った id に anchor した `insertAfter` と、その id の `delete`。\n第73条が作った id を触るので第73条に依存する（`dependsOn`）", b74.ops),
+        ("Unit_case_hane_missing", "unit_case_hane_missing", "失敗例 `hane-missing`（fixtures/cases）: 令和3年 第35条から「同条第三項中「前項」を「第三項」に改め」を落としたもの。`rev_403AC0000000090_20210519` に束縛。溶け込みはするが e-Gov の改正後と一致しない", b35_hane.ops),
+        ("Unit_case_conflict_22_A", "unit_case_conflict_22_A", "失敗例 `conflict-22`（fixtures/cases）の第一条: 第22条第1項「書面によって」を「書面又は電磁的記録によって」に。`rev_403AC0000000090_20210519` に束縛", bca.ops),
+        ("Unit_case_conflict_22_B", "unit_case_conflict_22_B", "同 第二条: 「書面によって」を「書面（電磁的記録を含む。）によって」に。同じ発射台に束縛。A の後に当てると期待した本文と違うので衝突として残る", bcb.ops),
     ];
     let mut out = Vec::new();
     for (file, name, doc, r) in &revs {
