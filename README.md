@@ -47,7 +47,8 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-render](crates/lawean-render) | **逆変換**（[ADR-0012](docs/adr/0012-structured-authoring.md)）。`Op` → 改め文（実改正 2 件で parse ∘ render = id）、Semantic IR → 日本語（原文と並べてレビュー） |
 | [lawean-verify](crates/lawean-verify) | Verification IR（[docs/07](docs/07-verification.md)）。Semantic IR を SMT-LIB に落とし z3 で性質を証明・反証。手書き IR で 第3・4・9・22条の性質 6 件（証明 5、意図した反例 1）。**手書き IR のバグを 1 件検出**（第4条ただし書きの「これ」） |
 | [lawean-check](crates/lawean-check) | **検査 API**（サービスが呼ぶもの、[docs/12](docs/12-cases.md)）。発射台・順序・衝突・ハネ・溶け込み・改正後との一致・新旧対照表・他法令の 9 検査を `Report` に。`cargo run -p lawean-check --example check -- --case <id>` |
-| [lawean-wasm](crates/lawean-wasm) | `lawean-check` を wasm32 に（playground 用） |
+| [lawean-leanrt](crates/lawean-leanrt) | **証明した定義そのものを呼ぶ**（[ADR-0017](docs/adr/0017-lean-to-c-is-the-runtime.md)）。`lean/Lawean/Ffi.lean` の `@[export]` → `lake build Lawean:static` → C の皮 → Rust。`lawean-check` は Lean がリンクされていればこちらで溶け込む（`Report.engine = "lean"`）。公職選挙法 1167 項で 6 ms |
+| [lawean-wasm](crates/lawean-wasm) | `lawean-check` を wasm32 に（playground 用。ここはまだ Rust の写し） |
 | [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
 
 ```sh
@@ -89,6 +90,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 4 件が通り、失敗例 8 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
     - ~~ハネの手当てを生成する~~（ADR-0012）: Rust が正しい置換を生成して改め文と突き合わせ、足りなければ改め文の形で提案。Lean `Refs.lean` で「描画が変わるのは参照先の番号が動いたときだけ」（完全性）を証明、令3-37 の実データで生成 = 実際の置換
     - ~~他法令への波及を Lean に~~（docs/09）: `Space.lean` の法令空間と `impact` の分類（健全性・完全性）。施行令の参照のずれと高齢者居住安定確保法の参照切れを実データで
+    - ~~M4（ネイティブ）: Lean → C → Rust~~（[ADR-0017](docs/adr/0017-lean-to-c-is-the-runtime.md)）: `lawean-leanrt` が証明した `applyUnit` / `checkUnit` を C 経由で呼び、`lawean-check` の本線に。WASM（Emscripten）は次
     - ~~実際に起きた改正漏れの再現~~（docs/12 §5）: 公職選挙法 平成30年法律第75号（罰則の引用の改め忘れ）を実物の改め文と e-Gov の発射台で再現。唯一の未手当てがその箇所で、生成した手当ては 3 年後の訂正法と一字違わず同じ。Lean `Koshoku.lean`
 17. `Ident` に条の挿入（条ずれ、令和5年法律第53号）と参照の id 化。`checkUnit`（[ADR-0014](docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）
 18. その他: [TODO](docs/TODO.md)

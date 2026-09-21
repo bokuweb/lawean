@@ -15,8 +15,10 @@
 //! | `Taisho`（新旧対照表） | 本文の突き合わせ | 新旧対照表の「新」欄が溶け込み後の本文と違う（2021 年のデジタル改革関連法案の誤りの型） |
 //! | `CrossLaw`（他法令） | `lawean-space::impact` | 他法令からの参照切れ・ずれ |
 //!
-//! Lean との関係: `Consolidate` / `Conflict` / `Order` は Lean の `Ident.applyUnit` の Rust 写しで判定している。
-//! 同じデータを `lawean-lean` が Lean に出し、`lean/Lawean/Cases.lean` が `native_decide` で同じ結論を確かめる（docs/12）。
+//! Lean との関係: `Consolidate` / `Conflict` / `Order` の溶け込みは、Lean ランタイムがリンクされていれば
+//! **証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、Lean → C）で計算し、無ければ Rust の写しで計算する
+//! （`Report.engine` にどちらかを書く）。同じデータを `lawean-lean` が Lean に出し、`lean/Lawean/Cases.lean` が
+//! `native_decide` で同じ結論を確かめる（docs/12）。
 
 use lawean_amend::ident::{self, IdentOp, IdentRevision};
 use lawean_amend::{hane_candidates, parse_units, AmendUnit};
@@ -78,6 +80,24 @@ pub struct Report {
     pub diff: Vec<String>,
     /// 生成したハネの手当て（改め文の形。番号は改正前で、繰り下げの文より前に置く）。手当てが足りないときだけ
     pub suggested_fixes: Vec<String>,
+    /// 溶け込みを計算したもの: `"lean"`（証明した定義を C 経由で）か `"rust"`（写し）
+    pub engine: String,
+}
+
+/// Lean の `applyUnit`（リンクされていれば）か Rust の写し
+fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision> {
+    match lawean_leanrt::apply_unit(rev, ops) {
+        Ok(r) => r,
+        Err(_) => ident::apply_unit(rev, ops),
+    }
+}
+
+fn engine_name() -> &'static str {
+    if lawean_leanrt::available() {
+        "lean"
+    } else {
+        "rust"
+    }
 }
 
 impl Report {
@@ -216,7 +236,7 @@ pub fn run(input: &Input<'_>) -> Report {
         let amend_id = format!("unit{}", i + 1);
         match ident::bind(&cur_doc, unit, &amend_id) {
             Ok(b) => {
-                let next = ident::apply_unit(&cur_rev, &b.ops);
+                let next = apply_verified(&cur_rev, &b.ops);
                 match next {
                     Some(r) if r.has_conflict() => {
                         for (id, text, news) in r.conflicts() {
@@ -259,7 +279,7 @@ pub fn run(input: &Input<'_>) -> Report {
                 // 分類: 発射台そのものに当たるか、先行する単位の後でだけ当たらないか、後続の単位の後なら当たるか
                 if i > 0 {
                     if let Ok(b0) = ident::bind(input.base, unit, &amend_id) {
-                        match ident::apply_unit(&cur_rev, &b0.ops) {
+                        match apply_verified(&cur_rev, &b0.ops) {
                             Some(r) if r.has_conflict() => {
                                 for (id, text, news) in r.conflicts() {
                                     conflict_fail.push(format!(
@@ -549,6 +569,7 @@ pub fn run(input: &Input<'_>) -> Report {
         after: cur_rev.render(),
         diff,
         suggested_fixes,
+        engine: engine_name().into(),
     }
 }
 
@@ -781,6 +802,7 @@ pub fn run_texts(
                 after: vec![],
                 diff: vec![],
                 suggested_fixes: vec![],
+                engine: engine_name().into(),
             }
         }
     };
@@ -799,6 +821,7 @@ pub fn run_texts(
                 after: vec![],
                 diff: vec![],
                 suggested_fixes: vec![],
+                engine: engine_name().into(),
             }
         }
     };

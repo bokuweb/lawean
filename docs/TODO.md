@@ -35,7 +35,9 @@
 - [x] Rust `ident::apply_unit`（Lean の写し）と `apply_unit`（Source IR 版）と Lean の三者一致。Rust 側は `tests/ident_binding.rs`、Lean 側は `Consolidate.lean`。Lean → C 抽出で Rust の写しを不要にするのは未
 - [ ] 条の見出し・条名の変更は `render` に入っていない（`snapshot_main` と同じ。全部改正で見出しが変わるケースは検査できない）
 - [x] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（`lean/Lawean/Check.lean`: `checkUnit_iff`、`applyUnit_none_iff`）
-- [ ] WASM 化の経路: **Lean → C** を本線に決めた（[ADR-0015](adr/0015-service-architecture.md)、[ADR-0016](adr/0016-lean-as-semantic-backend.md)、[docs/10](10-lean-semantics.md) M4）。C 呼び出しができたら `ident::apply_unit` を消す
+- [x] Lean → C → Rust（ネイティブ）: `lawean-leanrt`（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）
+- [ ] Lean → C → WASM（Emscripten で `libleanrt` を組む）。できたら playground を Lean 経路にして `ident::apply_unit` を消す
+- [ ] `Sem.applies` / `haneFixes` / `impact` の `@[export]` 入口（今は `applyUnit` / `checkUnit` / 依存の 3 つ）
 - [ ] 証跡の形式（[ADR-0015](adr/0015-service-architecture.md) §5）: 発射台リビジョンのハッシュ、改正単位、結果のハッシュ、WASM のバージョン。ハッシュ対象の正規化を Rust / Lean / WASM で揃える
 - [ ] エディタの各判定に裏付けの定理名を添える（`applyUnit_comm` / `scheduleOk` 等）
 - [ ] Z3 の WASM ビルドで自法令内の性質検査をブラウザで閉じられるか測る。法令空間（他法令への波及）はサーバー側

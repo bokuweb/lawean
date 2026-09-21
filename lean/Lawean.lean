@@ -18,3 +18,4 @@ import Lawean.Space
 import Lawean.SpaceExamples
 import Lawean.Koshoku
 import Lawean.Check
+import Lawean.Ffi

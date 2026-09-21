@@ -21,6 +21,7 @@
 | [0013](0013-identity-patches.md) | 改正単位は identity で書く。独立なら可換（`applyUnit_comm`）、衝突は値、依存は半順序。CRDT は中核に採らない | accepted、Rust の束縛は未 |
 | [0014](0014-proofs-at-build-time-editor-runs-verified-code.md) | 証明は開発時に一度。エディタ（ブラウザ）は検証済み `applyUnit` を WASM で実行するだけ。証明用サーバーは置かない | accepted |
 | [0015](0015-service-architecture.md) | 省庁向けエディタはサービス。証明はブラウザで走る検証済み関数、サーバーはデータ・保存・協調編集のみ。証跡は決定性による再現記録。0011 の `consolidates` は開発時の回帰テスト | accepted |
+| [0017](0017-lean-to-c-is-the-runtime.md) | 動くコードは Lean の C 出力（`lawean-leanrt`）。Rust の写しは代役に格下げして消す。Verus / Dafny / Rocq との比較 | accepted、ネイティブ済み・WASM 未 |
 | [0016](0016-lean-as-semantic-backend.md) | 法令の意味も Lean に載せる。法令は Lean のデータ（深い埋め込み）、意味論は Lean の評価器 1 つ。Z3 は反例探索に併用。改正 × 意味の frame 定理を最初の目標に | accepted、M1・M2 済み |
 
 ## テンプレート

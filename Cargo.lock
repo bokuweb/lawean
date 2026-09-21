@@ -645,6 +645,7 @@ name = "lawean-check"
 version = "0.1.0"
 dependencies = [
  "lawean-amend",
+ "lawean-leanrt",
  "lawean-render",
  "lawean-resolve",
  "lawean-source",
@@ -673,6 +674,15 @@ dependencies = [
  "lawean-source",
  "lawean-verify",
  "thiserror",
+]
+
+[[package]]
+name = "lawean-leanrt"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "lawean-amend",
+ "lawean-source",
 ]
 
 [[package]]

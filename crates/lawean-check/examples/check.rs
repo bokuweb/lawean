@@ -70,7 +70,11 @@ fn main() {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
         return;
     }
-    println!("{}", if report.ok { "PASS" } else { "FAIL" });
+    println!(
+        "{} (engine: {})",
+        if report.ok { "PASS" } else { "FAIL" },
+        report.engine
+    );
     for u in &report.units {
         println!(
             "- {}: {} 文, {} 操作 → id 操作 {} 個",

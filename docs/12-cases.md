@@ -23,7 +23,7 @@
 | Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
 
-Order / Conflict / Consolidate は Lean の `Ident.applyUnit` の Rust 写しで判定している。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
+Order / Conflict / Consolidate の溶け込みは、Lean ランタイムがリンクされていれば**証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）で計算する（`Report.engine = "lean"`）。無ければ Rust の写し。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
 Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`RefsExamples.lean` が「生成した手当て = 令3-37 の実際の置換」を確かめる。
 
 ## 3. ケース
@@ -70,7 +70,7 @@ python3 -m http.server 8765   # リポジトリのルートで
 open http://127.0.0.1:8765/docs/playground/index.html
 ```
 
-[ADR-0015](adr/0015-service-architecture.md) の経路（Lean → C → WASM）ではなく、Rust の写し（`ident::apply_unit`）を wasm32 にしたもの。Lean との一致は `Consolidate.lean` / `Cases.lean` で担保している。
+playground の WASM は、[ADR-0015](adr/0015-service-architecture.md) の経路（Lean → C → WASM）ではなく Rust の写し（`ident::apply_unit`）を wasm32 にしたもの（`engine: "rust"`）。ネイティブの `lawean-check` は Lean の C 出力で動く（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）。WASM を Emscripten で Lean 経路にするのは次。
 
 ## 5. 実際に起きた失敗事例の収集と評価
 
