@@ -3,6 +3,8 @@
 pub mod check;
 pub mod consistency;
 pub mod smt;
+pub mod temporal;
+pub mod validity;
 
 pub use check::{check, model_value, run_z3, script, z3_available, CheckError, Property, Verdict};
 pub use consistency::{conflicts, Conflict, ConflictKind};

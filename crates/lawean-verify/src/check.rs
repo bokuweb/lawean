@@ -110,11 +110,29 @@ pub fn run_z3(src: &str) -> Result<Verdict, CheckError> {
 
 /// 反例モデルから、指定した変数の値を取り出す（表示用。雑なテキスト走査）
 pub fn model_value(model: &str, name: &str) -> Option<String> {
+    // z3 は `|` が要らない名前（t.y 等）は素のまま出す
     let key = format!("(define-fun |{name}|");
-    let i = model.find(&key)?;
-    let rest = &model[i + key.len()..];
-    // "() Int\n    480)" のような形。最後の閉じ括弧までを取る
-    let body = rest.split_once('\n')?.1;
-    let end = body.find(')')?;
-    Some(body[..end].trim().to_string())
+    let key2 = format!("(define-fun {name} ");
+    let (i, klen) = match model.find(&key) {
+        Some(i) => (i, key.len()),
+        None => (model.find(&key2)?, key2.len()),
+    };
+    let rest = &model[i + klen..];
+    // "() Int\n    480)" / "() Int 480)" / "() Int\n    (- 3))" のような形。型の後ろから、対応する閉じ括弧までを取る
+    let rest = rest.trim_start().strip_prefix("()")?.trim_start();
+    let rest = rest.split_once(|c: char| c.is_whitespace())?.1.trim_start();
+    let mut depth = 0i32;
+    for (j, c) in rest.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return Some(rest[..j].trim().to_string());
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
