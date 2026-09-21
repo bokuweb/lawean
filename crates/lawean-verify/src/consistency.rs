@@ -4,7 +4,8 @@
 //! 張り忘れると、Z3 が両方適用される世界を反例として出す。効果の帰結は主張しない（主張すると unsat になって見えない）。
 //!
 //! 見る組: `Void t` と `Preserve t`（無効 vs 効力を妨げない）、同じ属性への `Set` で値が違う、
-//! 同じ行為への `Obligation` と `Prohibition`。主体は述語名に畳まれているので、主体違いは別の対象として扱う（限界）。
+//! 同じ行為への `Obligation` と `Prohibition`、同じ行為への `Permission` / `Power` と `Prohibition`
+//! （「できる」とされる行為が禁止される）、同じ対象への `Deem` と `Void`。主体は述語名に畳まれているので、主体違いは別の対象として扱う（限界）。
 //!
 //! もう一つの問い（`vacuous`）: 例外を差し引いた後に、その Rule が適用される世界が**残っているか**。
 //! 「罰則の対象を定めたが、例外規定を考慮すると対象が存在しない」は applies(R) = 条件 ∧ ¬applies(例外) が unsat、
@@ -23,6 +24,10 @@ pub enum ConflictKind {
     SetVsSet { attribute: String },
     /// 同じ行為に義務と禁止
     ObligationVsProhibition { verb: String },
+    /// 同じ行為に「できる」（許容・権限）と禁止
+    PermissionVsProhibition { verb: String },
+    /// 同じ対象に「みなす」と「無効とする」
+    DeemVsVoid { target: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +71,23 @@ fn candidates(model: &SemanticModel) -> Vec<(RuleId, RuleId, ConflictKind)> {
                 {
                     Some(ConflictKind::ObligationVsProhibition {
                         verb: p.verb.clone(),
+                    })
+                }
+                (Effect::Permission(p), Effect::Prohibition(q))
+                | (Effect::Prohibition(q), Effect::Permission(p))
+                | (Effect::Power { action: p, .. }, Effect::Prohibition(q))
+                | (Effect::Prohibition(q), Effect::Power { action: p, .. })
+                    if p.verb == q.verb =>
+                {
+                    Some(ConflictKind::PermissionVsProhibition {
+                        verb: p.verb.clone(),
+                    })
+                }
+                (Effect::Deem(f), Effect::Void(t)) | (Effect::Void(t), Effect::Deem(f))
+                    if f.pred.name == target_name(t) =>
+                {
+                    Some(ConflictKind::DeemVsVoid {
+                        target: target_name(t),
                     })
                 }
                 _ => None,

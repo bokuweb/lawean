@@ -316,3 +316,48 @@ fn a_penalty_swallowed_by_its_exception_is_vacuous() {
         .unwrap();
     assert!((360..600).contains(&n), "反例の期間（月）: {n}");
 }
+
+/// 「できる」とされる行為が禁止される: 「借地権者は建物を再築することができる」と
+/// 「借地権者は建物を再築してはならない」を overrides 無しで並べると、両方が適用される世界がある
+#[test]
+fn a_permission_and_a_prohibition_of_the_same_act_conflict() {
+    need_z3!();
+    let mut m = shakuchi_shakuya::model();
+    m.rules.push(
+        rule("R-can")
+            .condition(pred("借地権者である").expr())
+            .effect(Effect::Permission(action("再築する")))
+            .provenance(
+                "403AC0000000090/main/chap:2/sec:1/art:7/para:1/sent:1",
+                Confidence::High,
+                "test",
+            ),
+    );
+    m.rules.push(
+        rule("R-must-not")
+            .condition(pred("承諾がない").expr())
+            .effect(Effect::Prohibition(action("再築する")))
+            .provenance(
+                "403AC0000000090/main/chap:2/sec:1/art:7/para:1/sent:2",
+                Confidence::High,
+                "test",
+            ),
+    );
+    let rm = ResolvedModel::new(&m);
+    let cs = conflicts(&rm).unwrap();
+    let c = cs.iter().find(|c| matches!(c.kind, ConflictKind::PermissionVsProhibition { ref verb } if verb == "再築する")).expect("組が挙がる");
+    assert!(
+        matches!(c.verdict, Verdict::Counterexample(_)),
+        "{:?}",
+        c.verdict
+    );
+    // 禁止の側に「第七条の規定にかかわらず」（overrides）を張れば、同時適用は消える
+    m.rules.last_mut().unwrap().overrides = vec![Override::Rule(RuleId("R-can".into()))];
+    let rm = ResolvedModel::new(&m);
+    let c2 = conflicts(&rm)
+        .unwrap()
+        .into_iter()
+        .find(|c| c.b.0 == "R-must-not")
+        .unwrap();
+    assert_eq!(c2.verdict, Verdict::Proved);
+}
