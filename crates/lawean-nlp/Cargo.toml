@@ -9,8 +9,8 @@ description = "Layer 1.5: subject / object / act of a sentence from GiNZA depend
 [dependencies]
 lawean-source = { path = "../lawean-source" }
 lawean-extract = { path = "../lawean-extract" }
-jewel-core = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.7", default-features = false, features = ["sudachi-tokenizer"] }
-jewel-yoyogi = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.7" }
+jewel-core = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.8", default-features = false, features = ["sudachi-tokenizer"] }
+jewel-yoyogi = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.8" }
 thiserror.workspace = true
 serde.workspace = true
 

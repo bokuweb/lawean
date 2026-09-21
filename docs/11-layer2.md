@@ -45,8 +45,8 @@
 - 空文・長すぎる文（4000 バイト超）・括弧だけの文は落とさず空を返す。決定的
 
 借地借家法の義務・禁止・可能・不能の文 73 のうち主述語の主語が取れたのは 48（66%）。残りは主語の無い文（ただし書、「〜することができる」の主体が文脈にあるもの）が大半。
-GiNZA の parser は文節の主辞に `_bunsetu` を付けた関係（`nsubj_bunsetu`）を出すが、jewel の抽出プロファイルには Python 側の `bunsetu_recognizer` が無いので、
-`lawean-nlp` で落としている。jewel 側にも `process_bunsetu` を足す PR を出した（bokuweb/jewel#23。README の export コマンドの numpy / Python の固定も）。
+GiNZA の parser は文節の主辞に `_bunsetu` を付けた関係（`nsubj_bunsetu`）を出すが、jewel の抽出プロファイルには Python 側の `bunsetu_recognizer` が無かった。
+jewel 0.0.8 の `process_bunsetu`（bokuweb/jewel#23）が素の UD の関係に戻して文節の主辞と境界を返すので、`lawean-nlp` はそれを使う。
 
 ## 3. 段階
 

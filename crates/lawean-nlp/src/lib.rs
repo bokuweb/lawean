@@ -8,7 +8,7 @@
 //! 出力は `lawean-extract::candidate::Candidate`（原文根拠つき）。値は確定しない。
 
 use jewel_core::{Bundle, Doc, StringStore, TokenData};
-use jewel_yoyogi::GinzaPipeline;
+use jewel_yoyogi::{BunsetuAnnotation, GinzaPipeline};
 use lawean_extract::candidate::{Candidate, Confidence, Field};
 use lawean_source::StableId;
 use std::path::Path;
@@ -34,9 +34,9 @@ pub struct Word {
     pub text: String,
     /// Sudachi の品詞（「名詞-普通名詞-一般」）。既知のものだけ
     pub tag: Option<&'static str>,
-    /// UD の関係（`nsubj` など）。既知のものだけ。`_bunsetu` は落としてある
+    /// UD の関係（`nsubj` など）。既知のものだけ
     pub dep: Option<&'static str>,
-    /// 文節の主辞（parser の `_bunsetu` 付きの関係だった）
+    /// 文節の主辞（jewel の `BunsetuAnnotation`）
     pub bunsetu_head: bool,
     pub head: usize,
     /// 文の本文の UTF-8 バイト範囲
@@ -135,21 +135,6 @@ fn name_of(table: &'static [&'static str], id: u64) -> Option<&'static str> {
     table.iter().copied().find(|s| StringStore::id(s) == id)
 }
 
-/// GiNZA の parser は文節の主辞に `_bunsetu` を付けた関係（`nsubj_bunsetu`）を出し、Python 側の
-/// `bunsetu_recognizer` がそれを落として文節境界に変える。jewel の抽出プロファイルはその部品を持たないので、
-/// ここで落とす（文節の主辞かどうかは `Word::bunsetu_head`）
-fn dep_of(id: u64) -> (Option<&'static str>, bool) {
-    if let Some(d) = name_of(DEPS, id) {
-        return (Some(d), false);
-    }
-    for d in DEPS {
-        if StringStore::id(&format!("{d}_bunsetu")) == id {
-            return (Some(d), true);
-        }
-    }
-    (None, false)
-}
-
 impl Parser {
     /// `JEWEL_GINZA_BUNDLE` から読む
     pub fn from_env() -> Result<Self, NlpError> {
@@ -171,14 +156,16 @@ impl Parser {
         })
     }
 
-    pub fn doc(&self, text: &str) -> Result<Doc, NlpError> {
-        Ok(self.pipeline.process(text)?)
+    /// 解析した文書と文節（GiNZA の `_bunsetu` 付きの関係は jewel 0.0.8 の `process_bunsetu` が
+    /// 素の UD の関係に戻し、文節の主辞と境界を返す）
+    pub fn doc(&self, text: &str) -> Result<(Doc, BunsetuAnnotation), NlpError> {
+        Ok(self.pipeline.process_bunsetu(text)?)
     }
 
     /// 係り受け木を文字列に戻したもの
     pub fn words(&self, text: &str) -> Result<Vec<Word>, NlpError> {
-        let doc = self.doc(text)?;
-        Ok(words_of(&doc, text))
+        let (doc, bunsetu) = self.doc(text)?;
+        Ok(words_of(&doc, text, &bunsetu))
     }
 }
 
@@ -239,19 +226,18 @@ fn byte_range(text: &str, t: &TokenData) -> (usize, usize) {
     (start, end)
 }
 
-pub fn words_of(doc: &Doc, text: &str) -> Vec<Word> {
+pub fn words_of(doc: &Doc, text: &str, bunsetu: &BunsetuAnnotation) -> Vec<Word> {
     doc.tokens()
         .iter()
         .enumerate()
         .map(|(i, t)| {
             let (start, end) = byte_range(text, t);
-            let (dep, bunsetu_head) = dep_of(t.dep);
             Word {
                 i,
                 text: t.text.to_string(),
                 tag: name_of(TAGS, t.tag),
-                dep,
-                bunsetu_head,
+                dep: name_of(DEPS, t.dep),
+                bunsetu_head: bunsetu.heads.get(i).copied().unwrap_or(false),
                 head: (i as i64 + t.head as i64).max(0) as usize,
                 start,
                 end,
