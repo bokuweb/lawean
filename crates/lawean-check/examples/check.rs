@@ -112,4 +112,10 @@ fn main() {
             println!("    {d}");
         }
     }
+    if !report.taisho_generated.is_empty() {
+        println!("新旧対照表（溶け込みから生成、--taisho に渡せる形式）:");
+        for l in &report.taisho_generated {
+            println!("    {l}");
+        }
+    }
 }

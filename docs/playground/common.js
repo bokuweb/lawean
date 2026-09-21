@@ -86,6 +86,9 @@ export function renderReport(r, ms, opts = {}) {
   h += '</ul>';
   if (r.suggested_fixes && r.suggested_fixes.length) h += `<details open><summary>生成したハネの手当て（この改め文を繰り下げの文より前に足す）</summary><pre>${esc(r.suggested_fixes.join('\n'))}</pre></details>`;
   if (opts.extra) h += opts.extra;
+  if (r.taisho_generated && r.taisho_generated.length) {
+    h += `<details><summary>溶け込みから生成した新旧対照表（${r.taisho_generated.length / 1 | 0} 行。添付資料に。転記ではなく溶け込みから出すので、新旧対照表の誤記は起きない）</summary><pre>${esc(r.taisho_generated.join('\n'))}</pre></details>`;
+  }
   if (r.diff.length) {
     h += `<details open><summary>発射台からの差分（${r.diff.length} 項）</summary><pre class="diff">` +
       r.diff.map(d => `<span class="${d.startsWith('追加') ? 'add' : d.startsWith('削除') ? 'del' : 'chg'}">${esc(d)}</span>`).join('\n') + '</pre></details>';

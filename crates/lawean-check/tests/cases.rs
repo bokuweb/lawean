@@ -246,3 +246,65 @@ fn drafting_with_own_suppl_provision() {
     );
     assert_eq!(r.status(Kind::Enforcement), Some(Status::Skip));
 }
+
+/// 溶け込みから生成した新旧対照表は、そのまま Taisho の検査を通る（転記ミスの余地が無い）。
+/// 令和3年法律第37号 第35条: 手で起こした fixtures/taisho と同じ項が挙がる
+#[test]
+fn generated_taisho_passes_the_taisho_check() {
+    let base = fixture("revisions/403AC0000000090_20210519_503AC0000000037.xml");
+    let amend = fixture("amendments/503AC0000000037_art35.txt");
+    let r = run_texts(&base, &amend, None, None, &[], None, None, None);
+    assert!(r.ok);
+    let generated = r.taisho_generated.join("\n");
+    assert!(
+        generated.contains(
+            "新 第三十八条第五項\u{3000}建物の賃貸人が第三項の規定による説明をしなかったときは"
+        ),
+        "{generated}"
+    );
+    assert!(
+        generated.contains(
+            "旧 第三十八条第三項\u{3000}建物の賃貸人が前項の規定による説明をしなかったときは"
+        ),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("新 第二十二条第二項\u{3000}前項前段の特約"),
+        "{generated}"
+    );
+    // 生成した表を新旧対照表として与えると通る
+    let r2 = run_texts(&base, &amend, None, Some(&generated), &[], None, None, None);
+    assert_eq!(
+        r2.status(Kind::Taisho),
+        Some(Status::Pass),
+        "{:?}",
+        r2.checks.iter().find(|c| c.kind == Kind::Taisho)
+    );
+    // 枝番の条（公職選挙法 令和3年法律第51号: 第百四十二条の四を引く第二百四十四条など）でも生成した表は通る
+    let base = fixture("revisions/325AC1000000100_20201212_502AC1000000045.xml");
+    let amend = fixture("amendments/503AC0000000051.txt");
+    let r3 = run_texts(&base, &amend, None, None, &[], None, None, None);
+    let g3 = r3.taisho_generated.join("\n");
+    assert!(g3.contains("新 第二百四十四条\u{3000}"), "{g3}");
+    let r4 = run_texts(&base, &amend, None, Some(&g3), &[], None, None, None);
+    assert_eq!(
+        r4.status(Kind::Taisho),
+        Some(Status::Pass),
+        "{:?}",
+        r4.checks.iter().find(|c| c.kind == Kind::Taisho)
+    );
+    // 手で起こした fixtures/taisho の行はすべて生成にも含まれる
+    let hand = fixture("taisho/503AC0000000037_art35.txt");
+    for line in hand
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+    {
+        let norm: String = line.split_whitespace().collect();
+        assert!(
+            r.taisho_generated
+                .iter()
+                .any(|g| g.split_whitespace().collect::<String>() == norm),
+            "hand line missing: {line}"
+        );
+    }
+}

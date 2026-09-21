@@ -84,6 +84,9 @@ pub struct Report {
     pub diff: Vec<String>,
     /// 生成したハネの手当て（改め文の形。番号は改正前で、繰り下げの文より前に置く）。手当てが足りないときだけ
     pub suggested_fixes: Vec<String>,
+    /// 溶け込みから生成した新旧対照表（`taisho` の形式: 1 行 1 項、「新 第三十八条第五項　本文」「旧 …」）。
+    /// 起草者が添付資料として使う。手で写す代わりにここから取れば、新旧対照表の転記ミス（2021 年の型）は起きない
+    pub taisho_generated: Vec<String>,
     /// 溶け込みを計算したもの: `"lean"`（証明した定義を C 経由で）か `"rust"`（写し）
     pub engine: String,
 }
@@ -601,8 +604,58 @@ pub fn run(input: &Input<'_>) -> Report {
         after: cur_rev.render(),
         diff,
         suggested_fixes,
+        taisho_generated: generate_taisho(&base_rev, &cur_rev),
         engine: engine_name().into(),
     }
+}
+
+/// 溶け込みの前後から新旧対照表を作る（`check_taisho` が読む形式。変わった項・増えた項・消えた項）
+pub fn generate_taisho(base: &IdentRevision, after: &IdentRevision) -> Vec<String> {
+    use lawean_resolve::numeral::to_kanji;
+    let label = |r: &IdentRevision, id: &str| -> Option<String> {
+        let n = r.nodes.iter().find(|x| x.id == id)?;
+        if n.art == ident::TOC_ID {
+            return None;
+        }
+        let art: String = n
+            .art
+            .split('_')
+            .filter_map(|x| x.parse::<u32>().ok())
+            .map(to_kanji)
+            .collect::<Vec<_>>()
+            .join("条の");
+        let p = r.para_num(id)?;
+        Some(if p == 1 {
+            format!("第{art}条")
+        } else {
+            format!("第{art}条第{}項", to_kanji(p as u32))
+        })
+    };
+    let mut out = Vec::new();
+    for n in &after.nodes {
+        match base.nodes.iter().find(|b| b.id == n.id) {
+            Some(b) if b.text == n.text => {}
+            Some(b) => {
+                if let (Some(new), Some(old)) = (label(after, &n.id), label(base, &b.id)) {
+                    out.push(format!("新 {new}\u{3000}{}", n.text));
+                    out.push(format!("旧 {old}\u{3000}{}", b.text));
+                }
+            }
+            None => {
+                if let Some(new) = label(after, &n.id) {
+                    out.push(format!("新 {new}\u{3000}{}", n.text));
+                }
+            }
+        }
+    }
+    for b in &base.nodes {
+        if !after.nodes.iter().any(|n| n.id == b.id) {
+            if let Some(old) = label(base, &b.id) {
+                out.push(format!("旧 {old}\u{3000}{}", b.text));
+            }
+        }
+    }
+    out
 }
 
 /// stable_id（`…/art:38/para:6`）から参照の字句「第三十八条第六項」を作る（他法令側の手当て）
@@ -793,21 +846,22 @@ pub fn check_taisho(
 /// 「第三十八条第五項」→ (38, 5)。項が無ければ第1項
 fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
     let rest = pos.strip_prefix('第')?;
-    let (art_k, rest) = rest.split_once('条')?;
+    let (art_k, mut rest) = rest.split_once('条')?;
     let base = lawean_resolve::numeral::kanji_to_u32(art_k)?;
+    // 枝番「第百四十二条の四」「第六十四条の三の二」
+    let mut branch = Vec::new();
+    while let Some(r) = rest.strip_prefix('の') {
+        let end = r.find('第').unwrap_or(r.len());
+        branch.push(lawean_resolve::numeral::kanji_to_u32(&r[..end])?);
+        rest = &r[end..];
+    }
     let para = if rest.is_empty() {
         1
     } else {
         let p = rest.strip_prefix('第')?.strip_suffix('項')?;
         lawean_resolve::numeral::kanji_to_u32(p)?
     };
-    Some((
-        ArticleNum::Single {
-            base,
-            branch: vec![],
-        },
-        para,
-    ))
+    Some((ArticleNum::Single { base, branch }, para))
 }
 
 /// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
@@ -1109,6 +1163,7 @@ pub fn run_texts(
                 after: vec![],
                 diff: vec![],
                 suggested_fixes: vec![],
+                taisho_generated: vec![],
                 engine: engine_name().into(),
             }
         }
@@ -1128,6 +1183,7 @@ pub fn run_texts(
                 after: vec![],
                 diff: vec![],
                 suggested_fixes: vec![],
+                taisho_generated: vec![],
                 engine: engine_name().into(),
             }
         }

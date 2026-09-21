@@ -20,7 +20,7 @@
 | Hane（ハネ） | 項の繰り下げでずれる参照に、**正しい番号への**手当てがあるか。無ければ**手当てを生成して改め文の形で出す**（`suggested_fixes`） | `hane_candidates`（`render_fix` で置換先を生成し、改め文の置換と突き合わせる） |
 | Consolidate | id の重複なし | `IdentRevision::wf` |
 | Expected | e-Gov の改正後リビジョンと本則が一致するか | `render` の比較 |
-| Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか | 位置 → 本文の突き合わせ |
+| Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか。逆に**溶け込みから新旧対照表を生成**もする（`Report.taisho_generated`。転記ではないので誤記が起きない。生成した表は必ず Taisho を通り、手で起こした fixtures/taisho と同じ項が挙がる） | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
 | Penalty（罰則） | 罰則が指す規定に罰則の行為が無い（空振り）。改正で生じたものが Fail | `lawean-extract::penalty`（[07](07-verification.md) 罰則） |
 | Enforcement（施行期日） | 施行日が改正法の附則第一条（「公布の日から起算して一年を超えない範囲内において政令で定める日」）の許容区間にあるか。単位ごとに号の範囲欄から引く | `lawean-extract::suppl` + 暦（[07](07-verification.md) 時間表現の抽出。Z3 の暦と一致することは `lawean-verify` のテスト） |
