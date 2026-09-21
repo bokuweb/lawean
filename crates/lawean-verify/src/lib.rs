@@ -8,5 +8,5 @@ pub mod temporal;
 pub mod validity;
 
 pub use check::{check, model_value, run_z3, script, z3_available, CheckError, Property, Verdict};
-pub use consistency::{conflicts, Conflict, ConflictKind};
+pub use consistency::{conflicts, vacuous, Conflict, ConflictKind, Vacuity};
 pub use smt::{months, pred_name, Compiler, Smt};

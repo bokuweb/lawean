@@ -243,3 +243,76 @@ fn a_preserve_rule_without_override_conflicts_with_art9() {
     let c = cs.iter().find(|c| c.b.0 == "R-draft").unwrap();
     assert_eq!(c.verdict, Verdict::Proved);
 }
+
+// ---------------------------------------------------------------- 空振り（例外を差し引くと対象が無い）
+
+/// 手書き IR の Rule はすべて、例外を差し引いても適用される世界が残る
+#[test]
+fn hand_written_model_has_no_vacuous_rule() {
+    need_z3!();
+    let m = shakuchi_shakuya::model();
+    let rm = ResolvedModel::new(&m);
+    for v in vacuous(&rm).unwrap() {
+        assert!(
+            matches!(v.verdict, Verdict::Counterexample(_)),
+            "{} は空振り（例外 {:?}）",
+            v.rule.0,
+            v.exceptions
+        );
+    }
+}
+
+/// 罰則の型: 「三十年以上の期間を定めた者は…に処する」に、「二十年以上の期間を定めた場合はこの限りでない」と
+/// いう例外を張ると、対象が存在しない（30 以上は必ず 20 以上）。Z3 は applies が unsat になることで見つける。
+/// 例外を「五十年以上」に直せば、30〜50 年の世界が残る
+#[test]
+fn a_penalty_swallowed_by_its_exception_is_vacuous() {
+    need_z3!();
+    let mut m = shakuchi_shakuya::model();
+    m.rules.push(
+        rule("R-pen")
+            .condition(cmp(var("契約で定めた期間"), CmpOp::Ge, y(30)))
+            .effect(Effect::Prohibition(action("期間を定める")))
+            .provenance(
+                "403AC0000000090/main/chap:2/sec:1/art:3/para:1/sent:1",
+                Confidence::High,
+                "test",
+            ),
+    );
+    m.rules.push(
+        rule("R-pen-ex")
+            .condition(cmp(var("契約で定めた期間"), CmpOp::Ge, y(20)))
+            .effect(Effect::Exception(RuleId("R-pen".into())))
+            .overrides(&["R-pen"])
+            .provenance(
+                "403AC0000000090/main/chap:2/sec:1/art:3/para:1/sent:2",
+                Confidence::High,
+                "test",
+            ),
+    );
+    let rm = ResolvedModel::new(&m);
+    let vs = vacuous(&rm).unwrap();
+    let v = vs.iter().find(|v| v.rule.0 == "R-pen").unwrap();
+    assert_eq!(v.exceptions, vec![RuleId("R-pen-ex".into())]);
+    assert_eq!(v.verdict, Verdict::Proved, "例外に飲まれて対象が無い");
+    // 他の Rule は空振りしない
+    assert!(vs
+        .iter()
+        .filter(|v| v.rule.0 != "R-pen")
+        .all(|v| matches!(v.verdict, Verdict::Counterexample(_))));
+
+    // 例外を五十年以上にすると 30〜50 年の対象が残る
+    m.rules.last_mut().unwrap().condition = cmp(var("契約で定めた期間"), CmpOp::Ge, y(50));
+    let rm = ResolvedModel::new(&m);
+    let vs = vacuous(&rm).unwrap();
+    let v = vs.iter().find(|v| v.rule.0 == "R-pen").unwrap();
+    let Verdict::Counterexample(model) = &v.verdict else {
+        panic!("{:?}", v.verdict)
+    };
+    let n: i64 = model_value(model, "a:契約で定めた期間")
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!((360..600).contains(&n), "反例の期間（月）: {n}");
+}
