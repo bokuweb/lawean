@@ -40,13 +40,13 @@ fn main() {
         .status()
         .expect("run lake");
     assert!(status.success(), "lake build Lawean:static failed");
-    let lib = lean_dir.join(".lake/build/lib");
+    let lawean_lib = lean_dir.join(".lake/build/lib");
     let toolchain_lib = PathBuf::from(&prefix).join("lib/lean");
     cc::Build::new()
         .file("csrc/shim.c")
         .include(PathBuf::from(&prefix).join("include"))
         .compile("lawean_shim");
-    println!("cargo:rustc-link-search=native={}", lib.display());
+    println!("cargo:rustc-link-search=native={}", lawean_lib.display());
     println!("cargo:rustc-link-lib=static=Lawean");
     println!("cargo:rustc-link-search=native={}", toolchain_lib.display());
     println!(
@@ -59,11 +59,23 @@ fn main() {
     println!("cargo:rustc-link-lib=static=leanrt");
     println!("cargo:rustc-link-lib=static=gmp");
     println!("cargo:rustc-link-lib=static=uv");
-    if cfg!(target_os = "macos") {
-        println!("cargo:rustc-link-lib=c++");
+    // Lean のランタイムは libc++ で組んである。Linux のツールチェーンは libc++ を同梱しているのでそれを静的に、
+    // macOS はシステムの libc++ を使う（leanc と同じ）
+    let lib = PathBuf::from(&prefix).join("lib");
+    if lib.join("libc++.a").exists() {
+        println!("cargo:rustc-link-lib=static=c++");
+        if lib.join("libc++abi.a").exists() {
+            println!("cargo:rustc-link-lib=static=c++abi");
+        }
+        if lib.join("libunwind.a").exists() {
+            println!("cargo:rustc-link-lib=static=unwind");
+        }
     } else {
-        println!("cargo:rustc-link-lib=stdc++");
+        println!("cargo:rustc-link-lib=c++");
+    }
+    if !cfg!(target_os = "macos") {
         println!("cargo:rustc-link-lib=pthread");
         println!("cargo:rustc-link-lib=m");
+        println!("cargo:rustc-link-lib=dl");
     }
 }
