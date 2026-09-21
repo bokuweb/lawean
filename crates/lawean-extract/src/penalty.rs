@@ -73,7 +73,7 @@ fn rules() -> &'static Rules {
     R.get_or_init(|| Rules {
         tail: Regex::new(r"(に処する|に処し、又はこれを併科する|に処し、又はこれらを併科する|を併科する|を科する)。?$").unwrap(),
         sanction: Regex::new(&format!(
-            r"(?:(?P<n>{N})(?P<u>年|月)以下の(?P<imp>懲役|禁錮|拘禁刑))|(?:(?P<yen>{N})円以下の(?P<fine>罰金|科料|過料))|(?P<bare>懲役|禁錮|拘禁刑|罰金|科料|過料)"
+            r"(?:(?P<n>{N})(?P<u>年|月|日)以下の(?P<imp>懲役|禁錮|拘禁刑|拘留))|(?:(?P<yen>{N})円以下の(?P<fine>罰金|科料|過料))|(?P<bare>懲役|禁錮|拘禁刑|拘留|罰金|科料|過料)"
         ))
         .unwrap(),
         violate: Regex::new(r"の規定に違反して、?(?P<act>[^。]*?)(?:者|とき|場合)").unwrap(),
@@ -116,7 +116,11 @@ pub fn parse_sanctions(text: &str) -> Option<(Vec<Sanction>, bool)> {
         let text = c.get(0).unwrap().as_str().to_string();
         if let Some(imp) = c.name("imp") {
             let n = lawean_resolve::numeral::kanji_to_u32(&c["n"]).map(|x| x as i64);
-            let max = n.map(|x| if &c["u"] == "年" { x * 12 } else { x });
+            // 年・月は月数、「三十日以下の拘留」は日数のまま
+            let max = n.map(|x| match &c["u"] {
+                "年" => x * 12,
+                _ => x,
+            });
             out.push(Sanction {
                 kind: SanctionKind::Imprisonment(imp.as_str().into()),
                 max,

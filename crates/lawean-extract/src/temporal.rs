@@ -158,6 +158,7 @@ fn dur(n: &str, u: &str) -> Dur {
 
 struct Rules {
     enforcement: Regex,
+    within_event: Regex,
     sanction_term: Regex,
     enforcement_clause: Regex,
     window: Regex,
@@ -186,19 +187,20 @@ fn rules() -> &'static Rules {
         sanction_term: re(r"{N}(?:年|月)以下の(?:懲役|禁錮|拘禁刑)"),
         enforcement_clause: re(&format!("^(?:この法律は、)?{ENF}(?:から施行する)?。?$")),
         window: re(r"(?P<ev>[^、。（）]{1,30}?)の(?P<n1>{N})(?P<u1>年|月|日)前から(?P<n2>{N})(?P<u2>年|月|日)前までの間"),
-        elapsed: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日から|の時から|から|の後|後)(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)を経過(?P<b>した日|した後|する日|する時|した時|した場合|する場合|することによって|したとき|すること|し)"),
-        within: re(r"(?:(?P<ev>[^、。（）]{1,40}?)(?:の後|後|から|の日から))?(?P<n>{N})(?P<u>年|月|日|週間)(?:以内|を超えない範囲内)"),
-        period: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日|)から(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?(?:（[^）]*）)?(?:存続する|とする|の間)"),
+        elapsed: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日から|の時から|から|の後、|後、|の後|後)(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)を経過(?P<b>した日|した後|する日|する時|した時|した場合|する場合|することによって|したとき|すること|し)"),
+        within: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:以内|を超えない範囲内)"),
+        within_event: re(r"(?P<ev>(?:[^、。（）]|（[^（）]*）){1,60}?)(?:の後|後|から|の日から)(?:起算して)?$"),
+        period: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日|)から(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)(?:間(?:（[^）]*）)?(?:存続する|とする|の間)?|(?:（[^）]*）)?(?:存続する|とする|の間))"),
         approx: re(r"(?P<ev>[^、。（）]{1,30}?)(?:の後|後)(?P<n>{N})(?P<u>年|月|日)(?:以内)?を目途"),
-        calendar: re(r"(?:(?P<pre>毎年|、|及び|又は|翌年の|の年の)(?P<m>{N})月(?:(?P<d>{N})日|末日)?)|(?:(?P<m2>{N})月(?:(?P<d2>{N})日|末日|の第{N}(?:日曜日|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日)))|(?:月の(?P<d3>{N})日)"),
+        calendar: re(r"(?:(?P<pre>毎年|、|及び|又は|翌年の|の年の)(?P<m>{N})月(?:(?P<d>{N})日|末日)?)|(?:(?P<pre2>から)(?P<m3>{N})月まで)|(?:(?P<m2>{N})月(?:(?P<d2>{N})日|末日|の第{N}(?:日曜日|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日)))|(?:月の(?P<d3>{N})日)"),
         era_date: re(r"(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?:(?P<m>{N})月(?:(?P<d>{N})日)?)?"),
         quoted: re(r"「{N}(?:年|月|日|週間)(?:間)?」"),
-        every: re(r"(?P<n>{N})(?P<u>年|月|日|週間)ごとに"),
+        every: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:ごとに|に{N}回(?:以上)?)"),
         nth_day: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の後|後|の日から|から)(?P<n>{N})(?P<u>日|月|年|週間)に当たる日"),
-        within_before: re(r"(?P<ev>[^、。（）]{1,40}?)の前(?P<n>{N})(?P<u>日|月|年|週間)以内"),
+        within_before: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の前|以前|前)(?P<n>{N})(?P<u>日|月|年|週間)以内"),
         duration_value: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?(?P<tail>とする|分|）|間)"),
-        before: re(r"(?:(?P<ev>[^、。（）]{1,30}?)(?:の|)(?P<n>{N})(?P<u>年|月|日|週間)前までに)|(?:(?:少なくとも)?(?P<n2>{N})(?P<u2>年|月|日|週間)前に)"),
-        compare: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?P<op>以上|以下|未満|を超えない|を超える|を超え|より長い|より短い|に満たない)"),
+        before: re(r"(?:(?P<ev>(?:[^、。（）]|（[^（）]*）){1,60}?)(?:より|の|)(?:少なくとも)?(?P<n>{N})(?P<u>年|月|日|週間)前までに)|(?:(?:(?P<ev2>[^、。（）]{1,30}?)(?:より|の))?(?:少なくとも)?(?P<n2>{N})(?P<u2>年|月|日|週間)前に)"),
+        compare: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?P<op>以上|以下|未満|を超えることができない|を超えない|を超える|を超え|より長い|より短い|に満たない|を下ることができない|を下つてはならない|を下ってはならない|を下回つてはならない|を下回ってはならない|を下回らない|を下らない)"),
         duration: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?"),
         rate: re(r"年{N}割|年{N}分|年{N}パーセント"),
         law_num: re(r"(?:明治|大正|昭和|平成|令和){N}年(?:法律|政令|勅令|省令|規則)第{N}号"),
@@ -223,6 +225,9 @@ fn clean_event(ev: &str) -> (String, usize) {
             "を",
             "に",
             "も",
+            "の",
+            "で",
+            "翌日以後",
         ] {
             if let Some(rest) = s.strip_prefix(pre) {
                 if !rest.is_empty() {
@@ -236,10 +241,33 @@ fn clean_event(ev: &str) -> (String, usize) {
             break;
         }
     }
+    // 「A にあっては B の日」は B が事象。「A 又は B の日」は両方が事象（「放棄又は申入れがあった日」）なので切らない
     let mut cut = 0;
-    for sep in ["又は", "若しくは", "にあっては", "においては", "については"] {
+    for sep in [
+        "又は同号に規定する",
+        "又は同項に規定する",
+        "又は同条に規定する",
+        "にあっては",
+        "においては",
+        "については",
+        "以内に",
+        "以内",
+        "者で",
+        "もので",
+        "法人で",
+        "）で",
+        "者若しくは",
+        "者又は",
+        "とき若しくは",
+        "とき又は",
+    ] {
         if let Some(i) = s.rfind(sep) {
-            cut = cut.max(i + sep.len());
+            let keep = if sep.starts_with("又は同") {
+                "又は".len()
+            } else {
+                sep.len()
+            };
+            cut = cut.max(i + keep);
         }
     }
     if cut > 0 && cut < s.len() {
@@ -299,6 +327,28 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
         .chain(r.sanction_term.find_iter(text))
     {
         taken.push((m.start(), m.end()));
+    }
+    // 読替え規定の「」の中は読替え先の字句。ここでは取らない
+    if text.contains("とあるのは") || text.contains("読み替える") {
+        let mut depth = 0usize;
+        let mut open = 0usize;
+        for (i, ch) in text.char_indices() {
+            match ch {
+                '「' => {
+                    if depth == 0 {
+                        open = i;
+                    }
+                    depth += 1;
+                }
+                '」' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        taken.push((open, i + ch.len_utf8()));
+                    }
+                }
+                _ => {}
+            }
+        }
     }
     let overlaps =
         |taken: &[(usize, usize)], s: usize, e: usize| taken.iter().any(|(a, b)| s < *b && *a < e);
@@ -396,13 +446,54 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             },
         );
     }
-    for c in r.within.captures_iter(text) {
+    for c in r.within_before.captures_iter(text) {
         let m = c.get(0).unwrap();
         let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
             m.start() + drop,
+            m.end(),
+            TimeKind::WithinBefore {
+                event,
+                dur: dur(&c["n"], &c["u"]),
+            },
+        );
+    }
+    // 「二週間以内にその請求の日から四週間以内」: 数詞の側から見つけ、事象はその直前の句（末尾が「から」「後」）
+    for c in r.within.captures_iter(text) {
+        let m = c.get(0).unwrap();
+        let (event, start) = match r.within_event.captures(&text[..m.start()]) {
+            Some(e) => {
+                let em = e.get(0).unwrap();
+                // 事象は左に長く取れるので、除外した範囲（法令番号など）を含んだら、その後ろから
+                let floor = taken
+                    .iter()
+                    .filter(|(a, b)| *a < m.start() && *b > em.start())
+                    .map(|(_, b)| *b)
+                    .max();
+                match floor {
+                    Some(f) if f > em.start() && f < m.start() => {
+                        match r.within_event.captures(&text[f..m.start()]) {
+                            Some(e2) => {
+                                let (event, drop) = clean_event(&e2["ev"]);
+                                (event, f + e2.get(0).unwrap().start() + drop)
+                            }
+                            None => (String::new(), m.start()),
+                        }
+                    }
+                    _ => {
+                        let (event, drop) = clean_event(&e["ev"]);
+                        (event, em.start() + drop)
+                    }
+                }
+            }
+            None => (String::new(), m.start()),
+        };
+        push(
+            &mut out,
+            &mut taken,
+            start,
             m.end(),
             TimeKind::Within {
                 event,
@@ -428,8 +519,30 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
     for c in r.before.captures_iter(text) {
         let m = c.get(0).unwrap();
         let (n, u, (event, drop)) = match c.name("n") {
-            Some(n) => (n.as_str(), &c["u"], ev(&c)),
-            None => (&c["n2"], &c["u2"], (String::new(), 0)),
+            Some(n) => {
+                // 事象は左に長く取れるので、除外した範囲（法令番号など）を含んだら、その後ろから
+                let e = c.name("ev").unwrap();
+                let floor = taken
+                    .iter()
+                    .filter(|(a, b)| *a < e.end() && *b > e.start())
+                    .map(|(_, b)| *b)
+                    .max()
+                    .filter(|f| *f > e.start() && *f < e.end());
+                match floor {
+                    Some(f) => {
+                        let (event, drop) = clean_event(&text[f..e.end()]);
+                        (n.as_str(), &c["u"], (event, f - m.start() + drop))
+                    }
+                    None => (n.as_str(), &c["u"], ev(&c)),
+                }
+            }
+            None => (
+                &c["n2"],
+                &c["u2"],
+                c.name("ev2")
+                    .map(|x| clean_event(x.as_str()))
+                    .unwrap_or_default(),
+            ),
         };
         push(
             &mut out,
@@ -475,20 +588,6 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             },
         );
     }
-    for c in r.within_before.captures_iter(text) {
-        let m = c.get(0).unwrap();
-        let (event, drop) = ev(&c);
-        push(
-            &mut out,
-            &mut taken,
-            m.start() + drop,
-            m.end(),
-            TimeKind::WithinBefore {
-                event,
-                dur: dur(&c["n"], &c["u"]),
-            },
-        );
-    }
     for c in r.every.captures_iter(text) {
         let m = c.get(0).unwrap();
         push(
@@ -499,36 +598,18 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             TimeKind::Every(dur(&c["n"], &c["u"])),
         );
     }
-    for c in r.calendar.captures_iter(text) {
-        let m = c.get(0).unwrap();
-        let month = c
-            .name("m")
-            .or(c.name("m2"))
-            .and_then(|x| kanji_to_u32(x.as_str()));
-        let day = c
-            .name("d")
-            .or(c.name("d2"))
-            .or(c.name("d3"))
-            .and_then(|x| kanji_to_u32(x.as_str()));
-        // 「、六月を経過」のように期間の途中に当たるものは除く: 直後が「を」「以」「間」なら期間
-        let after: String = text[m.end()..].chars().take(1).collect();
-        if matches!(after.as_str(), "を" | "以" | "間" | "前" | "後") {
-            continue;
-        }
-        let s0 = c.name("pre").map(|p| p.end()).unwrap_or(m.start());
-        push(
-            &mut out,
-            &mut taken,
-            s0,
-            m.end(),
-            TimeKind::Calendar { month, day },
-        );
-    }
     for c in r.compare.captures_iter(text) {
         let m = c.get(0).unwrap();
         let op = match &c["op"] {
-            "以上" => CmpOp::Ge,
-            "以下" | "を超えない" => CmpOp::Le,
+            "以上"
+            | "を下ることができない"
+            | "を下つてはならない"
+            | "を下ってはならない"
+            | "を下らない"
+            | "を下回つてはならない"
+            | "を下回ってはならない"
+            | "を下回らない" => CmpOp::Ge,
+            "以下" | "を超えない" | "を超えることができない" => CmpOp::Le,
             "未満" | "より短い" | "に満たない" => CmpOp::Lt,
             _ => CmpOp::Gt,
         };
@@ -551,6 +632,42 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             s0,
             e0,
             TimeKind::DurationValue(dur(&c["n"], &c["u"])),
+        );
+    }
+    for c in r.calendar.captures_iter(text) {
+        let m = c.get(0).unwrap();
+        let month = c
+            .name("m")
+            .or(c.name("m2"))
+            .or(c.name("m3"))
+            .and_then(|x| kanji_to_u32(x.as_str()));
+        let day = c
+            .name("d")
+            .or(c.name("d2"))
+            .or(c.name("d3"))
+            .and_then(|x| kanji_to_u32(x.as_str()));
+        // 「、六月を経過」のように期間の途中に当たるものは除く: 直後が「を」「以」「間」なら期間
+        let after: String = text[m.end()..].chars().take(1).collect();
+        if matches!(after.as_str(), "を" | "以" | "間" | "前" | "後") {
+            continue;
+        }
+        let s0 = c
+            .name("pre")
+            .or(c.name("pre2"))
+            .map(|p| p.end())
+            .unwrap_or(m.start());
+        let e0 = m.end()
+            - if text[s0..m.end()].ends_with("まで") {
+                "まで".len()
+            } else {
+                0
+            };
+        push(
+            &mut out,
+            &mut taken,
+            s0,
+            e0,
+            TimeKind::Calendar { month, day },
         );
     }
     for c in r.duration.captures_iter(text) {

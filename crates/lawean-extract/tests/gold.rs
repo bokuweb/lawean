@@ -30,18 +30,34 @@ fn run(gold_name: &str) -> (usize, Counts) {
     (gold.len(), r.total)
 }
 
+/// dev は完全一致。例外は既知の 1 件: 「暴力団員又は同号に規定する暴力団員でなくなった日」の「又は」が
+/// 号の選択肢か事象の並列かは規則では決まらない（係り受けが要る。docs/11 L1.5）
 #[test]
 fn dev_gold_matches_exactly() {
-    let (n, c) = run("dev_413AC0000000026");
-    assert!(n >= 50);
-    assert_eq!((c.fp, c.fn_), (0, 0), "{c:?}");
+    let mut total = Counts::default();
+    for g in [
+        "dev_413AC0000000026",
+        "dev_337AC0000000069",
+        "dev_425AC0000000061",
+        "dev_327AC1000000176",
+        "dev_323AC0000000138",
+        "dev_325AC0000000158",
+    ] {
+        let (n, c) = run(g);
+        assert!(n >= 15, "{g}: {n}");
+        total.tp += c.tp;
+        total.fp += c.fp;
+        total.fn_ += c.fn_;
+    }
+    assert!(total.tp >= 190, "{total:?}");
+    assert!(total.fp <= 1 && total.fn_ <= 1, "{total:?}");
 }
 
 #[test]
 fn eval_gold_stays_above_the_recorded_floor() {
     let mut total = Counts::default();
     for g in [
-        "eval_425AC0000000061",
+        "eval_323AC0000000201",
         "eval_504CO0000000187",
         "eval_504M60000010029",
     ] {
@@ -50,8 +66,9 @@ fn eval_gold_stays_above_the_recorded_floor() {
         total.fp += c.fp;
         total.fn_ += c.fn_;
     }
-    // 2026-09-22: tp 14 fp 2 fn 2（誤りは事象の句の境界 2 件）。下回ったら退行
-    assert!(total.tp + total.fn_ >= 16);
+    // 2026-09-22: 医師法（規則を直さずに測った）tp 26 fp 2 fn 2 → P 0.93 / R 0.93。
+    // 誤り: 「二年ごとの」（ごとに だけ）、「二十四時間以内」（時間の単位）、「平成元年法律第六十四号」（法令番号の除外が「元年」を見ない）
+    assert!(total.tp + total.fn_ >= 27);
     assert!(total.precision() >= 0.85, "{total:?}");
     assert!(total.recall() >= 0.85, "{total:?}");
 }

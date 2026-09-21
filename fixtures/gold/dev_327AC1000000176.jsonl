@@ -1,0 +1,60 @@
+{"sentence": "327AC1000000176/main/chap:2/art:11/para:1/sent:1", "expected": [{"field": "within", "raw": "その日（第一号の場合にあつては、その事実を知つた日）から三十日以内"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:3/para:2/sent:1", "expected": [{"field": "duration_value", "raw": "五年"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:4/para:2/item:6/sent:1", "expected": [{"field": "duration", "raw": "一年"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:2/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から五年を経過し"}, {"field": "within_before", "raw": "当該取消しに係る聴聞の期日及び場所の公示の日前六十日以内"}, {"field": "elapsed", "raw": "当該取消しの日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "当該届出の日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:4/sent:1", "expected": [{"field": "within_before", "raw": "前号の公示の日前六十日以内"}, {"field": "elapsed", "raw": "当該消滅又は届出の日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:5/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:6/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:7/sent:1", "expected": [{"field": "elapsed", "raw": "同号に規定する暴力団員でなくなつた日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:5/para:1/item:8/sent:1", "expected": [{"field": "within_before", "raw": "免許の申請前五年以内"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:9/para:1/sent:1", "expected": [{"field": "within", "raw": "三十日以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_10/para:3/sent:1", "expected": [{"field": "within", "raw": "当該事業年度の終了後三月以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_15/para:3/sent:1", "expected": [{"field": "before", "raw": "その期日の一週間前までに"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_15/para:4/sent:1", "expected": [{"field": "compare", "raw": "二週間を下回つてはならない"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_16/para:1/sent:1", "expected": [{"field": "before", "raw": "その三月前までに"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_3/para:2/item:2/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から起算して二年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_3/para:2/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から起算して二年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_3/para:2/item:4/sub1:2/sent:1", "expected": [{"field": "elapsed", "raw": "その解任の日から起算して二年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_4/para:2/sent:1", "expected": [{"field": "before", "raw": "変更しようとする日の二週間前までに"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:16_5/para:2/sent:1", "expected": [{"field": "before", "raw": "変更しようとする日の二週間前までに"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17/para:3/sent:1", "expected": [{"field": "within", "raw": "三年以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17_11/para:1/sent:1", "expected": [{"field": "within", "raw": "毎事業年度経過後三月以内"}, {"field": "duration_value", "raw": "五年"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17_4/para:1/item:1/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から二年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17_4/para:1/item:2/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から二年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17_6/para:1/sent:1", "expected": [{"field": "compare", "raw": "三年を下らない"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:17_8/para:1/sent:1", "expected": [{"field": "before", "raw": "変更しようとする日の二週間前までに"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:10/sent:1", "expected": [{"field": "elapsed", "raw": "当該登録が消除された日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から五年を経過し"}, {"field": "within_before", "raw": "当該取消しに係る聴聞の期日及び場所の公示の日前六十日以内"}, {"field": "elapsed", "raw": "当該取消しの日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "当該届出の日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:6/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:7/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:18/para:1/item:9/sent:1", "expected": [{"field": "elapsed", "raw": "その処分の日から五年を経過し"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:21/para:1/sent:1", "expected": [{"field": "within", "raw": "その日（第一号の場合にあつては、その事実を知つた日）から三十日以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:22_2/para:2/sent:1", "expected": [{"field": "within_before", "raw": "交付の申請前六月以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:22_2/para:2/sent:2", "expected": [{"field": "within", "raw": "試験に合格した日から一年以内"}]}
+{"sentence": "327AC1000000176/main/chap:3/art:22_2/para:3/sent:1", "expected": [{"field": "duration_value", "raw": "五年"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:25/para:6/sent:1", "expected": [{"field": "within", "raw": "第三条第一項の免許をした日から三月以内"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:25/para:7/sent:1", "expected": [{"field": "within", "raw": "前項の催告が到達した日から一月以内"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:28/para:1/sent:1", "expected": [{"field": "within", "raw": "法務省令・国土交通省令で定める日から二週間以内"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:28/para:2/sent:1", "expected": [{"field": "within", "raw": "二週間以内"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:30/para:2/sent:1", "expected": [{"field": "compare", "raw": "六月を下らない"}]}
+{"sentence": "327AC1000000176/main/chap:4/art:30/para:2/sent:2", "expected": [{"field": "elapsed", "raw": "営業保証金を取りもどすことができる事由が発生した時から十年を経過したとき"}]}
+{"sentence": "327AC1000000176/main/chap:5/sec:1/art:31_3/para:3/sent:1", "expected": [{"field": "within", "raw": "二週間以内"}]}
+{"sentence": "327AC1000000176/main/chap:5/sec:1/art:34_2/para:3/sent:1", "expected": [{"field": "compare", "raw": "三月を超えることができない"}]}
+{"sentence": "327AC1000000176/main/chap:5/sec:1/art:34_2/para:3/sent:2", "expected": [{"field": "duration_value", "raw": "三月"}]}
+{"sentence": "327AC1000000176/main/chap:5/sec:1/art:34_2/para:4/sent:2", "expected": [{"field": "compare", "raw": "三月を超えることができない"}]}
+{"sentence": "327AC1000000176/main/chap:5/sec:1/art:34_2/para:9/sent:1", "expected": [{"field": "every", "raw": "二週間に一回以上"}, {"field": "every", "raw": "一週間に一回以上"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:79/para:1/item:3/sent:1", "expected": [{"field": "penalty_target", "raw": "第十三条第一項"}, {"field": "penalty_act", "raw": "他人に宅地建物取引業を営ませた"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:79/para:1/sent:1", "expected": [{"field": "sanction", "raw": "三年以下の拘禁刑"}, {"field": "sanction", "raw": "三百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:79_2/para:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十七条"}, {"field": "penalty_act", "raw": "同条第一号に掲げる行為をした"}, {"field": "sanction", "raw": "二年以下の拘禁刑"}, {"field": "sanction", "raw": "三百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:80/para:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十七条"}, {"field": "penalty_act", "raw": "同条第二号に掲げる行為をした"}, {"field": "sanction", "raw": "一年以下の拘禁刑"}, {"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:80_2/para:1/sent:1", "expected": [{"field": "sanction", "raw": "一年以下の拘禁刑"}, {"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:81/para:1/item:2/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十七条"}, {"field": "penalty_act", "raw": "同条第三号に掲げる行為をした"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:81/para:1/sent:1", "expected": [{"field": "sanction", "raw": "六月以下の拘禁刑"}, {"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:82/para:1/item:4/sent:1", "expected": [{"field": "penalty_target", "raw": "第五十六条第一項"}, {"field": "penalty_act", "raw": "手付金等保証事業以外の事業を営んだ"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:82/para:1/item:5/sent:1", "expected": [{"field": "penalty_target", "raw": "第六十条"}, {"field": "penalty_act", "raw": "保証委託契約を締結した"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:82/para:1/item:7/sent:1", "expected": [{"field": "penalty_target", "raw": "第六十三条の三第二項において準用する第五十六条第一項"}, {"field": "penalty_act", "raw": "手付金等保管事業以外の事業を営んだ"}]}
+{"sentence": "327AC1000000176/main/chap:8/art:82/para:1/sent:1", "expected": [{"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "327AC1000000176/main/chap:2/art:3/para:1/sent:1", "expected": []}
+{"sentence": "327AC1000000176/main/chap:1/art:1/para:1/sent:1", "expected": []}
