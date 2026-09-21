@@ -155,7 +155,7 @@ pub fn vacuous(rm: &ResolvedModel<'_>) -> Result<Vec<Vacuity>, CheckError> {
         let verdict = run_z3(&vacuity_script(rm, &r.id))?;
         out.push(Vacuity {
             rule: r.id.clone(),
-            exceptions: rm.exceptions_of(&r.id).into_iter().cloned().collect(),
+            exceptions: rm.exceptions_of(&r.id).to_vec(),
             verdict,
         });
     }

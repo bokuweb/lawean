@@ -18,7 +18,7 @@ fn main() {
         }
     }
     let mut v: Vec<_> = n.into_iter().collect();
-    v.sort_by(|a, b| b.1.cmp(&a.1));
+    v.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
     println!("sentences {total}, with conditions {with_cond}, with overrides {with_over}");
     for (k, c) in v {
         println!("{c:5} {k}");
