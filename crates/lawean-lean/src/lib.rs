@@ -65,6 +65,46 @@ pub fn emit_revision(doc: &str, name: &str, rev: &IdentRevision) -> String {
     s
 }
 
+/// `def <name> : Bodies`（Refs.lean）。参照を id で持つ本文の列
+pub fn emit_bodies(doc: &str, name: &str, bodies: &[(String, lawean_amend::body::Body)]) -> String {
+    use lawean_amend::body::{Piece, RefForm};
+    let mut s = header(doc);
+    s = s.replace("import Lawean.Ident\n", "import Lawean.Refs\n");
+    writeln!(s, "def {name} : Bodies :=").unwrap();
+    for (i, (id, body)) in bodies.iter().enumerate() {
+        let open = if i == 0 { "[" } else { " " };
+        let close = if i + 1 == bodies.len() { " ]" } else { "," };
+        let pieces: Vec<String> = body
+            .iter()
+            .map(|p| match p {
+                Piece::Text(t) => format!(".text {}", lean_string(t)),
+                Piece::Ref { target, form } => format!(
+                    ".ref {} {}",
+                    lean_string(target),
+                    match form {
+                        RefForm::Absolute => ".absolute".to_string(),
+                        RefForm::AbsoluteArt => ".absoluteArt".to_string(),
+                        RefForm::Prev(k) => format!("(.prev {k})"),
+                        RefForm::Next => ".next".to_string(),
+                    }
+                ),
+            })
+            .collect();
+        writeln!(
+            s,
+            "  {open} ({}, [{}]){close}",
+            lean_string(id),
+            pieces.join(", ")
+        )
+        .unwrap();
+    }
+    if bodies.is_empty() {
+        writeln!(s, "  []").unwrap();
+    }
+    s.push_str("\nend Lawean.Data\n");
+    s
+}
+
 /// `def <name> : AmendUnit`
 pub fn emit_unit(doc: &str, name: &str, ops: &[IdentOp]) -> String {
     let mut s = header(doc);
@@ -181,6 +221,34 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         "505AC0000000063/derived",
     );
 
+    // 先行改正で加える本文の参照がずれる実例（docs/13 §2.1）: 令2-62 第2条（抜粋）を起草時の版に当て、
+    // 令3-37 を差分から起こして当て、加えた条の本文を id の参照で描き直す
+    let m0 = rev("414AC0000000078_20200624_502AC0000000062");
+    let m1 = rev("414AC0000000078_20220401_502AC0000000008");
+    let m2 = rev("414AC0000000078_20220401_502AC0000000062");
+    let u262 = parse_units(&read("amendments/502AC0000000062_art2_excerpt.txt"))
+        .unwrap()
+        .remove(0);
+    let x262 = bind(&m0, &u262, "502AC0000000062/art2").unwrap().ops;
+    let rm0 = from_document(&m0);
+    let rmx = lawean_amend::ident::apply_unit(&rm0, &x262).unwrap();
+    let b337 =
+        lawean_amend::ident::derive_unit(&rm0, &from_document(&m1), "503AC0000000037/derived");
+    let bodies262: Vec<(String, lawean_amend::body::Body)> = x262
+        .iter()
+        .flat_map(|op| op.creates())
+        .filter_map(|id| {
+            let n = rmx.nodes.iter().find(|n| n.id == id)?;
+            // 第178条と第180条第4項だけ（定理で使う 2 項。全部出すと大きい）
+            (n.art == "178" || n.art == "180").then(|| {
+                (
+                    id.to_string(),
+                    lawean_amend::body::body_of(&rmx, id, &n.text),
+                )
+            })
+        })
+        .collect();
+
     // 公職選挙法（実際に起きた改正漏れ、docs/12 §6）: 平成30年法律第75号の発射台と、令和3年法律第51号（誤りの訂正）の前後
     let k0 = rev("325AC1000000100_20180620_430AC0000000059");
     let k1 = rev("325AC1000000100_20201212_502AC1000000045");
@@ -195,6 +263,8 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let bk51 = bind(&k1, &uk51, "503AC0000000051").unwrap();
 
     let revs = [
+        ("Rev_414AC0000000078_draft_r2_62", "rev_414AC0000000078_draft_r2_62", "マンション建替え円滑化法 `414AC0000000078_20200624_502AC0000000062`（令2-62 第2条の起草時の版）に第2条（抜粋）を当てたもの（改正法が振った id つき）", rmx.clone()),
+        ("Rev_414AC0000000078_20220401", "rev_414AC0000000078_20220401", "マンション建替え円滑化法 `414AC0000000078_20220401_502AC0000000062`（令2-62 第2条の施行後 = 令3-37 附則第63条の手当ての後）", from_document(&m2)),
         ("Rev_324AC0000000108_20220617", "rev_324AC0000000108_20220617", "古物営業法 `324AC0000000108_20220617_504AC0000000068`（令和4年法律第68号の公布時 = 第98条の起草時の発射台）", from_document(&g0)),
         ("Rev_324AC0000000108_20250601", "rev_324AC0000000108_20250601", "古物営業法 `324AC0000000108_20250601_504AC0000000068`（令4-68 第98条の施行後。間に令5-79 が 2024-04-01 に施行されている）", from_document(&g2)),
         ("Rev_325AC1000000100_20180620", "rev_325AC1000000100_20180620", "公職選挙法 `325AC1000000100_20180620_430AC0000000059`（平成30年法律第75号の発射台。本則 1164 項）", from_document(&k0)),
@@ -207,6 +277,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Rev_403AC0000000090_20280613", "rev_403AC0000000090_20280613", "借地借家法 `403AC0000000090_20280613_505AC0000000053`（令和5年法律第53号 第125条の施行後。未施行）", from_document(&r4)),
     ];
     let units = [
+        ("Unit_derived_414AC0000000078_20220401", "unit_derived_414AC0000000078_20220401", "先行改正（令3-37。2021-09-01 施行、第28条に 2 項を挿入し第124条第3項を書き換え）を 2020-06-24 版と 2022-04-01 版（令2-62 第2条の直前）の差から起こした id の操作列（docs/13 §2.1）", b337),
         ("Unit_504AC0000000068_art98", "unit_504AC0000000068_art98", "刑法等一部改正法整備法（令和4年法律第68号）第98条（古物営業法、`fixtures/amendments/504AC0000000068_5laws.txt`）を公布時の版 `rev_324AC0000000108_20220617` に束縛したもの", b98.ops),
         ("Unit_derived_324AC0000000108_20240401", "unit_derived_324AC0000000108_20240401", "先行改正（令和5年法律第79号、2024-04-01 施行）を、改め文ではなく 2022-06-17 版と 2024-04-01 版の差から起こした id の操作列（`ident::derive_unit`）。\n令4-68 より後に公布され先に施行された = 公布順と施行順が逆の実例（docs/13）", derived),
         ("Unit_430AC0100000075", "unit_430AC0100000075", "公職選挙法の一部を改正する法律（平成30年法律第75号、参議院の特定枠）を `rev_325AC1000000100_20180620` に束縛したもの（34 文のうち 32 文。入れ子の読替え規定の書き換えと別表を除く）。\n第142条の4に第4項を挿入し第6項を第7項に繰り下げたが、第244条第1項第2号の2の「第百四十二条の四第六項」を改めておらず、罰則が消えた（実際に起きた改正漏れ。docs/12 §6）", bk75.ops),
@@ -222,6 +293,14 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Unit_case_conflict_22_B", "unit_case_conflict_22_B", "同 第二条: 「書面によって」を「書面（電磁的記録を含む。）によって」に。同じ発射台に束縛。A の後に当てると期待した本文と違うので衝突として残る", bcb.ops),
     ];
     let mut out = Vec::new();
+    out.push((
+        "Bodies_502AC0000000062_art2.lean".to_string(),
+        emit_bodies(
+            "令2-62 第2条が加える第178条・第180条の本文を、起草時の版に当てたリビジョンで id の参照にしたもの（`body::body_of`）。\n「第二十八条第五項」「第四項」「第六項」は第28条の項の id を指す",
+            "bodies_502AC0000000062_art2",
+            &bodies262,
+        ),
+    ));
     for (file, name, doc, r) in &revs {
         out.push((format!("{file}.lean"), emit_revision(doc, name, r)));
     }

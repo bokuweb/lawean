@@ -15,7 +15,8 @@
 //! X が触る項が交わらなければ**独立** = 順序を入れ替えても同じ結果（Lean `applyUnit_comm`）。交われば調整規定が要る。
 //! 加える本文の中の参照は、起草時の版で指す項の本文を施行時の版で探し、番号が違えば手当てを生成する。
 
-use lawean_amend::ident::{bind, IdentOp};
+use lawean_amend::body::{body_of, changed_refs, Body};
+use lawean_amend::ident::{apply_unit as apply_ident, bind, derive_unit, from_document, IdentOp};
 use lawean_amend::{para_text, AmendUnit, Op};
 use lawean_resolve::numeral::to_kanji;
 use lawean_resolve::{find_references, RefKind};
@@ -302,7 +303,42 @@ pub fn check_unit(
         }
     }
 
-    // 2. X が加える本文・置換先の中の参照
+    // 2. X が加える本文の中の自法令への参照を id で持ち、先行改正を当てた後で描き直す（Refs.lean の写し）。
+    //    描画が変わった参照が手当て。B は改め文が無くても 2 つの版の差から id の操作列にできる（derive_unit）
+    let mut id_fixed: Vec<String> = Vec::new(); // id で手当てした参照（下の字面の突き合わせで重複して出さない）
+    if let Ok(bx) = &bd {
+        let rd = from_document(base_draft);
+        if let Some(rx) = apply_ident(&rd, &bx.ops) {
+            let b = derive_unit(&rd, &from_document(base), "intervening");
+            if let Some(rxb) = apply_ident(&rx, &b) {
+                let bodies: Vec<(String, Body)> = bx
+                    .ops
+                    .iter()
+                    .flat_map(|op| op.creates())
+                    .filter_map(|id| {
+                        let n = rx.nodes.iter().find(|n| n.id == id)?;
+                        Some((id.to_string(), body_of(&rx, id, &n.text)))
+                    })
+                    .collect();
+                for (id, before, after) in changed_refs(&rx, &rxb, &bodies) {
+                    let art = rx
+                        .nodes
+                        .iter()
+                        .find(|n| n.id == id)
+                        .map(|n| lawean_amend::article_label(&ArticleNum::parse(&n.art)))
+                        .unwrap_or_default();
+                    o.fails.push(format!(
+                        "{label}: X が加える{art}の本文の「{before}」は、先行改正を当てた後は「{after}」を指すべき項（参照を id で持って描き直した。Refs.lean renderBody）。手当て: 「{before}」→「{after}」"
+                    ));
+                    o.fixes
+                        .push(format!("{art}中「{before}」を「{after}」に改める。"));
+                    id_fixed.push(format!("{art}|{before}"));
+                }
+            }
+        }
+    }
+
+    // 3. 他法令への参照と、置換先の中の参照は字面で: 起草時の項の本文を施行時の版で探す
     let external = |law: &str| -> Option<(LegalDocument, LegalDocument)> {
         let id = space?.resolve_name(law)?;
         let e = space?.get(id)?.clone();
@@ -393,6 +429,12 @@ pub fn check_unit(
                         continue;
                     };
                     let law_label = law.clone().unwrap_or_default();
+                    if law.is_none()
+                        && where_.is_empty()
+                        && id_fixed.iter().any(|k| k == &format!("{here}|{}", r.text))
+                    {
+                        continue;
+                    }
                     let text_changed = |np: u32| {
                         let enf_id = m
                             .changed

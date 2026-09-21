@@ -1,6 +1,7 @@
 //! 改正 — 改め文を操作に分解し、Source IR のリビジョンに適用し、発射台とハネを検査する（docs/08-amendment.md）。
 
 pub mod apply;
+pub mod body;
 pub mod hane;
 pub mod ident;
 pub mod numbering;

@@ -22,7 +22,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で検出する。実データは高齢者居住安定確保法・借地借家法施行令 | 実装（Lean は未） |
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
-| [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を、起草時と施行時の版から生成して再現。独立なら可換（Lean `applyUnit_comm`、`Pending.lean` で実データ） | 実装 |
+| [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を再現。可換性（`applyUnit_comm`）で順序は消えるが正しさは出ない → **参照を id で持つ**（`Refs.lean` / `lawean-amend::body`）と描き直しが e-Gov の本文と一致する（Lean で実データ） | 実装 |
 | [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 18 件（通る）と、失敗例 15 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
 | [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。実例のケース集と、[発射台を選んで改正法を書いて検査する](docs/playground/draft.html) 画面（Z3 もブラウザ内）。公開: https://bokuweb.github.io/lawean/ | — |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |

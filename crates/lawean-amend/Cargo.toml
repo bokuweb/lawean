@@ -16,3 +16,4 @@ thiserror.workspace = true
 lawean-render = { path = "../lawean-render" }
 lawean-semantic = { path = "../lawean-semantic" }
 lawean-extract = { path = "../lawean-extract" }
+serde_json.workspace = true
