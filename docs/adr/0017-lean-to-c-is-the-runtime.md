@@ -1,6 +1,6 @@
 # 0017. 動くコードは Lean の C 出力。Rust の写しは消す。構成の比較（Verus / Dafny / Rocq）
 
-状態: accepted（2026-09-21）。ネイティブは実装済み（`crates/lawean-leanrt`）、WASM は未
+状態: accepted（2026-09-21）。ネイティブ（`crates/lawean-leanrt`）と WASM（`docs/playground/build-lean-wasm.sh` → `docs/playground/lean/`）とも実装済み。Rust の写しは代役として残っている（下の「結果」）
 
 ## 文脈
 
@@ -32,7 +32,8 @@
 2. **`lawean-check` は Lean がリンクされていればそれを使う**（`Report.engine = "lean"`）。無ければ Rust の写し（`"rust"`）。
    写しは「Lean が無い環境の代役」と「一致テストの相手」に格下げし、WASM が Lean 経路になった時点で消す
 3. **入出力は行形式**（`id<TAB>art<TAB>text`）。`para_text` が空白を除くので本文にタブ・改行は無い。JSON にして `Lean` パッケージに依存しない
-4. **WASM は Emscripten で Lean の C 出力をビルドする**のが次（ADR-0015 §表）。それまでの playground は Rust の写し（`Report.engine = "rust"`）
+4. **WASM は Emscripten で Lean の C 出力をビルドする**。Lean の GitHub release にある wasm32 版ツールチェーン（`lean-<ver>-linux_wasm32.zip`、`libInit.a` / `libleanrt.a`）とリンクし、同梱されていない libuv の 4 関数はスタブにする（純粋関数は呼ばない）。
+   playground は Rust の WASM（パース・束縛・ハネ・他法令）と Lean の WASM（溶け込み）の 2 モジュールで、Rust 側は `globalThis` の関数越しに Lean を呼ぶ（`lawean-leanrt` の `lean_js`）。`Report.engine = "lean"`
 5. Verus は「Rust に残る部分（束縛 `bind`、パーサ）の検証」に将来使う候補として残す。Lean で書くには IO 寄りすぎる部分
 
 ## 理由
@@ -46,7 +47,8 @@
 - ビルドに Lean が要る。`build.rs` が `lake build Lawean:static` を呼ぶ。無ければ `no_lean` で組み、`lawean-leanrt` は `Err(Unavailable)` を返す。CI の rust ジョブにも Lean を入れた
 - 静的ライブラリには `Data/`（実リビジョン）も入る（4.5MB）。`Lawean.Ffi` は `Ident` / `Check` / `Refs` しか import しないので初期化はそこまで
 - Lean のランタイムは Rust のスレッドを知らない。呼ぶスレッドごとに `lean_initialize_thread` が要る（やらないと落ちる。実際に落ちた）
-- WASM は未。Emscripten で `libleanrt` を組む作業が要る。それまで playground と Lean は別のコード
+- Rust の写し（`ident::apply_unit`）はまだ残っている: Lean が無い環境の代役、一致テストの相手、`id_map` 等の内部利用。消すには `IdentOp` / `IdentRevision` の型を別 crate に出して `lawean-leanrt` の依存の向きを直す必要がある（TODO）
+- WASM の Lean モジュールは 1.1MB（Rust 側 1.4MB と別）。ブラウザでの `applyUnit` は借地借家法で数 ms
 
 ## 関連
 

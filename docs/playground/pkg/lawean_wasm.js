@@ -20,6 +20,17 @@ export function check(input_json) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_lawean_lean_apply_unit_4fe3c5d438647114: function(arg0, arg1, arg2, arg3, arg4) {
+            const ret = lawean_lean_apply_unit(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg_lawean_lean_available_17694e11e9f6250e: function() {
+            const ret = lawean_lean_available();
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
@@ -34,6 +45,14 @@ function __wbg_get_imports() {
         __proto__: null,
         "./lawean_wasm_bg.js": import0,
     };
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -119,6 +138,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedDataViewMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

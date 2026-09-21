@@ -32,6 +32,10 @@
 5. **評価器は実行時にも使う。** 「条件充足の判定」（[00](../00-overview.md) の Rust evaluator）は Lean の評価器を Lean → C で動かす。Rust に写しを書かない（[ADR-0014](0014-proofs-at-build-time-editor-runs-verified-code.md) の経路 1、[ADR-0015](0015-service-architecture.md) の表）。
    性質の**定理**（`Properties.lean`）は [ADR-0015](0015-service-architecture.md) §6 の `consolidates` と同じく開発時の検証で、担当者の改正案ごとに作るものではない。担当者に返るのは評価器と Z3 の値
 
+## 位置づけ（2026-09-21 追記）
+
+内容の性質の定理は「法令が正しい」ことの証明ではない（[00](../00-overview.md)「何を「証明」と呼ぶか」）。性質は人が書き、形式化は解釈であり、結果は起案者向けの検討資料である。本線は改正の検証で、内容の側は改正 × 意味の frame 定理（影響分析）に価値がある。
+
 ## 理由
 
 なぜ浅い埋め込み（条を Lean のコードにする、Catala → Coq の流儀）にしないか:

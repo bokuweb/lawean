@@ -36,7 +36,8 @@
 - [ ] 条の見出し・条名の変更は `render` に入っていない（`snapshot_main` と同じ。全部改正で見出しが変わるケースは検査できない）
 - [x] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（`lean/Lawean/Check.lean`: `checkUnit_iff`、`applyUnit_none_iff`）
 - [x] Lean → C → Rust（ネイティブ）: `lawean-leanrt`（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）
-- [ ] Lean → C → WASM（Emscripten で `libleanrt` を組む）。できたら playground を Lean 経路にして `ident::apply_unit` を消す
+- [x] Lean → C → WASM（`docs/playground/build-lean-wasm.sh`。Lean の wasm32 版ツールチェーン + libuv スタブ）。playground は Lean 経路
+- [ ] `ident::apply_unit`（Rust の写し）を消す: `IdentOp` / `IdentRevision` を型だけの crate に出し、`id_map` 等も `lawean-leanrt` 経由にする。Lean が無い環境（CI の一部）の代役をどうするかも決める
 - [ ] `Sem.applies` / `haneFixes` / `impact` の `@[export]` 入口（今は `applyUnit` / `checkUnit` / 依存の 3 つ）
 - [ ] 証跡の形式（[ADR-0015](adr/0015-service-architecture.md) §5）: 発射台リビジョンのハッシュ、改正単位、結果のハッシュ、WASM のバージョン。ハッシュ対象の正規化を Rust / Lean / WASM で揃える
 - [ ] エディタの各判定に裏付けの定理名を添える（`applyUnit_comm` / `scheduleOk` 等）

@@ -12,9 +12,14 @@ fn main() {
     println!("cargo:rerun-if-changed=../../lean/Lawean/Ident.lean");
     println!("cargo:rerun-if-changed=../../lean/Lawean/Check.lean");
     println!("cargo::rustc-check-cfg=cfg(no_lean)");
+    println!("cargo::rustc-check-cfg=cfg(lean_js)");
     let target = std::env::var("TARGET").unwrap_or_default();
-    if std::env::var("LAWEAN_NO_LEAN").is_ok() || target.starts_with("wasm32") {
-        // wasm32 は Lean → C → Emscripten の経路がまだ無いので Rust の写しで動く（docs/12 §4）
+    if target.starts_with("wasm32") {
+        // wasm32: Lean の C 出力を Emscripten で組んだ別モジュール（docs/playground/lean/）を JS 越しに呼ぶ
+        println!("cargo:rustc-cfg=lean_js");
+        return;
+    }
+    if std::env::var("LAWEAN_NO_LEAN").is_ok() {
         println!("cargo:rustc-cfg=no_lean");
         return;
     }

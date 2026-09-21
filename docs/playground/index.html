@@ -48,7 +48,7 @@
 <body>
 <header>
   <h1>改正案の検査 playground</h1>
-  <span class="sub">実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> を WASM にしたもの（Lean の <code>applyUnit</code> の写し）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
+  <span class="sub">実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> の WASM。溶け込みは <b>Lean の C 出力を WASM にした証明済みの <code>applyUnit</code></b> で計算する（ADR-0017）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
 </header>
 <main>
   <section class="left">
@@ -89,6 +89,30 @@
 </main>
 <script type="module">
 import init, { check } from './pkg/lawean_wasm.js';
+import createLean from './lean/lawean_lean.js';
+
+// 溶け込みは Lean の C 出力を Emscripten で組んだ WASM（証明した applyUnit そのもの、ADR-0017）で計算する。
+// Rust 側（lawean-leanrt）は globalThis のこの 4 つを呼ぶ。読み込めなければ Rust の写しに戻る（Report.engine で分かる）
+let leanEngine = null;
+async function loadLean() {
+  try {
+    const M = await createLean();
+    const rc = M.cwrap('lawean_leanrt_init', 'number', [])();
+    if (rc !== 0) throw new Error('lean init failed: ' + rc);
+    const wrap = (name) => {
+      const f = M.cwrap(name, 'number', ['string', 'string']);
+      const free = M.cwrap('lawean_leanrt_free', null, ['number']);
+      return (a, b) => { const p = f(a, b); const s = M.UTF8ToString(p); free(p); return s; };
+    };
+    leanEngine = { apply: wrap('lawean_leanrt_apply_unit'), check: wrap('lawean_leanrt_check_unit'), relation: wrap('lawean_leanrt_relation') };
+  } catch (e) {
+    console.warn('Lean wasm not available, falling back to the Rust mirror', e);
+  }
+  globalThis.lawean_lean_available = () => leanEngine !== null;
+  globalThis.lawean_lean_apply_unit = (rev, unit) => leanEngine.apply(rev, unit);
+  globalThis.lawean_lean_check_unit = (rev, unit) => leanEngine.check(rev, unit);
+  globalThis.lawean_lean_relation = (a, b) => leanEngine.relation(a, b);
+}
 
 const FIX = '../../fixtures/';
 const REVISIONS = [
@@ -179,7 +203,8 @@ function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt
 function render(r, ms) {
   if (r.error) { $('report').innerHTML = `<pre>${esc(r.error)}</pre>`; return; }
   const expect = current ? (r.ok === current.expect.ok && JSON.stringify(r.checks.filter(c => c.status === 'fail').map(c => c.kind)) === JSON.stringify(current.expect.fail)) : null;
-  let h = `<p class="verdict ${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'} <span class="status">${ms.toFixed(0)} ms${expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）'}</span></p>`;
+  const engine = r.engine === 'lean' ? '溶け込み: Lean（証明した applyUnit の WASM）' : '溶け込み: Rust の写し';
+  let h = `<p class="verdict ${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'} <span class="status">${ms.toFixed(0)} ms・${engine}${expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）'}</span></p>`;
   h += '<ul class="checks">';
   for (const c of r.checks) {
     const mark = { pass:'✓', fail:'✗', warn:'!', skip:'–' }[c.status];
@@ -203,6 +228,7 @@ function render(r, ms) {
 
 (async () => {
   await init();
+  await loadLean();
   fill($('base'), REVISIONS, false);
   fill($('expected'), REVISIONS, true);
   fill($('laws'), LAWS, false);

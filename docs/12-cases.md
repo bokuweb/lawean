@@ -70,7 +70,11 @@ python3 -m http.server 8765   # リポジトリのルートで
 open http://127.0.0.1:8765/docs/playground/index.html
 ```
 
-playground の WASM は、[ADR-0015](adr/0015-service-architecture.md) の経路（Lean → C → WASM）ではなく Rust の写し（`ident::apply_unit`）を wasm32 にしたもの（`engine: "rust"`）。ネイティブの `lawean-check` は Lean の C 出力で動く（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）。WASM を Emscripten で Lean 経路にするのは次。
+playground は 2 つの WASM で動く: Rust の `lawean-check`（パース・束縛・ハネ・他法令、1.4MB）と、**Lean の C 出力を Emscripten で組んだ証明済み `applyUnit`**（`docs/playground/lean/`、1.1MB、[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）。溶け込み・順序・衝突は後者で計算する（画面に「溶け込み: Lean」と出る）。Lean の WASM が読めなければ Rust の写しに戻る。
+
+```sh
+./docs/playground/build-lean-wasm.sh   # emcc と gh が要る。Lean の wasm32 版ツールチェーンを初回に取ってくる
+```
 
 ## 5. 実際に起きた失敗事例の収集と評価
 

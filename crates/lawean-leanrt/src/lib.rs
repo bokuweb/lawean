@@ -74,12 +74,51 @@ pub fn decode_revision(s: &str) -> IdentRevision {
     }
 }
 
-/// Lean ランタイムがリンクされているか
+/// Lean の `applyUnit` が呼べるか（ネイティブ: リンク済み。wasm32: ページが Lean の WASM を用意しているか）
 pub fn available() -> bool {
-    !cfg!(no_lean)
+    #[cfg(lean_js)]
+    {
+        ffi::js_available()
+    }
+    #[cfg(not(lean_js))]
+    {
+        !cfg!(no_lean)
+    }
 }
 
-#[cfg(not(no_lean))]
+/// wasm32: ページ側が `globalThis` に置く関数を呼ぶ（`docs/playground/index.html`）。
+/// Lean の C 出力を Emscripten で組んだモジュール（`build-lean-wasm.sh`）がその実体
+#[cfg(lean_js)]
+mod ffi {
+    use wasm_bindgen::prelude::*;
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_name = lawean_lean_available)]
+        fn lawean_lean_available() -> bool;
+        #[wasm_bindgen(js_name = lawean_lean_apply_unit)]
+        fn lawean_lean_apply_unit(rev: &str, unit: &str) -> String;
+        #[wasm_bindgen(js_name = lawean_lean_check_unit)]
+        fn lawean_lean_check_unit(rev: &str, unit: &str) -> String;
+        #[wasm_bindgen(js_name = lawean_lean_relation)]
+        fn lawean_lean_relation(a: &str, b: &str) -> String;
+    }
+
+    pub fn js_available() -> bool {
+        lawean_lean_available()
+    }
+    pub fn apply_unit(rev: &str, unit: &str) -> String {
+        lawean_lean_apply_unit(rev, unit)
+    }
+    pub fn check_unit(rev: &str, unit: &str) -> String {
+        lawean_lean_check_unit(rev, unit)
+    }
+    pub fn relation(a: &str, b: &str) -> String {
+        lawean_lean_relation(a, b)
+    }
+}
+
+#[cfg(all(not(no_lean), not(lean_js)))]
 mod ffi {
     use std::ffi::{c_char, CStr, CString};
     use std::sync::Once;
@@ -159,6 +198,9 @@ pub fn apply_unit(rev: &IdentRevision, ops: &[IdentOp]) -> Result<Option<IdentRe
     }
     #[cfg(not(no_lean))]
     {
+        if !available() {
+            return Err(Error::Unavailable);
+        }
         let out = ffi::apply_unit(&encode_revision(rev), &encode_unit(ops));
         match out.split_once('\n') {
             Some(("ok", rest)) => Ok(Some(decode_revision(rest))),
@@ -178,6 +220,9 @@ pub fn check_unit(rev: &IdentRevision, ops: &[IdentOp]) -> Result<bool, Error> {
     }
     #[cfg(not(no_lean))]
     {
+        if !available() {
+            return Err(Error::Unavailable);
+        }
         match ffi::check_unit(&encode_revision(rev), &encode_unit(ops)).as_str() {
             "true" => Ok(true),
             "false" => Ok(false),
@@ -203,6 +248,9 @@ pub fn relation(a: &[IdentOp], b: &[IdentOp]) -> Result<Relation, Error> {
     }
     #[cfg(not(no_lean))]
     {
+        if !available() {
+            return Err(Error::Unavailable);
+        }
         match ffi::relation(&encode_unit(a), &encode_unit(b)).as_str() {
             "independent" => Ok(Relation::Independent),
             "b_depends_on_a" => Ok(Relation::BDependsOnA),
