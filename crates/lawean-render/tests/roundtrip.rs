@@ -1,4 +1,4 @@
-//! 改め文の往復: parse → render → parse が同じ操作列になる（実データ 6 件）。
+//! 改め文の往復: parse → render → parse が同じ操作列になる（実データ 8 件）。
 //! Semantic IR の日本語化: 手書き 8 条分がすべて描画でき、代表例が意図した文になる。
 
 use lawean_amend::parse_units;
@@ -24,6 +24,8 @@ fn amendment_text_roundtrips_through_ops() {
         "amendments/504AC0000000068_5laws.txt",
         "amendments/503AC0000000037_art24.txt",
         "amendments/503AC0000000037_art17.txt",
+        "amendments/503AC0000000037_art44.txt",
+        "amendments/503AC0000000037_art58.txt",
     ] {
         let units = parse_units(&fixture(f)).unwrap();
         let text = render_units(&units);
