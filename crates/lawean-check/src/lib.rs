@@ -1195,6 +1195,10 @@ pub fn run_texts(
         s.add(base.clone());
         for x in other_laws {
             if let Ok(d) = parse_response(x) {
+                // 発射台と同じ法令の別の版が他法令に混じっても、発射台を上書きしない
+                if d.law_id == base.law_id {
+                    continue;
+                }
                 s.add(d);
             }
         }

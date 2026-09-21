@@ -44,7 +44,7 @@
       <div><label for="promulgated">公布予定日</label><input id="promulgated" placeholder="YYYY-MM-DD"></div>
       <div><label for="enforced">施行日（予定）</label><input id="enforced" placeholder="YYYY-MM-DD"></div>
     </div>
-    <label for="laws">他法令（参照の波及を見る。複数選択）</label>
+    <label for="laws">他法令（参照の波及を見る。発射台を引いている法令は自動で選ぶ。複数選択）</label>
     <select id="laws" multiple size="4"></select>
     <button id="run">検査する</button>
     <button id="z3" class="secondary">Z3 で確かめる（ブラウザ内の z3。初回に 33MB 読む）</button>
@@ -155,6 +155,17 @@ async function setBase(xml) {
     $('amend').value = header();
   }
   showOutline();
+  // 他法令: 発射台の題名を「〜法第N条」の形で引いている法令を先に選んでおく（参照の波及を見るため）
+  for (const o of $('laws').options) {
+    o.selected = false;
+    if (o.value === $('base').value) continue;
+    try {
+      const x = await load(o.value);
+      // 同じ法令の別の版は除く。題名を「〜法第N条」「〜法（」の形で引いていれば選ぶ
+      if (x.includes('<law_id>' + info.law_id + '</law_id>')) continue;
+      if (x.includes(info.title + '第') || x.includes(info.title + '（')) o.selected = true;
+    } catch (e) { /* 無ければ選ばない */ }
+  }
   $('report').innerHTML = `<p class="status">${esc(info.title)}（${esc(info.law_num)}、本則 ${info.articles.length} 条）。${preset ? '初期値は実際の改正法: ' + esc(preset.note) + '。そのまま、または書き換えて' : '改め文を書いて'}「検査する」。</p>`;
 }
 
