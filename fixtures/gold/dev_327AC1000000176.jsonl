@@ -56,5 +56,5 @@
 {"sentence": "327AC1000000176/main/chap:8/art:82/para:1/item:5/sent:1", "expected": [{"field": "penalty_target", "raw": "第六十条"}, {"field": "penalty_act", "raw": "保証委託契約を締結した"}]}
 {"sentence": "327AC1000000176/main/chap:8/art:82/para:1/item:7/sent:1", "expected": [{"field": "penalty_target", "raw": "第六十三条の三第二項において準用する第五十六条第一項"}, {"field": "penalty_act", "raw": "手付金等保管事業以外の事業を営んだ"}]}
 {"sentence": "327AC1000000176/main/chap:8/art:82/para:1/sent:1", "expected": [{"field": "sanction", "raw": "百万円以下の罰金"}]}
-{"sentence": "327AC1000000176/main/chap:2/art:3/para:1/sent:1", "expected": []}
+{"sentence": "327AC1000000176/main/chap:2/art:3/para:1/sent:1", "expected": [{"field": "quantity", "raw": "二以上"}]}
 {"sentence": "327AC1000000176/main/chap:1/art:1/para:1/sent:1", "expected": []}

@@ -131,3 +131,23 @@ fn degenerate_inputs_do_not_panic() {
         p.candidates(&sid(), t).unwrap()
     );
 }
+
+#[test]
+fn refine_events_shrinks_only_at_clause_boundaries() {
+    let Some(p) = parser() else { return };
+    use lawean_extract::temporal::time_candidates;
+    // 「講習で」は別の節: 事象は「交付の申請」まで縮める
+    let t = "宅地建物取引士証の交付を受けようとする者は、登録をしている都道府県知事が国土交通省令の定めるところにより指定する講習で交付の申請前六月以内に行われるものを受講しなければならない。";
+    let cs = p.refine_events(t, time_candidates(&sid(), t));
+    let c = cs.iter().find(|c| c.field == Field::WithinBefore).unwrap();
+    assert_eq!(c.raw, "交付の申請前六月以内");
+    assert_eq!(c.source_label.as_deref(), Some("交付の申請"));
+    assert!(c.reason.ends_with("+ginza:event"));
+    assert_eq!(&t[c.evidence.start..c.evidence.end], c.evidence.snippet);
+    // 「被相続人の」は連体の句: 縮めない
+    let t = "その相続人は、被相続人の死亡後六十日以内に都道府県知事に申請して、その承認を受けなければならない。";
+    let cs = p.refine_events(t, time_candidates(&sid(), t));
+    let c = cs.iter().find(|c| c.field == Field::Within).unwrap();
+    assert_eq!(c.raw, "被相続人の死亡後六十日以内");
+    assert!(!c.reason.contains("ginza"));
+}

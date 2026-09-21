@@ -199,6 +199,11 @@ impl Stripped {
         orig.push(text.len());
         Stripped { text: out, orig }
     }
+    /// 落とした本文の各バイトが元のどのバイトか
+    pub fn orig_iter(&self) -> impl Iterator<Item = &usize> {
+        self.orig.iter().take(self.text.len())
+    }
+
     /// 落とした本文の範囲を元の範囲に
     pub fn to_orig(&self, start: usize, end: usize) -> (usize, usize) {
         let last = self.orig[self.orig.len() - 1];
@@ -488,5 +493,145 @@ impl Parser {
             }
         }
         Ok(out)
+    }
+}
+
+// ---------------------------------------------------------------- 規則の候補を係り受けで補正する
+
+use lawean_extract::candidate::Field as F;
+
+/// 事象の句を持つ時間表現のフィールド
+fn has_event(f: F) -> bool {
+    matches!(
+        f,
+        F::Period
+            | F::Elapsed
+            | F::Within
+            | F::WithinBefore
+            | F::NthDay
+            | F::Before
+            | F::Approx
+            | F::Window
+    )
+}
+
+impl Parser {
+    /// 規則（層 1）が出した時間表現の候補の、**事象の句の左端**を係り受けで補正する。
+    ///
+    /// 規則は読点までを事象に取るので、「…する講習で交付の申請前六月以内」（「講習で」は別の節）や
+    /// 「…役員であつた者で当該取消しの日から」のように読点の無い節境界を越える。数詞の直前の名詞（「日」「申請前」）を
+    /// 事象の主辞とし、その部分木の左端まで**縮める**。伸ばすことはしない（読点で切った規則の方が慣行に合う）。
+    /// 括弧書きは落として解析し、位置は元に戻す。解析できない文はそのまま返す
+    pub fn refine_events(&self, text: &str, candidates: Vec<Candidate>) -> Vec<Candidate> {
+        if !candidates
+            .iter()
+            .any(|c| has_event(c.field) && c.source_label.is_some())
+        {
+            return candidates;
+        }
+        let st = Stripped::new(text);
+        let Ok(words) = self.words(&st.text) else {
+            return candidates;
+        };
+        // 元の位置 → 落とした本文の位置（落とした文字は None）
+        let mut to_stripped = vec![None; text.len() + 1];
+        for (i, &o) in st.orig_iter().enumerate() {
+            if o < to_stripped.len() {
+                to_stripped[o] = Some(i);
+            }
+        }
+        to_stripped[text.len()] = Some(st.text.len());
+        let mut children: Vec<Vec<usize>> = vec![Vec::new(); words.len()];
+        for w in &words {
+            if w.head != w.i && w.head < words.len() {
+                children[w.head].push(w.i);
+            }
+        }
+        candidates
+            .into_iter()
+            .map(|mut c| {
+                if !has_event(c.field) || c.source_label.is_none() {
+                    return c;
+                }
+                let (Some(s0), Some(e1)) =
+                    (to_stripped[c.evidence.start], to_stripped[c.evidence.end])
+                else {
+                    return c;
+                };
+                // 範囲内の最初の数詞
+                let Some(k) = words
+                    .iter()
+                    .position(|w| w.start >= s0 && w.end <= e1 && w.tag == Some("名詞-数詞"))
+                else {
+                    return c;
+                };
+                // その直前の語が事象の主辞（「日」「後」「以前」「申請前」）。格助詞・助動詞・読点は飛ばす
+                let Some(t) = (0..k).rev().find(|&i| {
+                    words[i].start >= s0
+                        && !matches!(
+                            words[i].dep,
+                            Some("case") | Some("aux") | Some("punct") | Some("mark")
+                        )
+                        && words[i].tag.is_some_and(|t| {
+                            !t.starts_with("助詞")
+                                && !t.starts_with("助動詞")
+                                && !t.starts_with("補助記号")
+                        })
+                }) else {
+                    return c;
+                };
+                // 主辞 t の部分木の左端（格助詞・読点は除く）
+                let mut lo = words[t].start;
+                let mut stack = vec![t];
+                let mut seen = vec![false; words.len()];
+                while let Some(i) = stack.pop() {
+                    if seen[i] {
+                        continue;
+                    }
+                    seen[i] = true;
+                    if i != t && matches!(words[i].dep, Some("case") | Some("punct")) {
+                        continue;
+                    }
+                    lo = lo.min(words[i].start);
+                    stack.extend(children[i].iter().copied());
+                }
+                // 縮めるだけ
+                if lo <= s0 {
+                    return c;
+                }
+                let (new_start, _) = st.to_orig(lo, lo);
+                if new_start <= c.evidence.start || new_start >= c.evidence.end {
+                    return c;
+                }
+                let dropped = &text[c.evidence.start..new_start];
+                // 節の境界でだけ縮める: 落とす部分が「で」「が」「は」「を」「て」などで終わる（「…講習で」「…者で」）。
+                // 「被相続人の」「この法律の」のような連体の句は、parser が主辞に付けなくても事象の一部
+                if !["で", "が", "は", "を", "て", "と", "、"]
+                    .iter()
+                    .any(|p| dropped.ends_with(p))
+                {
+                    return c;
+                }
+                let label = c.source_label.take().unwrap_or_default();
+                c.source_label = Some(
+                    label
+                        .strip_prefix(dropped)
+                        .map(str::to_string)
+                        .unwrap_or(label),
+                );
+                let refreshed = Candidate::new(
+                    c.field,
+                    &c.evidence.sentence,
+                    text,
+                    new_start,
+                    c.evidence.end,
+                    "ginza:event",
+                );
+                c.evidence = refreshed.evidence;
+                c.raw = refreshed.raw;
+                c.reason = format!("{}+ginza:event", c.reason);
+                c
+            })
+            .collect()
     }
 }

@@ -1,5 +1,6 @@
 //! 法令全体の候補（時間表現・罰則）を共通の形で。層 1.5（主体・行為、`lawean-nlp`）は別 crate から足す
 
+use crate::amount::amount_candidates;
 use crate::candidate::{dedup_sorted, Candidate};
 use crate::penalty::penalties;
 use crate::temporal::time_candidates;
@@ -10,7 +11,13 @@ pub fn candidates(doc: &LegalDocument) -> Vec<Candidate> {
     for g in doc.sentence_groups() {
         for s in &g.sentences {
             let text = s.sentence.plain_text();
-            out.extend(time_candidates(&s.sentence.stable_id, &text));
+            let times = time_candidates(&s.sentence.stable_id, &text);
+            let spans: Vec<(usize, usize)> = times
+                .iter()
+                .map(|c| (c.evidence.start, c.evidence.end))
+                .collect();
+            out.extend(amount_candidates(&s.sentence.stable_id, &text, &spans));
+            out.extend(times);
         }
     }
     for p in penalties(doc) {

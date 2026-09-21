@@ -7,7 +7,7 @@
 {"sentence": "323AC0000000138/main/art:3/para:2/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から起算して三年を経過し"}]}
 {"sentence": "323AC0000000138/main/art:3/para:2/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "取消しの日から起算して三年を経過し"}]}
 {"sentence": "323AC0000000138/main/art:3/para:2/item:5/sent:1", "expected": [{"field": "elapsed", "raw": "同号に規定する暴力団員でなくなつた日から起算して五年を経過し"}]}
-{"sentence": "323AC0000000138/main/art:3_4/para:1/sent:1", "expected": [{"field": "within", "raw": "被相続人の死亡後六十日以内"}]}
+{"sentence": "323AC0000000138/main/art:3_4/para:1/sent:1", "expected": [{"field": "within", "raw": "被相続人の死亡後六十日以内"}, {"field": "quantity", "raw": "二人以上"}]}
 {"sentence": "323AC0000000138/main/art:8/para:1/sent:1", "expected": [{"field": "within", "raw": "一年以内"}]}
 {"sentence": "323AC0000000138/main/art:9/para:1/sent:1", "expected": [{"field": "before", "raw": "聴聞の期日又は弁明を記載した書面の提出期限（口頭による弁明の機会の付与を行う場合には、その日時）の一週間前までに"}]}
 {"sentence": "323AC0000000138/main/art:1/para:1/sent:1", "expected": []}

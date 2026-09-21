@@ -32,6 +32,10 @@
 候補は値を確定しない。採用は起草者か Semantic IR への写し（L3）が決める。`evidence.snippet == text[start..end]` はテストで確かめる。
 時間表現（`temporal`）と罰則（`penalty`）は変換済み、主体・客体・行為は `lawean-nlp`（下）が出す。
 
+**事象の句の境界の補正**（`Parser::refine_events`）: 規則は読点までを事象に取るので、「…指定する講習で交付の申請前六月以内」の「講習で」のような読点の無い節境界を越える。
+数詞の直前の語を事象の主辞（「日」「後」「申請前」）とし、その部分木の左端まで**縮める**（伸ばさない。落とす部分が「で」「が」「は」「を」「て」で終わる節境界のときだけ）。
+gold 全体で P/R 0.989 → 0.993、退行なし（`examples/eval_refined.rs`）。「暴力団員又は同号に規定する暴力団員でなくなった日」の「又は」は parser も名詞句の中に付けるので直らない。
+
 ### L1.5. 主体・客体・行為を係り受けで（`lawean-nlp`、2026-09-22）
 
 格助詞の正規表現ではなく GiNZA の係り受け（UD の `nsubj` / `obj` / `obl`）で取る。モデルは jewel（Python 不要の spaCy ランタイム、
@@ -56,7 +60,7 @@ jewel 0.0.8 の `process_bunsetu`（bokuweb/jewel#23）が素の UD の関係に
 |---|---|---|
 | 節末動詞と格 | 形態素解析（vibrato、Rust）で条件節を分かち書き、節末の動詞（原形）を述語名、直前の「が／を／に／から／まで／と／で」句を引数候補に | `Pred(name, args)`。引数は `EntityRef`（定義語に当たれば）か `Var` |
 | 期間・時点・施行 | **済**: `lawean-extract::temporal::time_exprs`（正規表現。「〜の日から起算して六月を経過した日」「一年前から六月前までの間」「公布の日から起算して一年を超えない範囲内において政令で定める日から施行する」。利率・法令番号・読替えの中の字句は除く）。被覆 借地借家法 100%、公職選挙法 87%、民法 89%（[07](07-verification.md) 時間表現の抽出）。附則 → 施行日は `suppl` | `TimeExpr`（`Period` / `Elapsed` / `Within` / `Window` / `Before` / `Compare` / `Enforcement` …）。Z3 の暦へは `lawean-verify::enforcement`。残りは先行詞が文をまたぐもの（「同項の期間」）で L2 |
-| 金額・数量 | 正規表現（「年一割」「二百平方メートル」）。漢数字は `lawean-resolve::numeral` | `Value::Money` / `Int` |
+| 金額・割合・数量 | **済**: `lawean-extract::amount`（「五千万円以上」「十分の三をこえる」「年一割」「百分の五以下」「二百平方メートル未満」「三人以上」「二以上の都道府県」。刑の金額は `penalty`、法令番号・条項番号・読替えの「」は除く） | `Candidate`（円・千分率・個数、比較は `role`） |
 | 比較 | 「以上／以下／未満／を超える／より長い／より短い」 | `Cmp(a, op, b)`。「これ」「その期間」は照応（L2 へ） |
 | 参照 | 層 1 の解決結果をそのまま | `Ref(Rule)` / `RuleValue(Rule)` |
 | 定義語 | 定義規定（`Column`）と「以下「X」という。」の有効 scope（`lawean-resolve`） | `EntityRef::Definition` |

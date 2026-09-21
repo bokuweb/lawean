@@ -38,6 +38,11 @@ pub enum Field {
     Subject,
     Object,
     Act,
+    // 金額・割合・数量（amount）
+    Money,
+    Ratio,
+    Rate,
+    Quantity,
 }
 
 /// 画面表示用の粗い分類。`Field` から一意に決まる
@@ -51,6 +56,7 @@ pub enum Category {
     Reference,
     Party,
     Action,
+    Amount,
 }
 
 impl Field {
@@ -65,6 +71,7 @@ impl Field {
             PenaltyTarget => Category::Reference,
             PenaltyAct | Act => Category::Action,
             Subject | Object => Category::Party,
+            Money | Ratio | Rate | Quantity => Category::Amount,
         }
     }
 }
@@ -84,6 +91,10 @@ pub enum ValueKind {
     Date,
     /// 構造ノードの stable_id（参照先）
     NodeRef,
+    /// 千分率（割合・利率）。「十分の三」= 300
+    Permille,
+    /// 個数・面積などの数
+    Count,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
