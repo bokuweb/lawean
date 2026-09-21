@@ -15,6 +15,7 @@
 //! | `Taisho`（新旧対照表） | 本文の突き合わせ | 新旧対照表の「新」欄が溶け込み後の本文と違う（2021 年のデジタル改革関連法案の誤りの型） |
 //! | `CrossLaw`（他法令） | `lawean-space::impact` | 他法令からの参照切れ・ずれ |
 //! | `Enforcement`（施行期日） | `lawean-extract::suppl` + 暦 | 施行日が改正法の附則「公布の日から起算して一年を超えない範囲内」の外 |
+//! | `Penalty`（罰則の空振り） | `lawean-extract::penalty` | 罰則が指す規定に、罰則の行為（「表示しなかつた」）が無い。改正で新たに生じたものが Fail（公職選挙法 平成30年法律第75号の実例） |
 //!
 //! Lean との関係: `Consolidate` / `Conflict` / `Order` の溶け込みは、Lean ランタイムがリンクされていれば
 //! **証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、Lean → C）で計算し、無ければ Rust の写しで計算する
@@ -40,6 +41,7 @@ pub enum Kind {
     Taisho,
     CrossLaw,
     Enforcement,
+    Penalty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,6 +564,13 @@ pub fn run(input: &Input<'_>) -> Report {
         _ => check(Kind::Enforcement, Status::Skip, "施行日が無い", vec![]),
     });
 
+    // 罰則の空振り: 改正後の本文で、罰則の行為・効果種別が対象規定と合わないもの。改正前から在るものは Warn
+    checks.push(if stopped {
+        check(Kind::Penalty, Status::Skip, "溶け込みが止まった", vec![])
+    } else {
+        check_penalty(input.base, &clean_doc)
+    });
+
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let diff = id_diff(&base_rev, &cur_rev);
     let suggested_fixes = if suggested.is_empty() {
@@ -908,6 +917,74 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
             Status::Pass,
             "施行日は附則の施行期日の範囲内",
             details,
+        )
+    }
+}
+
+fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {
+    use lawean_extract::penalty::{mismatches, MismatchKind};
+    let key = |m: &lawean_extract::penalty::Mismatch| {
+        (
+            m.target.0.clone(),
+            m.referenced.0.clone(),
+            format!("{:?}", m.kind),
+        )
+    };
+    let before: std::collections::BTreeSet<_> = mismatches(base).iter().map(key).collect();
+    let after_ms = mismatches(after);
+    if after_ms.is_empty() && before.is_empty() {
+        return check(
+            Kind::Penalty,
+            Status::Pass,
+            "罰則の対象規定と行為は合っている",
+            vec![],
+        );
+    }
+    let line = |m: &lawean_extract::penalty::Mismatch| {
+        let what = match &m.kind {
+            MismatchKind::ActNotInTarget { word } => format!("行為「{word}」が対象規定に無い"),
+            MismatchKind::NotADuty { kinds } => {
+                format!("対象規定に義務・禁止が無い（{}）", kinds.join(", "))
+            }
+        };
+        format!(
+            "{}「{}」→ {}「{}」: {what}",
+            m.target.0.rsplit("/main/").next().unwrap_or(&m.target.0),
+            m.target_text.chars().take(40).collect::<String>(),
+            m.referenced
+                .0
+                .rsplit("/main/")
+                .next()
+                .unwrap_or(&m.referenced.0),
+            m.referenced_text.chars().take(40).collect::<String>(),
+        )
+    };
+    let (new, old): (Vec<_>, Vec<_>) = after_ms.iter().partition(|m| !before.contains(&key(m)));
+    let mut details: Vec<String> = new
+        .iter()
+        .map(|m| format!("改正で生じた: {}", line(m)))
+        .collect();
+    details.extend(old.iter().map(|m| format!("改正前から: {}", line(m))));
+    if !new.is_empty() {
+        check(
+            Kind::Penalty,
+            Status::Fail,
+            "改正で罰則が空振りになる",
+            details,
+        )
+    } else if !old.is_empty() {
+        check(
+            Kind::Penalty,
+            Status::Warn,
+            "改正前から罰則と対象規定が合わない箇所がある",
+            details,
+        )
+    } else {
+        check(
+            Kind::Penalty,
+            Status::Pass,
+            "罰則の対象規定と行為は合っている",
+            vec![],
         )
     }
 }

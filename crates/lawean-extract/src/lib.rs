@@ -5,6 +5,7 @@
 pub mod calendar;
 pub mod clause;
 pub mod effect;
+pub mod penalty;
 pub mod skeleton;
 pub mod suppl;
 pub mod temporal;
