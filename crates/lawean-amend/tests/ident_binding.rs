@@ -56,6 +56,7 @@ fn reiwa3_act37_art35_binds_to_ident_ops() {
             IdentOp::InsertAfter { .. } => "insert",
             IdentOp::Delete { .. } => "delete",
             IdentOp::Resolve { .. } => "resolve",
+            IdentOp::Renumber { .. } => "renumber",
         })
         .collect();
     assert_eq!(

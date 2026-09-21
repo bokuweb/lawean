@@ -26,6 +26,8 @@ pub struct HaneCandidate {
     pub target: StableId,
     /// 改正後に指すべき項（削られた項なら None）
     pub new_target_paragraph: Option<u32>,
+    /// 条ずれの候補なら、改正後に指すべき条（項の候補では None）
+    pub new_target_article: Option<ArticleNum>,
     /// 生成した手当て: 参照の字句をこれに置き換えればよい（削られた項への参照は None = 人が決める）
     pub fix: Option<String>,
     /// 生成した手当てを改め文の操作にしたもの（番号は改正前。繰り下げの文より前に置く）
@@ -152,12 +154,12 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
         })
         .filter(|(_, m)| m.iter().any(|(k, v)| k != v))
         .collect();
+    let mut out = article_hane_candidates(doc, unit, &replaced);
     if mappings.is_empty() {
-        return Vec::new();
+        return out;
     }
 
     let index = Index::build(doc);
-    let mut out = Vec::new();
     for g in doc.sentence_groups() {
         let mut ante = Antecedent::default();
         for s in &g.sentences {
@@ -262,6 +264,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                             text: r.span.text.clone(),
                             target: t.clone(),
                             new_target_paragraph: new_tp,
+                            new_target_article: None,
                             fix,
                             fix_op,
                             handled,
@@ -269,6 +272,167 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                         });
                     }
                 }
+            }
+        }
+    }
+    out.dedup();
+    out
+}
+
+/// 改正単位が動かす条の対応（旧 → 新）。「第N条を第M条とする」「第N条から第M条までをK条ずつ繰り下げ」から作る
+pub fn article_mapping(doc: &LegalDocument, unit: &AmendUnit) -> BTreeMap<ArticleNum, ArticleNum> {
+    let mut map = BTreeMap::new();
+    for ins in &unit.instructions {
+        for op in &ins.ops {
+            match op {
+                Op::RenumberArticle { from, to } => {
+                    map.insert(from.clone(), to.clone());
+                }
+                Op::ShiftArticles { from, to, by } => {
+                    for n in crate::numbering::article_nums(doc) {
+                        if let ArticleNum::Single { base, branch } = &n {
+                            if *base >= *from && *base <= *to {
+                                let target = ArticleNum::Single {
+                                    base: (*base as i32 + by) as u32,
+                                    branch: branch.clone(),
+                                };
+                                map.insert(n.clone(), target);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    map.retain(|k, v| k != v);
+    map
+}
+
+fn art_of(id: &str) -> Option<ArticleNum> {
+    id.split("/art:")
+        .nth(1)?
+        .split('/')
+        .next()
+        .map(ArticleNum::parse)
+}
+
+/// 条ずれ（第N条を第M条とする）で、指す先の条番号が変わる絶対参照「第N条…」を列挙する。
+/// 手当ては「第N条」を「第M条」に置き換えた字句。相対形（前条・次条）は参照元も同じだけ動くのが普通なので、
+/// 参照元と参照先の距離が変わるときだけ候補にする
+fn article_hane_candidates(
+    doc: &LegalDocument,
+    unit: &AmendUnit,
+    replaced: &[(Loc, String, String)],
+) -> Vec<HaneCandidate> {
+    let map = article_mapping(doc, unit);
+    if map.is_empty() {
+        return Vec::new();
+    }
+    let new_of = |a: &ArticleNum| map.get(a).cloned().unwrap_or_else(|| a.clone());
+    let base_of = |a: &ArticleNum| match a {
+        ArticleNum::Single { base, .. } => Some(*base as i64),
+        _ => None,
+    };
+    let index = Index::build(doc);
+    let mut out = Vec::new();
+    for g in doc.sentence_groups() {
+        let mut ante = Antecedent::default();
+        for s in &g.sentences {
+            let id = &s.sentence.stable_id;
+            let text = s.sentence.plain_text();
+            // 附則（過去の改正法の附則）は改正当時の番号のままにするのが慣行なので、本則だけ見る
+            if id.0.contains("/suppl:") {
+                continue;
+            }
+            let Some(src_art) = art_of(&id.0) else {
+                continue;
+            };
+            for r in resolve_sentence_with(&index, id, &text, &mut ante) {
+                let Resolution::Internal(ids) = &r.resolution else {
+                    continue;
+                };
+                let relative = match r.span.parsed.kind {
+                    RefKind::PrevArticle(_) | RefKind::NextArticle => true,
+                    RefKind::Article { suppl: false, .. } => false,
+                    _ => continue,
+                };
+                let Some(t) = ids.first() else { continue };
+                let Some(tgt) = art_of(&t.0) else { continue };
+                let new_tgt = new_of(&tgt);
+                let affected = if relative {
+                    let (Some(os), Some(ot), Some(ns), Some(nt)) = (
+                        base_of(&src_art),
+                        base_of(&tgt),
+                        base_of(&new_of(&src_art)),
+                        base_of(&new_tgt),
+                    ) else {
+                        continue;
+                    };
+                    os - ot != ns - nt
+                } else {
+                    new_tgt != tgt
+                };
+                if !affected {
+                    continue;
+                }
+                let sp = para_of(&id.0);
+                let old_label = crate::apply::article_label(&tgt);
+                let new_label = crate::apply::article_label(&new_tgt);
+                let fix = if relative {
+                    None
+                } else {
+                    Some(r.span.text.replacen(&old_label, &new_label, 1))
+                };
+                let at_here = |loc: &Loc| {
+                    loc.article == src_art
+                        && match &loc.paragraph {
+                            Some(ParaRef::Num(n)) => sp == Some(*n),
+                            None => true,
+                        }
+                };
+                let found: Vec<&String> = replaced
+                    .iter()
+                    .filter(|(loc, from_text, _)| at_here(loc) && from_text == &r.span.text)
+                    .map(|(_, _, to)| to)
+                    .collect();
+                let rewritten = replaced.iter().any(|(loc, from_text, _)| {
+                    at_here(loc) && from_text != &r.span.text && from_text.contains(&r.span.text)
+                });
+                let handled = rewritten
+                    || found.iter().any(|to| to.contains(&new_label))
+                    // 参照元の条の本文が丸ごと差し替えられる（次のように改める）なら手当て済み
+                    || unit.instructions.iter().flat_map(|i| &i.ops).any(|op| {
+                        matches!(op, Op::ReplaceArticle { article, .. } if *article == src_art)
+                    });
+                let fix_op = match (&fix, sp) {
+                    (Some(f), Some(p)) => Some(Op::Replace {
+                        at: Loc {
+                            article: src_art.clone(),
+                            paragraph: Some(ParaRef::Num(p)),
+                            item: id
+                                .0
+                                .split("/item:")
+                                .nth(1)
+                                .and_then(|x| x.split('/').next())
+                                .map(String::from),
+                        },
+                        from: r.span.text.clone(),
+                        to: f.clone(),
+                    }),
+                    _ => None,
+                };
+                out.push(HaneCandidate {
+                    sentence: id.clone(),
+                    text: r.span.text.clone(),
+                    target: t.clone(),
+                    new_target_paragraph: None,
+                    new_target_article: Some(new_tgt),
+                    fix,
+                    fix_op,
+                    handled,
+                    found_to: found.first().map(|s| s.to_string()),
+                });
             }
         }
     }

@@ -23,7 +23,7 @@
 //! `native_decide` で同じ結論を確かめる（docs/12）。
 
 use lawean_amend::ident::{self, IdentOp, IdentRevision};
-use lawean_amend::{hane_candidates, parse_units, AmendUnit};
+use lawean_amend::{article_label, hane_candidates, parse_units, AmendUnit};
 use lawean_source::{parse_response, ArticleNum, LegalDocument};
 use lawean_space::{impact, locate, ImpactKind, LawSpace};
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,9 @@ pub struct Input<'a> {
     pub base: &'a LegalDocument,
     /// 改正単位（施行の順）。ラベルは表示用
     pub units: Vec<(String, AmendUnit)>,
+    /// 同じ改正法のうち、他法令（`space` にあるもの）を改正する単位: (ラベル, 法令 ID, 単位)。
+    /// 他法令への波及（CrossLaw）の手当てとして突き合わせる（「手当ては生成するもの」なので、生成した字句と同じ置換があるか）
+    pub other_units: Vec<(String, String, AmendUnit)>,
     /// e-Gov の改正後リビジョン（あれば本文を突き合わせる）
     pub expected: Option<&'a LegalDocument>,
     /// 新旧対照表（`taisho` の形式）
@@ -179,6 +182,7 @@ fn op_line(op: &IdentOp) -> String {
         ),
         IdentOp::Delete { id } => format!("delete {}", tail(id)),
         IdentOp::Resolve { id, text } => format!("resolve {} 「{}」", tail(id), short(text)),
+        IdentOp::Renumber { id, art } => format!("renumber {} → 第{art}条", tail(id)),
     }
 }
 
@@ -234,9 +238,10 @@ pub fn run(input: &Input<'_>) -> Report {
                         .unwrap_or(&c.sentence.0),
                     c.text,
                     c.target.0.rsplit("/main/").next().unwrap_or(&c.target.0),
-                    match c.new_target_paragraph {
-                        Some(n) => format!("第{n}項になる"),
-                        None => "削られる".into(),
+                    match (&c.new_target_article, c.new_target_paragraph) {
+                        (Some(a), _) => format!("{}になる", article_label(a)),
+                        (None, Some(n)) => format!("第{n}項になる"),
+                        (None, None) => "削られる".into(),
                     }
                 ));
                 if let Some(op) = c.fix_op {
@@ -330,6 +335,27 @@ pub fn run(input: &Input<'_>) -> Report {
                 }
                 stopped = true;
             }
+        }
+    }
+
+    // 他法令を改正する単位は、その法令に当たるかだけ見る（波及の手当ての突き合わせは CrossLaw で）
+    for (label, law_id, unit) in &input.other_units {
+        let Some(doc) = input.space.and_then(|s| s.get(law_id)) else {
+            continue;
+        };
+        let title = doc
+            .title
+            .as_ref()
+            .map(|t| lawean_source::inline_text(&t.text))
+            .unwrap_or_else(|| law_id.clone());
+        units_out.push(UnitSummary {
+            label: format!("{label}（{title}）"),
+            instructions: unit.instructions.len(),
+            ops: unit.instructions.iter().map(|x| x.ops.len()).sum(),
+            ident_ops: vec![],
+        });
+        if let Err(e) = lawean_amend::apply_unit(doc, unit, label) {
+            base_fail.push(format!("{label}（{title}）: {e}"));
         }
     }
 
@@ -533,6 +559,42 @@ pub fn run(input: &Input<'_>) -> Report {
             let target = input.base.law_id.clone().unwrap_or_default();
             let mut fails = Vec::new();
             let mut warns = Vec::new();
+            let mut handled = Vec::new();
+            // 手当て済みの参照（法令, 文, 字句）。同じ改正法で同時に施行されるので、その間の意味のずれ（TimingGap）は無い
+            let mut handled_refs: Vec<(String, String, String)> = Vec::new();
+            // 他法令の側の改正単位に、参照元の文（条・項）への置換があるか。`to` があればその置換先も見る
+            let fixed_by = |law: &str, sentence: &str, text: &str, to: Option<&str>| -> Option<String> {
+                let src_art = sentence
+                    .split("/art:")
+                    .nth(1)
+                    .and_then(|x| x.split('/').next())
+                    .map(ArticleNum::parse)?;
+                let src_para: Option<u32> = sentence
+                    .split("/para:")
+                    .nth(1)
+                    .and_then(|x| x.split('/').next())
+                    .and_then(|x| x.parse().ok());
+                input
+                    .other_units
+                    .iter()
+                    .filter(|(_, id, _)| id == law)
+                    .flat_map(|(l, _, u)| u.instructions.iter().flat_map(move |i| i.ops.iter().map(move |o| (l, o))))
+                    .find_map(|(l, op)| match op {
+                        lawean_amend::Op::Replace { at, from, to: t }
+                            if at.article == src_art
+                                && match &at.paragraph {
+                                    Some(lawean_amend::ParaRef::Num(n)) => src_para == Some(*n),
+                                    _ => true,
+                                }
+                                && from.contains(text)
+                                && to.is_none_or(|want| t.contains(want) || !from.ends_with(text)) =>
+                        {
+                            Some(l.clone())
+                        }
+                        lawean_amend::Op::Delete { at } if at.article == src_art => Some(l.clone()),
+                        _ => None,
+                    })
+            };
             for (label, unit) in &input.units {
                 match impact(space, &target, unit, day) {
                     Ok(imps) => {
@@ -554,22 +616,46 @@ pub fn run(input: &Input<'_>) -> Report {
                             );
                             match i.kind {
                                 ImpactKind::Dangling => {
-                                    fails.push(format!("{label}: {where_} が参照切れになる"))
+                                    match fixed_by(&r.from_law, &r.sentence.0, &r.text, None) {
+                                        Some(l) => {
+                                            handled_refs.push((r.from_law.clone(), r.sentence.0.clone(), r.text.clone()));
+                                            handled.push(format!(
+                                                "{label}: {where_} は参照切れになるが、{l} が改めている"
+                                            ))
+                                        }
+                                        None => fails
+                                            .push(format!("{label}: {where_} が参照切れになる")),
+                                    }
                                 }
                                 ImpactKind::Shifted { moved_to, .. } => {
                                     let new_ref = render_ref_of(&moved_to.0);
-                                    fails.push(format!(
-                                        "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま。手当て: 「{}」→「{new_ref}」",
-                                        moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
-                                        r.text
-                                    ))
+                                    match fixed_by(&r.from_law, &r.sentence.0, &r.text, Some(&new_ref)) {
+                                        Some(l) => {
+                                            handled_refs.push((r.from_law.clone(), r.sentence.0.clone(), r.text.clone()));
+                                            handled.push(format!(
+                                                "{label}: {where_} の指す先が {} に動く。{l} の「{}」→「{new_ref}」で手当て済み",
+                                                moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
+                                                r.text
+                                            ))
+                                        }
+                                        None => fails.push(format!(
+                                            "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま。手当て: 「{}」→「{new_ref}」",
+                                            moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
+                                            r.text
+                                        )),
+                                    }
                                 }
                                 ImpactKind::SemanticChange { .. } => {
                                     warns.push(format!("{label}: {where_} の参照先の本文が変わる"))
                                 }
-                                ImpactKind::TimingGap { from, to, .. } => warns.push(format!(
-                                    "{label}: {where_} は {from}〜{to} の間、改正後と違う意味になる"
-                                )),
+                                ImpactKind::TimingGap { from, to, .. } => {
+                                    let key = (r.from_law.clone(), r.sentence.0.clone(), r.text.clone());
+                                    if !handled_refs.contains(&key) {
+                                        warns.push(format!(
+                                            "{label}: {where_} は {from}〜{to} の間、改正後と違う意味になる"
+                                        ))
+                                    }
+                                }
                             }
                         }
                     }
@@ -584,6 +670,13 @@ pub fn run(input: &Input<'_>) -> Report {
                     Status::Warn,
                     "他法令の参照の意味が変わる",
                     warns,
+                )
+            } else if !handled.is_empty() {
+                check(
+                    Kind::CrossLaw,
+                    Status::Pass,
+                    format!("他法令への波及 {} 件はすべて改正法の中で手当て済み", handled.len()),
+                    handled,
                 )
             } else {
                 check(
@@ -1245,13 +1338,30 @@ pub fn run_texts(
         }
         space = Some(s);
     }
-    let labels: Vec<(String, AmendUnit)> = units
-        .into_iter()
-        .map(|u| (u.article_of_amending_law.clone(), u))
-        .collect();
+    // 発射台と違う法令（他法令にあるもの）を改正する単位は、波及の手当てとして別に持つ
+    let base_title = base
+        .title
+        .as_ref()
+        .map(|t| lawean_source::inline_text(&t.text))
+        .unwrap_or_default();
+    let mut labels: Vec<(String, AmendUnit)> = Vec::new();
+    let mut other_units: Vec<(String, String, AmendUnit)> = Vec::new();
+    for u in units {
+        let label = u.article_of_amending_law.clone();
+        let other = (u.target_title != base_title)
+            .then(|| space.as_ref().and_then(|s| s.resolve_name(&u.target_title)))
+            .flatten()
+            .filter(|id| Some(id.to_string()) != base.law_id)
+            .map(str::to_string);
+        match other {
+            Some(id) => other_units.push((label, id, u)),
+            None => labels.push((label, u)),
+        }
+    }
     let mut report = run(&Input {
         base: &base,
         units: labels,
+        other_units,
         expected: expected.as_ref(),
         taisho,
         space: space.as_ref(),

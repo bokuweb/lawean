@@ -333,3 +333,57 @@ fn r3_act51_koshoku_senkyo_fix_reproduces_egov() {
     let got = apply_unit(&before, &units[0], "test").unwrap();
     assert_same_main(&got, &after);
 }
+
+/// 令和5年法律第53号 第125条: 条ずれ（第47条〜第61条 → 第49条〜第64条）、3 条の新設、見出しの改め、後段の読替え表
+#[test]
+fn reiwa5_act53_art125_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art125.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let unit = &units[0];
+    let ops: Vec<&Op> = unit.instructions.iter().flat_map(|i| &i.ops).collect();
+    assert!(ops
+        .iter()
+        .any(|o| matches!(o, Op::RenumberArticle { from, to }
+        if from.to_num_string() == "61" && to.to_num_string() == "64")));
+    assert!(ops.iter().any(|o| matches!(
+        o,
+        Op::ShiftArticles {
+            from: 49,
+            to: 53,
+            by: 3
+        }
+    )));
+    assert!(ops
+        .iter()
+        .any(|o| matches!(o, Op::ReplaceCaption { from, to, .. }
+        if from == "適用除外" && to == "適用関係")));
+    assert!(ops.iter().any(|o| matches!(o, Op::SetCaption { text, .. }
+        if text == "（非電磁的事件記録の閲覧等）")));
+    assert!(ops.iter().any(
+        |o| matches!(o, Op::ReplaceSentencePart { part: SentencePart::Back, text, .. }
+        if text.len() > 1 && text[0].starts_with("この場合において、次の表"))
+    ));
+    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text }
+        if after.to_num_string() == "46" && text.iter().filter(|l| l.starts_with("第四十")).count() == 2)));
+
+    let got = apply_unit(
+        &revision("403AC0000000090_20260521_504AC0000000048"),
+        unit,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("403AC0000000090_20280613_505AC0000000053"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+
+    // 条ずれのハネ: 本則で番号の変わる条を指す絶対参照 5 件が、改め文の字句改めで全部手当て済み
+    let cands = hane_candidates(&current(), unit);
+    let arts: Vec<&HaneCandidate> = cands
+        .iter()
+        .filter(|c| c.new_target_article.is_some())
+        .collect();
+    assert_eq!(arts.len(), 5, "{arts:#?}");
+    assert!(arts.iter().all(|c| c.handled));
+    assert!(arts
+        .iter()
+        .any(|c| c.text == "第五十五条第一項" && c.fix.as_deref() == Some("第五十八条第一項")));
+}

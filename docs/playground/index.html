@@ -60,7 +60,8 @@ const REVISIONS = [
   ['revisions/403AC0000000090_20230220_504AC0000000048.xml', '2023-02-20（令4-48 第73条 施行後）'],
   ['revisions/403AC0000000090_20230614_505AC0000000053.xml', '2023-06-14（令5-53 1 段目。本則は同じ）'],
   ['403AC0000000090.xml', '2026-05-21 現行（令4-48 第74条 施行後）'],
-  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '2028-06-13（令5-53 条ずれ。未対応）'],
+  ['revisions/403AC0000000090_20260521_504AC0000000048.xml', '2026-05-21（令5-53 第125条の発射台。現行と同じ）'],
+  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '2028-06-13（令5-53 第125条 施行後。条ずれ）'],
   ['revisions/325AC1000000100_20180620_430AC0000000059.xml', '公職選挙法 2018-06-20（平30-75 の発射台）'],
   ['revisions/325AC1000000100_20181025_430AC0100000075.xml', '公職選挙法 2018-10-25（平30-75 施行後、罰則の引用が残る）'],
   ['revisions/325AC1000000100_20201212_502AC1000000045.xml', '公職選挙法 2020-12-12（令3-51 の発射台）'],
@@ -89,6 +90,10 @@ const LEAN = {
   'insert-article-wrong-number': 'Rust の連番の検査（lawean-amend::numbering）。溶け込みは Lean、番号の列は溶け込み後の Revision の art から',
   'enforced-out-of-range': 'Rust の規則（附則第一条の読み）と暦。暦が Z3 の暦（lawean-verify::temporal）と一致することは lawean-verify のテスト',
   'h30-75-koshoku-senkyo': 'Penalty は Rust の規則（罰則の行為 vs 対象規定）。Koshoku.lean: generated_fix_is_the_2021_correction（生成した手当て = 令和3年法律第51号の replace）, h30_75_does_not_touch_244',
+  'r5-53-art125': 'Consolidate.lean: consolidates_505AC0000000053_art125, wf_505AC0000000053_art125（Ident.lean の Op.renumber）',
+  'r5-53-art125-129': 'Rust の他法令の波及（lawean-space::impact）と、他法令を改正する単位（第129条）の突き合わせ。溶け込みは Lean',
+  'r5-53-art125-crosslaw-missing': 'Rust の他法令の波及（lawean-space::impact）。生成した手当てが実際の第129条と同じ',
+  'r5-53-art125-missing-hane': 'Rust のハネ（lawean-amend::hane::article_hane_candidates）。溶け込みは Lean で通り、e-Gov と食い違う',
   'r3-51-koshoku-senkyo-fix': 'Koshoku.lean: consolidates_503AC0000000051（本則 1167 項が e-Gov と一致）',
 };
 

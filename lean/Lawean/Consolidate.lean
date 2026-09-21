@@ -3,9 +3,11 @@ import Lawean.Data.Rev_403AC0000000090_20210519
 import Lawean.Data.Rev_403AC0000000090_20220518
 import Lawean.Data.Rev_403AC0000000090_20230220
 import Lawean.Data.Rev_403AC0000000090_20260521
+import Lawean.Data.Rev_403AC0000000090_20280613
 import Lawean.Data.Unit_503AC0000000037_art35
 import Lawean.Data.Unit_504AC0000000048_art73
 import Lawean.Data.Unit_504AC0000000048_art74
+import Lawean.Data.Unit_505AC0000000053_art125
 
 /-!
 # 溶け込みの正 — 実データを `Ident.applyUnit` に通す（ADR-0011）
@@ -47,6 +49,18 @@ theorem consolidates_504AC0000000048_art73_74 :
 
 theorem wf_504AC0000000048_art73_74 :
     (applyUnit rev_403AC0000000090_20220518 (unit_504AC0000000048_art73 ++ unit_504AC0000000048_art74)).map
+      (fun r => (r.wf, r.hasConflict)) = some (true, false) := by
+  native_decide
+
+/-- 令和5年法律第53号 第125条（4 段目、未施行）: 現行に当てると 2028-06-13 版になる。
+第47条〜第61条を第49条〜第64条にする条ずれ（`renumber`）と 3 条の新設を含む -/
+theorem consolidates_505AC0000000053_art125 :
+    (applyUnit rev_403AC0000000090_20260521 unit_505AC0000000053_art125).map Revision.render =
+      some rev_403AC0000000090_20280613.render := by
+  native_decide
+
+theorem wf_505AC0000000053_art125 :
+    (applyUnit rev_403AC0000000090_20260521 unit_505AC0000000053_art125).map
       (fun r => (r.wf, r.hasConflict)) = some (true, false) := by
   native_decide
 

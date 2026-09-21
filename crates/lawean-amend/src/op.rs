@@ -79,6 +79,31 @@ pub enum Op {
     },
     /// 「第N条[第M項]を削る」
     Delete { at: Loc },
+    /// 「第N条を第M条とする」「同条を第M条とし」— 条ずれ。本文は触らない
+    RenumberArticle { from: ArticleNum, to: ArticleNum },
+    /// 「第N条から第M条までをK条ずつ繰り下げ」— 範囲の条（枝番も含む）の基数を K 動かす
+    ShiftArticles { from: u32, to: u32, by: i32 },
+    /// 「第N条の見出し中「A」を「B」に改め」
+    ReplaceCaption {
+        article: ArticleNum,
+        from: String,
+        to: String,
+    },
+    /// 「第N条の見出しを「（X）」に改め」
+    SetCaption { article: ArticleNum, text: String },
+    /// 「第N条[第M項]後段を次のように改める」— 項の本文の前段／後段を差し替える。続く行のうち最初の 1 行が文で、
+    /// 残り（読替え表の欄など）は文には入れない
+    ReplaceSentencePart {
+        at: Loc,
+        part: SentencePart,
+        text: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SentencePart {
+    Front,
+    Back,
 }
 
 impl Op {
@@ -96,6 +121,10 @@ impl Op {
             | Op::RenumberParagraph { article, .. }
             | Op::ShiftParagraphs { article, .. } => Some(article),
             Op::InsertArticleAfter { after, .. } => Some(after),
+            Op::RenumberArticle { from, .. } => Some(from),
+            Op::ShiftArticles { .. } => None,
+            Op::ReplaceCaption { article, .. } | Op::SetCaption { article, .. } => Some(article),
+            Op::ReplaceSentencePart { at, .. } => Some(&at.article),
         }
     }
 
@@ -109,6 +138,7 @@ impl Op {
                 | Op::InsertArticleAfter { .. }
                 | Op::AppendSentence { .. }
                 | Op::ReplaceArticle { .. }
+                | Op::ReplaceSentencePart { .. }
         )
     }
 
@@ -119,7 +149,8 @@ impl Op {
             | Op::AppendArticle { text, .. }
             | Op::InsertArticleAfter { text, .. }
             | Op::AppendSentence { text, .. }
-            | Op::ReplaceArticle { text, .. } => text.push(line),
+            | Op::ReplaceArticle { text, .. }
+            | Op::ReplaceSentencePart { text, .. } => text.push(line),
             _ => {}
         }
     }

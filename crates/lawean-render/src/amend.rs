@@ -52,6 +52,9 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceToc { from, to } => {
             format!("目次中「{from}」を「{to}」に{}", end("改め", "改める"))
         }
+        Op::Replace { at, from, to } if to.is_empty() => {
+            format!("{}中「{from}」を{}", loc_label(at), end("削り", "削る"))
+        }
         Op::Replace { at, from, to } => format!(
             "{}中「{from}」を「{to}」に{}",
             loc_label(at),
@@ -89,9 +92,15 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
-        Op::InsertArticleAfter { after, .. } => format!(
-            "{}の次に次の一条を{}",
+        Op::InsertArticleAfter { after, text } => format!(
+            "{}の次に次の{}条を{}",
             article_label(after),
+            to_kanji(
+                text.iter()
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
+                    .count()
+                    .max(1) as u32
+            ),
             end("加え", "加える")
         ),
         Op::AppendSentence { at, .. } => format!(
@@ -130,6 +139,42 @@ fn segment(op: &Op, last: bool) -> String {
             }
         ),
         Op::Delete { at } => format!("{}を{}", loc_label(at), end("削り", "削る")),
+        Op::RenumberArticle { from, to } => format!(
+            "{}を{}と{}",
+            article_label(from),
+            article_label(to),
+            end("し", "する")
+        ),
+        Op::ShiftArticles { from, to, by } => format!(
+            "第{}条から第{}条までを{}条ずつ繰り{}",
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            }
+        ),
+        Op::ReplaceCaption { article, from, to } => format!(
+            "{}の見出し中「{from}」を「{to}」に{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::SetCaption { article, text } => format!(
+            "{}の見出しを「{text}」に{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::ReplaceSentencePart { at, part, .. } => format!(
+            "{}{}を次のように{}",
+            loc_label(at),
+            match part {
+                SentencePart::Front => "前段",
+                SentencePart::Back => "後段",
+            },
+            end("改め", "改める")
+        ),
     }
 }
 
@@ -140,7 +185,8 @@ fn content_of(op: &Op) -> &[String] {
         | Op::AppendArticle { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::AppendSentence { text, .. }
-        | Op::ReplaceArticle { text, .. } => text,
+        | Op::ReplaceArticle { text, .. }
+        | Op::ReplaceSentencePart { text, .. } => text,
         _ => &[],
     }
 }

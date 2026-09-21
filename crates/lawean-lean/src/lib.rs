@@ -95,6 +95,9 @@ pub fn emit_unit(doc: &str, name: &str, ops: &[IdentOp]) -> String {
             IdentOp::Resolve { id, text } => {
                 format!(".resolve {} {}", lean_string(id), lean_string(text))
             }
+            IdentOp::Renumber { id, art } => {
+                format!(".renumber {} {}", lean_string(id), lean_string(art))
+            }
         };
         writeln!(s, "  {open} {body}{close}").unwrap();
     }
@@ -120,6 +123,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let r1 = rev("403AC0000000090_20220518_503AC0000000037");
     let r2 = rev("403AC0000000090_20230220_504AC0000000048");
     let r3 = parse_response(&read("403AC0000000090.xml")).unwrap();
+    let r4 = rev("403AC0000000090_20280613_505AC0000000053");
 
     let u35 = parse_units(&read("amendments/503AC0000000037_art35.txt"))
         .unwrap()
@@ -154,6 +158,12 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     // 第74条は第73条が作った id を触るので、e-Gov の版ではなく第73条を束縛した文書に対して束縛する
     let b74 = bind(&b73.doc, &u74, "504AC0000000048/art74").unwrap();
 
+    // 令和5年法律第53号 第125条（民事関係手続のデジタル化）: 現行に当てると 2028-06-13 版になる。条ずれ（renumber）を含む
+    let u125 = parse_units(&read("amendments/505AC0000000053_art125.txt"))
+        .unwrap()
+        .remove(0);
+    let b125 = bind(&r3, &u125, "505AC0000000053/art125").unwrap();
+
     // 公職選挙法（実際に起きた改正漏れ、docs/12 §6）: 平成30年法律第75号の発射台と、令和3年法律第51号（誤りの訂正）の前後
     let k0 = rev("325AC1000000100_20180620_430AC0000000059");
     let k1 = rev("325AC1000000100_20201212_502AC1000000045");
@@ -175,6 +185,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Rev_403AC0000000090_20220518", "rev_403AC0000000090_20220518", "借地借家法 `403AC0000000090_20220518_503AC0000000037`（令和3年法律第37号 第35条の施行後 = 令和4年法律第48号 第73条の発射台。20220525 版と本則は同じ）", from_document(&r1)),
         ("Rev_403AC0000000090_20230220", "rev_403AC0000000090_20230220", "借地借家法 `403AC0000000090_20230220_504AC0000000048`（令和4年法律第48号 第73条の施行後。20230614 版と本則は同じ）", from_document(&r2)),
         ("Rev_403AC0000000090_20260521", "rev_403AC0000000090_20260521", "借地借家法 `403AC0000000090_20260521_504AC0000000048`（現行。令和4年法律第48号 第74条の施行後）", from_document(&r3)),
+        ("Rev_403AC0000000090_20280613", "rev_403AC0000000090_20280613", "借地借家法 `403AC0000000090_20280613_505AC0000000053`（令和5年法律第53号 第125条の施行後。未施行）", from_document(&r4)),
     ];
     let units = [
         ("Unit_430AC0100000075", "unit_430AC0100000075", "公職選挙法の一部を改正する法律（平成30年法律第75号、参議院の特定枠）を `rev_325AC1000000100_20180620` に束縛したもの（34 文のうち 32 文。入れ子の読替え規定の書き換えと別表を除く）。\n第142条の4に第4項を挿入し第6項を第7項に繰り下げたが、第244条第1項第2号の2の「第百四十二条の四第六項」を改めておらず、罰則が消えた（実際に起きた改正漏れ。docs/12 §6）", bk75.ops),
@@ -182,6 +193,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
         ("Unit_503AC0000000037_art35", "unit_503AC0000000037_art35", "デジタル社会形成整備法（令和3年法律第37号）第35条（`fixtures/amendments/503AC0000000037_art35.txt`）を `rev_403AC0000000090_20210519` に束縛したもの。\n繰り下げ・「第P項を第Q項とし」は id の世界では操作にならないので消え、「前項」の手当ては本文全体の `replace` になる", b35.ops.clone()),
         ("Unit_504AC0000000048_art73", "unit_504AC0000000048_art73", "民事訴訟法等改正法（令和4年法律第48号）第73条（`fixtures/amendments/504AC0000000048_art73-74.txt`）を `rev_403AC0000000090_20220518` に束縛したもの。目次・第42条第1項・第61条の新設", b73.ops),
         ("Unit_504AC0000000048_art74", "unit_504AC0000000048_art74", "同 第74条を、第73条を当てた後の状態に束縛したもの。第61条の全部改正 = 第73条が作った id に anchor した `insertAfter` と、その id の `delete`。\n第73条が作った id を触るので第73条に依存する（`dependsOn`）", b74.ops),
+        ("Unit_505AC0000000053_art125", "unit_505AC0000000053_art125", "民事関係手続等における情報通信技術の活用等の推進を図るための関係法律の整備に関する法律（令和5年法律第53号）第125条（`fixtures/amendments/505AC0000000053_art125.txt`）を現行 `rev_403AC0000000090_20260521` に束縛したもの。\n第47条〜第61条を第49条〜第64条に繰り下げる条ずれ（`renumber`）と、第47・48・51条の新設", b125.ops),
         ("Unit_case_hane_missing", "unit_case_hane_missing", "失敗例 `hane-missing`（fixtures/cases）: 令和3年 第35条から「同条第三項中「前項」を「第三項」に改め」を落としたもの。`rev_403AC0000000090_20210519` に束縛。溶け込みはするが e-Gov の改正後と一致しない", b35_hane.ops),
         ("Unit_case_conflict_22_A", "unit_case_conflict_22_A", "失敗例 `conflict-22`（fixtures/cases）の第一条: 第22条第1項「書面によって」を「書面又は電磁的記録によって」に。`rev_403AC0000000090_20210519` に束縛", bca.ops),
         ("Unit_draft_insert_38_4", "unit_draft_insert_38_4", "自作の改正案 `fixtures/amendments/drafts/insert-38-4.txt`（docs/09 計画 3）: 第38条第3項の次に 1 項を挿入し、以降を繰り下げる。現行 `rev_403AC0000000090_20260521` に束縛。施行令の「第三十八条第四項」がずれる", b_ins.ops),

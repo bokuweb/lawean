@@ -9,9 +9,10 @@ pub mod parse;
 pub mod scenario;
 
 pub use apply::{
-    apply_unit, diff_snapshots, para_text, paragraph_mapping, snapshot_main, toc_text, ApplyError,
+    apply_unit, article_label, diff_snapshots, para_text, paragraph_mapping, snapshot_main,
+    toc_text, ApplyError,
 };
-pub use hane::{hane_candidates, HaneCandidate};
+pub use hane::{article_mapping, hane_candidates, HaneCandidate};
 pub use op::*;
 pub use parse::{parse_instruction, parse_units, ParseError};
 pub use scenario::{explore, run_sequence, Enforcement, ScenarioReport, Stage};

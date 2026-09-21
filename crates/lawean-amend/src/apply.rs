@@ -128,10 +128,50 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 ch.children.push(Provision::Article(a));
             }
             Op::InsertArticleAfter { after, text } => {
-                let a = parse_article(text)?;
                 article_mut(doc, after)?;
-                if !insert_article_after(&mut doc.main_provision, after, a) {
-                    return Err(ApplyError::ArticleNotFound(after.to_num_string()));
+                let mut anchor = after.clone();
+                for a in parse_articles(text)? {
+                    let num = a.num.clone();
+                    if !insert_article_after(&mut doc.main_provision, &anchor, a) {
+                        return Err(ApplyError::ArticleNotFound(anchor.to_num_string()));
+                    }
+                    anchor = num;
+                }
+            }
+            Op::RenumberArticle { from, to } => renumber_article(doc, from, to)?,
+            Op::ShiftArticles { from, to, by } => shift_articles(doc, *from, *to, *by)?,
+            Op::ReplaceCaption { article, from, to } => {
+                let art = article_mut(doc, article)?;
+                let cur = art
+                    .caption
+                    .as_ref()
+                    .map(|c| inline_text(c))
+                    .unwrap_or_default();
+                if !cur.contains(from.as_str()) {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: format!("{}の見出し", article_label(article)),
+                        phrase: from.clone(),
+                    });
+                }
+                art.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
+            }
+            Op::SetCaption { article, text } => {
+                let art = article_mut(doc, article)?;
+                art.caption = Some(vec![Inline::Text(text.clone())]);
+            }
+            Op::ReplaceSentencePart { at, part, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let first = text.first().cloned().unwrap_or_default();
+                let p = paragraph_mut(art, idx);
+                replace_sentence_part(p, *part, &first)?;
+                // 2 行目以降は読替え表（「次の表の上欄に掲げる…」）。段落の表として持つ
+                if text.len() > 1 {
+                    p.children.retain(
+                        |c| !matches!(c, ParagraphChild::Raw(e) if e.name == "TableStruct"),
+                    );
+                    p.children
+                        .push(ParagraphChild::Raw(build_table(&text[1..])));
                 }
             }
             Op::AppendSentence { at, text } => {
@@ -563,6 +603,162 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
             .map(ArticleChild::Paragraph)
             .collect(),
     })
+}
+
+/// 「次の二条を加える」の内容を条ごとに分ける（「（見出し）」の行と「第N条　…」の行で区切る）
+pub(crate) fn parse_articles(lines: &[String]) -> Result<Vec<Article>, ApplyError> {
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    let mut pending_caption: Option<String> = None;
+    for l in lines {
+        if l.starts_with('（') {
+            pending_caption = Some(l.clone());
+            continue;
+        }
+        let is_title = l.starts_with('第')
+            && l.split_once('\u{3000}')
+                .is_some_and(|(t, _)| t.ends_with('条') || t.contains("条の"));
+        if is_title || groups.is_empty() {
+            let mut g = Vec::new();
+            if let Some(c) = pending_caption.take() {
+                g.push(c);
+            }
+            g.push(l.clone());
+            groups.push(g);
+        } else {
+            groups.last_mut().unwrap().push(l.clone());
+        }
+    }
+    groups.iter().map(|g| parse_article(g)).collect()
+}
+
+/// 条番号を変える（見出しの「第N条」も）
+pub(crate) fn renumber_article(
+    doc: &mut LegalDocument,
+    from: &ArticleNum,
+    to: &ArticleNum,
+) -> Result<(), ApplyError> {
+    let art = article_mut(doc, from)?;
+    art.num = to.clone();
+    art.title = Some(vec![Inline::Text(article_label(to))]);
+    Ok(())
+}
+
+/// 「第百四十二条の四」
+pub fn article_label(n: &ArticleNum) -> String {
+    use lawean_resolve::numeral::to_kanji;
+    match n {
+        ArticleNum::Single { base, branch } => {
+            let mut s = format!("第{}条", to_kanji(*base));
+            for b in branch {
+                s.push_str(&format!("の{}", to_kanji(*b)));
+            }
+            s
+        }
+        other => format!("第{}条", other.to_num_string()),
+    }
+}
+
+/// 範囲の条をまとめて動かす（繰り下げは番号の大きい方から、繰り上げは小さい方から）
+pub(crate) fn shift_articles(
+    doc: &mut LegalDocument,
+    from: u32,
+    to: u32,
+    by: i32,
+) -> Result<(), ApplyError> {
+    let mut nums: Vec<ArticleNum> = crate::numbering::article_nums(doc)
+        .into_iter()
+        .filter(|n| matches!(n, ArticleNum::Single { base, .. } if *base >= from && *base <= to))
+        .collect();
+    if by > 0 {
+        nums.reverse();
+    }
+    for n in nums {
+        let ArticleNum::Single { base, branch } = &n else {
+            continue;
+        };
+        let target = ArticleNum::Single {
+            base: (*base as i32 + by) as u32,
+            branch: branch.clone(),
+        };
+        renumber_article(doc, &n, &target)?;
+    }
+    Ok(())
+}
+
+/// 項の本文のうち前段／後段（ただし書きを除く本文の最初／最後の文）を差し替える。差し替え後の本文を返す
+pub(crate) fn replace_sentence_part(
+    p: &mut Paragraph,
+    part: SentencePart,
+    text: &str,
+) -> Result<(), ApplyError> {
+    let mains: Vec<usize> = p
+        .sentences
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.function != SentenceFunction::Proviso)
+        .map(|(i, _)| i)
+        .collect();
+    let idx = match part {
+        SentencePart::Front => mains.first().copied(),
+        SentencePart::Back => mains.get(1).copied().or_else(|| mains.last().copied()),
+    }
+    .ok_or_else(|| ApplyError::BadContent("前段・後段が無い".into()))?;
+    p.sentences[idx].text = vec![Inline::Text(text.to_string())];
+    Ok(())
+}
+
+/// 改め文に平らに並んだ表のセルを行にまとめる。読替え表の上欄は条項の参照なので、
+/// 「第N条…」で始まるセルが行の先頭、それ以外で始まる場合は上欄が空の続き行（2 セル）とみなす
+pub(crate) fn build_table(cells: &[String]) -> Element {
+    fn sentence(t: &str) -> Node {
+        Node::Element(Element {
+            name: "Sentence".into(),
+            attrs: vec![("Num".into(), "1".into())],
+            children: if t.is_empty() {
+                vec![]
+            } else {
+                vec![Node::Text(t.to_string())]
+            },
+        })
+    }
+    fn column(t: &str) -> Node {
+        Node::Element(Element {
+            name: "TableColumn".into(),
+            attrs: vec![],
+            children: vec![sentence(t)],
+        })
+    }
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut i = 0;
+    while i < cells.len() {
+        let head = cells[i].starts_with('第') || rows.is_empty();
+        let n = if head { 3 } else { 2 };
+        let mut row: Vec<String> = if head { vec![] } else { vec![String::new()] };
+        row.extend(cells[i..(i + n).min(cells.len())].iter().cloned());
+        while row.len() < 3 {
+            row.push(String::new());
+        }
+        rows.push(row);
+        i += n;
+    }
+    Element {
+        name: "TableStruct".into(),
+        attrs: vec![],
+        children: vec![Node::Element(Element {
+            name: "Table".into(),
+            attrs: vec![],
+            children: rows
+                .iter()
+                .map(|r| {
+                    Node::Element(Element {
+                        name: "TableRow".into(),
+                        attrs: vec![],
+                        children: r.iter().map(|c| column(c)).collect(),
+                    })
+                })
+                .collect(),
+        })],
+    }
 }
 
 // ---------------------------------------------------------------- 事後検査と再パース

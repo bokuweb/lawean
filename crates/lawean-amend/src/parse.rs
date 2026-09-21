@@ -49,7 +49,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         let Some(unit) = units.last_mut() else {
             return Err(ParseError::NoHeader);
         };
-        let is_instruction = indent >= 2 && line.ends_with('。') && !line.starts_with('（');
+        let is_instruction = indent == 2 && line.ends_with('。') && !line.starts_with('（');
         if is_instruction {
             let ops = parse_instruction(line)?;
             unit.instructions.push(Instruction {
@@ -261,29 +261,35 @@ fn ante_loc(ante: &Ante, seg: &str) -> Result<Loc, ParseError> {
 }
 
 pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
-    static RULES: OnceLock<Vec<Regex>> = OnceLock::new();
+    static RULES: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
     let rules = RULES.get_or_init(|| {
         [
-            r"^目次中「(?P<a>.+)」を「(?P<b>.+)」に改める$",
+            ("toc", r"^目次中「(?P<a>.+)」を「(?P<b>.+)」に改める$"),
+            // 見出しは「中」の規則より先に（「第四十二条の見出し中「A」を「B」に改め」）
+            ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_set", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出しを「(?P<a>.+?)」に(?:改め(?:る)?)?$"),
             // 「改める」「加える」が付かない形は、同じ文の中で「、」で連なる列挙の途中（「A」を「B」に、「C」を「D」に改める）
-            r"^(?P<loc>.+?)中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$",
-            r"^(?P<loc>.+?)中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$",
+            ("replace", r"^(?P<loc>.+?)中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("insert_phrase", r"^(?P<loc>.+?)中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
             // 位置を省いた続き: 「第X中「A」の下に「B」を加え、「C」を「D」に改める」の後半。直前の位置を引き継ぐ
-            r"^「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$",
-            r"^「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$",
-            r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$",
-            r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$",
-            r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$",
-            r"^(?P<loc>.+?)の次に次の一項を加え(?:る)?$",
-            r"^(?P<loc>.+?)に次の一項を加え(?:る)?$",
-            r"^第(?P<ch>{N})章に次の一条を加え(?:る)?$",
-            r"^(?P<loc>.+?)を次のように改め(?:る)?$",
-            r"^(?P<loc>.+?)を削(?:り|る)$",
-            r"^(?P<loc>第{N}条(?:の{N})*)の次に次の一条を加え(?:る)?$",
-            r"^(?P<loc>.+?)に後段として次のように加え(?:る)?$",
+            ("replace_cont", r"^「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("insert_phrase_cont", r"^「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
+            ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
+            ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
+            ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
+            // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
+            ("renumber_art", r"^(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
+            ("insert_para_after", r"^(?P<loc>.+?)の次に次の一項を加え(?:る)?$"),
+            ("append_para", r"^(?P<loc>.+?)に次の一項を加え(?:る)?$"),
+            ("append_art", r"^第(?P<ch>{N})章に次の一条を加え(?:る)?$"),
+            ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
+            ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
+            ("insert_arts_after", r"^(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
+            ("append_sentence", r"^(?P<loc>.+?)に後段として次のように加え(?:る)?$"),
         ]
         .iter()
-        .map(|s| re(s))
+        .map(|(n, s)| (*n, re(s)))
         .collect()
     });
     let mut ante = Ante {
@@ -295,15 +301,17 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
     for seg in split_segments(line) {
         let seg = seg.trim();
         // 字句の置換・追加・削除は正規表現でなく手で読む（置換先に「」が入れ子になることがある）。
-        // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する
-        if !seg.contains("及び") || seg.starts_with('「') {
+        // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する。見出しの中は別
+        let loc_part = seg.split("中「").next().unwrap_or("");
+        if (!loc_part.contains("及び") || seg.starts_with('「')) && !loc_part.contains("見出し")
+        {
             if let Some(op) = parse_phrase_op(seg, &mut ante)? {
                 ops.push(op);
                 continue;
             }
         }
         let mut matched = false;
-        for (i, r) in rules.iter().enumerate() {
+        for (name, r) in rules.iter() {
             let Some(c) = r.captures(seg) else { continue };
             matched = true;
             let g = |n: &str| {
@@ -313,10 +321,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             };
             let num = |n: &str| kanji_to_u32(&g(n)).unwrap_or(0);
             // 「第百条第三項及び第百三条第四項中「A」を「B」に改める」: 位置ごとに同じ操作
-            if (i == 1 || i == 2) && g("loc").contains("及び") {
+            if (*name == "replace" || *name == "insert_phrase") && g("loc").contains("及び") {
                 for l in g("loc").split("及び") {
                     let at = loc(l, &mut ante)?;
-                    ops.push(if i == 1 {
+                    ops.push(if *name == "replace" {
                         Op::Replace {
                             at,
                             from: g("a"),
@@ -332,32 +340,41 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 }
                 break;
             }
-            let op = match i {
-                0 => Op::ReplaceToc {
+            let op = match *name {
+                "toc" => Op::ReplaceToc {
                     from: g("a"),
                     to: g("b"),
                 },
-                1 => Op::Replace {
+                "caption_replace" => Op::ReplaceCaption {
+                    article: loc(&g("loc"), &mut ante)?.article,
+                    from: g("a"),
+                    to: g("b"),
+                },
+                "caption_set" => Op::SetCaption {
+                    article: loc(&g("loc"), &mut ante)?.article,
+                    text: g("a"),
+                },
+                "replace" => Op::Replace {
                     at: loc(&g("loc"), &mut ante)?,
                     from: g("a"),
                     to: g("b"),
                 },
-                2 => Op::InsertAfterPhrase {
+                "insert_phrase" => Op::InsertAfterPhrase {
                     at: loc(&g("loc"), &mut ante)?,
                     anchor: g("a"),
                     text: g("b"),
                 },
-                3 => Op::Replace {
+                "replace_cont" => Op::Replace {
                     at: ante_loc(&ante, seg)?,
                     from: g("a"),
                     to: g("b"),
                 },
-                4 => Op::InsertAfterPhrase {
+                "insert_phrase_cont" => Op::InsertAfterPhrase {
                     at: ante_loc(&ante, seg)?,
                     anchor: g("a"),
                     text: g("b"),
                 },
-                5 => {
+                "renumber_para" => {
                     let l = loc(&g("loc"), &mut ante)?;
                     ante.paragraph = Some(num("p"));
                     Op::RenumberParagraph {
@@ -366,7 +383,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         to: num("q"),
                     }
                 }
-                6 => {
+                "shift_paras" => {
                     let article = ante
                         .article
                         .clone()
@@ -379,7 +396,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         by,
                     }
                 }
-                7 => {
+                "renumber_para_same" => {
                     let l = loc(&g("loc"), &mut ante)?;
                     let from = l
                         .paragraph
@@ -391,7 +408,22 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         to: num("q"),
                     }
                 }
-                8 => {
+                "renumber_art" => {
+                    let from = loc(&g("loc"), &mut ante)?.article;
+                    let to = art_num(&format!("第{}条{}", g("q"), g("qb")));
+                    // 以後の「同条」は新しい番号
+                    ante.article = Some(to.clone());
+                    Op::RenumberArticle { from, to }
+                }
+                "shift_arts" => {
+                    let by = num("k") as i32 * if g("dir") == "下げ" { 1 } else { -1 };
+                    Op::ShiftArticles {
+                        from: num("p"),
+                        to: num("q"),
+                        by,
+                    }
+                }
+                "insert_para_after" => {
                     let l = loc(&g("loc"), &mut ante)?;
                     let after = l
                         .paragraph
@@ -403,29 +435,43 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         text: Vec::new(),
                     }
                 }
-                9 => {
+                "append_para" => {
                     let l = loc(&g("loc"), &mut ante)?;
                     Op::AppendParagraph {
                         article: l.article,
                         text: Vec::new(),
                     }
                 }
-                10 => Op::AppendArticle {
+                "append_art" => Op::AppendArticle {
                     chapter: num("ch"),
                     text: Vec::new(),
                 },
-                11 => {
-                    let l = loc(&g("loc"), &mut ante)?;
-                    Op::ReplaceArticle {
-                        article: l.article,
-                        text: Vec::new(),
+                "replace_whole" => {
+                    let l = g("loc");
+                    // 「同条後段を次のように改める」: 項の後段（前段）の差し替え
+                    if let Some(part) =
+                        [("後段", SentencePart::Back), ("前段", SentencePart::Front)]
+                            .iter()
+                            .find_map(|(sfx, p)| l.strip_suffix(sfx).map(|_| *p))
+                    {
+                        let base = l.trim_end_matches("後段").trim_end_matches("前段");
+                        Op::ReplaceSentencePart {
+                            at: loc(base, &mut ante)?,
+                            part,
+                            text: Vec::new(),
+                        }
+                    } else {
+                        Op::ReplaceArticle {
+                            article: loc(&l, &mut ante)?.article,
+                            text: Vec::new(),
+                        }
                     }
                 }
-                12 => Op::Delete {
+                "delete" => Op::Delete {
                     at: loc(&g("loc"), &mut ante)?,
                 },
-                13 => Op::InsertArticleAfter {
-                    after: art_num(&g("loc")),
+                "insert_arts_after" => Op::InsertArticleAfter {
+                    after: loc(&g("loc"), &mut ante)?.article,
                     text: Vec::new(),
                 },
                 _ => Op::AppendSentence {

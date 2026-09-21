@@ -9,7 +9,7 @@ Rust（と WASM）が呼ぶのは**この定義そのもの**をコンパイル�
 受け渡しは単純な行形式（本文は空白を除いてあるのでタブ・改行を含まない）:
 
 - リビジョン: 1 行 1 項 `id<TAB>art<TAB>text`
-- 改正単位: 1 行 1 操作 `replace<TAB>id<TAB>expected<TAB>new` / `insertAfter<TAB>anchor<TAB>newId<TAB>art<TAB>text` / `delete<TAB>id` / `resolve<TAB>id<TAB>text`
+- 改正単位: 1 行 1 操作 `replace<TAB>id<TAB>expected<TAB>new` / `insertAfter<TAB>anchor<TAB>newId<TAB>art<TAB>text` / `delete<TAB>id` / `resolve<TAB>id<TAB>text` / `renumber<TAB>id<TAB>art`
 - 結果: 1 行目が `ok` / `none`（対象の id が無い）、以下 1 行 1 項 `id<TAB>art<TAB>text<TAB>conflicts`（衝突は `\x1f` 区切り）
 
 `lean_io_mark_end_initialization` の後は純粋な関数なので、スレッドから呼んでも状態を持たない。
@@ -31,6 +31,7 @@ def parseUnit (s : String) : Option AmendUnit :=
     | ["insertAfter", anchor, newId, art, text] => some (.insertAfter anchor newId art text)
     | ["delete", id] => some (.delete id)
     | ["resolve", id, text] => some (.resolve id text)
+    | ["renumber", id, art] => some (.renumber id art)
     | _ => none
 
 def emitRevision (r : Revision) : String :=

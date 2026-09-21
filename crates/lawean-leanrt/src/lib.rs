@@ -47,6 +47,7 @@ pub fn encode_unit(ops: &[IdentOp]) -> String {
             } => format!("insertAfter\t{anchor}\t{new_id}\t{art}\t{text}"),
             IdentOp::Delete { id } => format!("delete\t{id}"),
             IdentOp::Resolve { id, text } => format!("resolve\t{id}\t{text}"),
+            IdentOp::Renumber { id, art } => format!("renumber\t{id}\t{art}"),
         })
         .collect::<Vec<_>>()
         .join("\n")
