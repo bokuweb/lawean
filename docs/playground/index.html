@@ -43,6 +43,7 @@
   .lean { font-size:12px; color:var(--muted); margin-top:10px; }
   .lean code { font-size:11px; }
   .status { font-size:12px; color:var(--muted); }
+table.cands { border-collapse: collapse; font-size: 12px; width: 100%; } table.cands th, table.cands td { border-bottom: 1px solid #ddd; padding: 2px 6px; text-align: left; vertical-align: top; } table.cands td.ctx { color: #666; max-width: 32em; } table.cands td:first-child, table.cands td:nth-child(3), table.cands td:last-child { white-space: nowrap; } table.cands tr.low td { color: #999; }
 </style>
 </head>
 <body>
@@ -88,7 +89,7 @@
   </section>
 </main>
 <script type="module">
-import init, { check } from './pkg/lawean_wasm.js';
+import init, { check, candidates } from './pkg/lawean_wasm.js';
 import createLean from './lean/lawean_lean.js';
 
 // 溶け込みは Lean の C 出力を Emscripten で組んだ WASM（証明した applyUnit そのもの、ADR-0017）で計算する。
@@ -191,6 +192,7 @@ async function run() {
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
     const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null };
     const t0 = performance.now();
+    lastBaseXml = base;
     const report = JSON.parse(check(JSON.stringify(input)));
     render(report, performance.now() - t0);
   } catch (e) {
@@ -200,6 +202,21 @@ async function run() {
 }
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+const FIELD_JA = { duration_value:'期間の値', duration:'期間（裸）', period:'事象からの期間', elapsed:'経過', within:'期限', window:'窓', before:'前', within_before:'前の期間', nth_day:'N日目', every:'周期', approx:'目途', compare:'期間の比較', calendar_day:'暦日', era_date:'元号日付', enforcement:'施行期日', sanction:'刑', penalty_target:'罰則の対象規定', penalty_act:'罰則の行為', money:'金額', ratio:'割合', rate:'利率', quantity:'数量' };
+// 層 1 の候補（発射台の全文から）。原文根拠つきで、値は確定しない
+let lastBaseXml = '';
+function candidatesSection() {
+  let cs;
+  try { cs = JSON.parse(candidates(lastBaseXml)); } catch (e) { return ''; }
+  if (!Array.isArray(cs)) return '';
+  let h = `<details><summary>発射台の全文から取った候補（層 1、${cs.length} 件: 時間表現・罰則・金額。原文根拠つき、値は確定しない）</summary><table class="cands"><tr><th>種類</th><th>原文</th><th>正規化</th><th>事象・役割</th><th>文脈</th><th>信頼</th></tr>`;
+  for (const c of cs.slice(0, 400)) {
+    h += `<tr class="${c.confidence}"><td>${FIELD_JA[c.field] || c.field}</td><td>${esc(c.raw)}</td><td>${esc(c.normalized ?? '')}${c.unit ? ' ' + esc(c.unit) : ''}</td><td>${esc(c.source_label ?? '')}${c.role ? ' / ' + esc(c.role) : ''}</td><td class="ctx" title="${esc(c.evidence.sentence)}">${esc(c.evidence.context)}</td><td>${c.confidence}</td></tr>`;
+  }
+  if (cs.length > 400) h += `<tr><td colspan="6">…ほか ${cs.length - 400} 件</td></tr>`;
+  return h + '</table></details>';
+}
 
 function render(r, ms) {
   if (r.error) { $('report').innerHTML = `<pre>${esc(r.error)}</pre>`; return; }
@@ -224,6 +241,7 @@ function render(r, ms) {
     h += `<details><summary>${esc(u.label)}: ${u.instructions} 文・${u.ops} 操作 → id 操作 ${u.ident_ops.length} 個（Lean の AmendUnit）</summary><pre>${esc(u.ident_ops.join('\n') || '（束縛できなかった）')}</pre></details>`;
   }
   h += `<details><summary>報告の JSON</summary><pre>${esc(JSON.stringify(r, null, 1))}</pre></details>`;
+  h += candidatesSection();
   $('report').innerHTML = h;
 }
 

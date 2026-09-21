@@ -32,3 +32,13 @@ pub fn check(input_json: &str) -> String {
     );
     serde_json::to_string(&report).unwrap()
 }
+
+/// 法令 XML の全文から、層 1 の候補（時間表現・罰則・金額）を JSON Lines ではなく JSON 配列で。
+/// 入力: e-Gov の XML。出力: `[{ field, category, raw, normalized, unit, role, source_label, evidence: { sentence, start, end, snippet, context }, confidence, reason }, ...]`
+#[wasm_bindgen]
+pub fn candidates(xml: &str) -> String {
+    match lawean_source::parse_response(xml) {
+        Ok(doc) => serde_json::to_string(&lawean_extract::candidates::candidates(&doc)).unwrap(),
+        Err(e) => format!("{{\"error\":\"{e}\"}}"),
+    }
+}

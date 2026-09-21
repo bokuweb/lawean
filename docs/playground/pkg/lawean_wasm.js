@@ -1,4 +1,25 @@
 /**
+ * 法令 XML の全文から、層 1 の候補（時間表現・罰則・金額）を JSON Lines ではなく JSON 配列で。
+ * 入力: e-Gov の XML。出力: `[{ field, category, raw, normalized, unit, role, source_label, evidence: { sentence, start, end, snippet, context }, confidence, reason }, ...]`
+ * @param {string} xml
+ * @returns {string}
+ */
+export function candidates(xml) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(xml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.candidates(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced? }。出力は `Report` の JSON
  * @param {string} input_json
  * @returns {string}

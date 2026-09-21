@@ -974,6 +974,8 @@ name = "lawean-wasm"
 version = "0.1.0"
 dependencies = [
  "lawean-check",
+ "lawean-extract",
+ "lawean-source",
  "serde_json",
  "wasm-bindgen",
 ]
