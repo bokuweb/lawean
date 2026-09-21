@@ -190,3 +190,43 @@ fn body_rendering_regenerates_the_real_hane_fixes_of_r3_37_art35() {
         ]
     );
 }
+
+/// 令3-37 第24条（区分所有法）から字句の置換を全部落として当てると、描画の差が実際の手当て 6 箇所と一致する
+/// （「前項の」→「同項の」は慣行の層 `render_pieces_styled`。「第九項本文」の「本文」は平文として残る）
+#[test]
+fn body_rendering_regenerates_the_six_hane_fixes_of_r3_37_art24() {
+    use lawean_amend::Op;
+    let base = parse_response(&fixture(
+        "revisions/337AC0000000069_20210519_503AC0000000037.xml",
+    ))
+    .unwrap();
+    let mut units = parse_units(&fixture("amendments/503AC0000000037_art24.txt")).unwrap();
+    for ins in &mut units[0].instructions {
+        ins.ops.retain(|o| !matches!(o, Op::Replace { .. }));
+    }
+    let x = bind(&base, &units[0], "x").unwrap().ops;
+    let rd = from_document(&base);
+    let rx = apply_unit(&rd, &x).unwrap();
+    let bodies: Vec<(String, Body)> = rd
+        .nodes
+        .iter()
+        .map(|n| (n.id.clone(), body_of(&rd, &n.id, &n.text)))
+        .collect();
+    let changed: Vec<(String, String, String)> = changed_refs(&rd, &rx, &bodies)
+        .into_iter()
+        .map(|(id, a, b)| (id.rsplit("/art:").next().unwrap().to_string(), a, b))
+        .collect();
+    let s = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+    assert_eq!(
+        changed,
+        [
+            s("61/para:9", "第十三項", "第十五項"),
+            s("61/para:11", "前項", "第十一項"),
+            s("61/para:11", "前項", "同項"),
+            s("61/para:13", "第九項", "第十項"),
+            s("63/para:2", "前項", "第一項"),
+            s("63/para:4", "第二項", "第三項"),
+            s("63/para:6", "第四項", "第五項"),
+        ]
+    );
+}

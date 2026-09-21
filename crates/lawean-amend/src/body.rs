@@ -199,6 +199,37 @@ pub fn render_body(r: &IdentRevision, src: &str, body: &Body) -> String {
     body.iter().map(|p| render_piece(r, src, p)).collect()
 }
 
+/// 断片ごとの描画に法制執務の慣行を 1 つ足したもの（Lean の写しの外。手当ての字句を実際の改め文に近づける）:
+/// 相対形（「前項」）が絶対形に変わった直後に、同じ項を指す相対形がまた絶対形に変わるなら「同項」と書く
+/// （令3-37 第24条: 第61条第11項の「前項に」→「第十一項に」、「前項の」→「同項の」）
+pub fn render_pieces_styled(r: &IdentRevision, src: &str, body: &Body) -> Vec<String> {
+    let mut out = Vec::with_capacity(body.len());
+    let mut prev_converted: Option<&str> = None; // 直前に相対形→絶対形になった参照の id
+    for p in body {
+        let rendered = render_piece(r, src, p);
+        match p {
+            Piece::Ref {
+                target,
+                form: RefForm::Prev(_) | RefForm::Next,
+            } => {
+                let converted = rendered.starts_with('第');
+                if converted && prev_converted == Some(target.as_str()) {
+                    out.push("同項".into());
+                } else {
+                    out.push(rendered);
+                }
+                prev_converted = converted.then_some(target.as_str());
+            }
+            Piece::Ref { .. } => {
+                prev_converted = None;
+                out.push(rendered);
+            }
+            Piece::Text(_) => out.push(rendered),
+        }
+    }
+    out
+}
+
 /// Lean `haneFixes`: 改正の前後（`r` → `r2`）で描画が変わる項の (id, 改正前の描画, 改正後の描画)
 pub fn hane_fixes(
     r: &IdentRevision,
@@ -223,12 +254,11 @@ pub fn changed_refs(
 ) -> Vec<(String, String, String)> {
     let mut out = Vec::new();
     for (id, body) in bodies {
-        for p in body {
-            if let Piece::Ref { .. } = p {
-                let (a, b) = (render_piece(r, id, p), render_piece(r2, id, p));
-                if a != b {
-                    out.push((id.clone(), a, b));
-                }
+        let before = render_pieces_styled(r, id, body);
+        let after = render_pieces_styled(r2, id, body);
+        for (p, (a, b)) in body.iter().zip(before.iter().zip(after.iter())) {
+            if matches!(p, Piece::Ref { .. }) && a != b {
+                out.push((id.clone(), a.clone(), b.clone()));
             }
         }
     }
