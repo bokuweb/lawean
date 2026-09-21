@@ -24,6 +24,8 @@
       <div>
         <label for="expected">改正後のリビジョン（あれば突き合わせる）</label>
         <select id="expected"></select>
+        <label for="base_draft">起草時の発射台（任意。改め文を書いたときの版。あれば施行前の他の改正との競合を見る）</label>
+        <select id="base_draft"></select>
       </div>
     </div>
     <label for="amend">改め文（編集できる）</label>
@@ -85,6 +87,11 @@ const REVISIONS = [
   ['revisions/327AC1000000176_20250601_504AC0000000068.xml', '宅建業法 2025-06-01（令4-68 施行後）'],
   ['revisions/323AC0000000201_20250401_503AC0000000049.xml', '医師法 2025-04-01（令4-68 の発射台）'],
   ['revisions/323AC0000000201_20250601_504AC0000000068.xml', '医師法 2025-06-01（令4-68 施行後）'],
+  ['revisions/324AC0000000108_20220617_504AC0000000068.xml', '古物営業法 2022-06-17（令4-68 の公布時 = 起草時の発射台）'],
+  ['revisions/327AC1000000176_20220518_503AC0000000037.xml', '宅建業法 2022-05-18（令4-68 の公布時 = 起草時の発射台）'],
+  ['revisions/414AC0000000078_20200624_502AC0000000062.xml', '建替え円滑化法 2020-06-24（令2-62 第2条の起草時）'],
+  ['revisions/414AC0000000078_20220401_502AC0000000008.xml', '建替え円滑化法 2022-04-01（令2-62 第2条の施行時。令3-37 施行後）'],
+  ['revisions/337AC0000000069_20200401_502AC0000000008.xml', '区分所有法 2020-04-01（令2-62 の起草時）'],
 ];
 const LAWS = [
   ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律（2022-05-18）'],
@@ -123,6 +130,9 @@ const LEAN = {
   'r4-68-ryokan': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
   'r4-68-takken': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
   'r4-68-ishi': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r2-62-vs-r3-37-stale': 'Rust の Stale（起草時・施行時の両方に束縛して比べる）。生成した手当てが令3-37 附則第63条と同じ',
+  'r4-68-takken-commutes': 'Rust の Stale（触る id が交わらない）。Lean は同じ形の古物営業法で Pending.lean: independent_art98_intervening → art98_intervening_commute（applyUnit_comm）',
+  'r5-53-art125-future-base': 'Rust の Stale（起草時の版には当たらず施行時の版に当たる = 先行改正の施行後を前提）',
   'r3-51-koshoku-senkyo-fix': 'Koshoku.lean: consolidates_503AC0000000051（本則 1167 項が e-Gov と一致）',
 };
 
@@ -133,7 +143,7 @@ async function selectCase(id) {
   current = cases.find(c => c.id === id);
   if (!current) return;
   $('note').innerHTML = `<b>${current.kind === 'success' ? '成功例' : '失敗例'}</b> — ${current.note || ''}<br><span>出典: ${current.source || ''}</span>`;
-  for (const [sel, v] of [['base', current.base], ['expected', current.expected || '']]) {
+  for (const [sel, v] of [['base', current.base], ['expected', current.expected || ''], ['base_draft', current.base_draft || '']]) {
     if (v && ![...$(sel).options].some(o => o.value === v)) $(sel).append(new Option(v, v));
     $(sel).value = v;
   }
@@ -149,8 +159,10 @@ async function run() {
   try {
     const base = await load($('base').value);
     const expected = $('expected').value ? await load($('expected').value) : null;
+    const base_draft = $('base_draft').value ? await load($('base_draft').value) : null;
+    const other_laws_draft = current && current.other_laws_draft ? await Promise.all(current.other_laws_draft.map(load)) : [];
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
-    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null };
+    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null, base_draft, other_laws_draft };
     const t0 = performance.now();
     lastBaseXml = base;
     const report = JSON.parse(check(JSON.stringify(input)));
@@ -173,6 +185,7 @@ function render(r, ms) {
   await setup();
   fill($('base'), REVISIONS, false);
   fill($('expected'), REVISIONS, true);
+  fill($('base_draft'), REVISIONS, true);
   fill($('laws'), LAWS, false);
   cases = JSON.parse(await load('cases/cases.json'));
   const sel = $('case');

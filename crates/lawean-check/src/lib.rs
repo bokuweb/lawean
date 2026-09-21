@@ -15,6 +15,7 @@
 //! | `Taisho`（新旧対照表） | 本文の突き合わせ | 新旧対照表の「新」欄が溶け込み後の本文と違う（2021 年のデジタル改革関連法案の誤りの型） |
 //! | `CrossLaw`（他法令） | `lawean-space::impact` | 他法令からの参照切れ・ずれ |
 //! | `Enforcement`（施行期日） | `lawean-extract::suppl` + 暦 | 施行日が改正法の附則「公布の日から起算して一年を超えない範囲内」の外 |
+//! | `Stale`（先行改正との競合） | `stale`（`ident::bind` を起草時・施行時の両方の発射台に） | 起草後・施行前に別の改正が施行されて、字句が消える（空振り）・「第N項」が別の項を指す・加える本文の参照がずれる・同じ項を両方が改める。独立なら可換（Lean `applyUnit_comm`）で調整規定は要らない（令3-37 附則第63条 ← 令2-62 の実例、docs/13） |
 //! | `Penalty`（罰則の空振り） | `lawean-extract::penalty` | 罰則が指す規定に、罰則の行為（「表示しなかつた」）が無い。改正で新たに生じたものが Fail（公職選挙法 平成30年法律第75号の実例） |
 //!
 //! Lean との関係: `Consolidate` / `Conflict` / `Order` の溶け込みは、Lean ランタイムがリンクされていれば
@@ -26,6 +27,8 @@ use lawean_amend::ident::{self, IdentOp, IdentRevision};
 use lawean_amend::{article_label, hane_candidates, parse_units, AmendUnit};
 use lawean_source::{parse_response, ArticleNum, LegalDocument};
 use lawean_space::{impact, locate, ImpactKind, LawSpace};
+
+pub mod stale;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +45,7 @@ pub enum Kind {
     CrossLaw,
     Enforcement,
     Penalty,
+    Stale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +141,10 @@ pub struct Input<'a> {
     pub suppl: Option<&'a str>,
     /// 公布（予定）日 `YYYY-MM-DD`。附則の「公布の日から起算して…」の起点
     pub promulgated: Option<&'a str>,
+    /// 起草時の発射台（改め文を書いたときの法令の状態）。`base` は施行時の状態。両方あれば先行改正との競合を見る
+    pub base_draft: Option<&'a LegalDocument>,
+    /// 他法令の起草時の版（`space` と同じ法令 ID で）
+    pub space_draft: Option<&'a LawSpace>,
 }
 
 fn check(kind: Kind, status: Status, message: impl Into<String>, details: Vec<String>) -> Check {
@@ -203,6 +211,8 @@ pub fn run(input: &Input<'_>) -> Report {
     let mut hane_warn = Vec::new();
     let mut hane_ok = 0usize;
     let mut suggested: Vec<lawean_amend::Op> = Vec::new();
+    // 先行改正とのずれの手当て（改め文の本文に施すもの。改正法の改正の形）
+    let mut stale_fixes: Vec<String> = Vec::new();
     let mut stopped = false;
 
     for (i, (label, unit)) in input.units.iter().enumerate() {
@@ -730,6 +740,60 @@ pub fn run(input: &Input<'_>) -> Report {
         _ => check(Kind::Enforcement, Status::Skip, "施行日が無い", vec![]),
     });
 
+    // 先行改正との競合: 起草時の発射台があれば、両方に束縛して比べる
+    checks.push(match input.base_draft {
+        None => check(
+            Kind::Stale,
+            Status::Skip,
+            "起草時の発射台が無い（施行時の発射台だけで検査）",
+            vec![],
+        ),
+        Some(draft) => {
+            let mut fails = Vec::new();
+            let mut warns = Vec::new();
+            let mut infos = Vec::new();
+            for (label, unit) in &input.units {
+                let o = stale::check_unit(
+                    label,
+                    unit,
+                    draft,
+                    input.base,
+                    input.space_draft,
+                    input.space,
+                );
+                fails.extend(o.fails);
+                warns.extend(o.warns);
+                infos.extend(o.infos);
+                stale_fixes.extend(o.fixes);
+            }
+            let mut details = fails.clone();
+            details.extend(warns.iter().cloned());
+            details.extend(infos.iter().cloned());
+            if !fails.is_empty() {
+                check(
+                    Kind::Stale,
+                    Status::Fail,
+                    "起草後に施行された改正とぶつかる（空振り・別の項・参照のずれ・同じ項）",
+                    details,
+                )
+            } else if !warns.is_empty() {
+                check(
+                    Kind::Stale,
+                    Status::Warn,
+                    "起草後に施行された改正との関係を確かめる",
+                    details,
+                )
+            } else {
+                check(
+                    Kind::Stale,
+                    Status::Pass,
+                    "起草後に施行された改正と独立（順序を入れ替えても同じ結果）",
+                    details,
+                )
+            }
+        }
+    });
+
     // 罰則の空振り: 改正後の本文で、罰則の行為・効果種別が対象規定と合わないもの。改正前から在るものは Warn
     checks.push(if stopped {
         check(Kind::Penalty, Status::Skip, "溶け込みが止まった", vec![])
@@ -739,7 +803,7 @@ pub fn run(input: &Input<'_>) -> Report {
 
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let diff = id_diff(&base_rev, &cur_rev);
-    let suggested_fixes = if suggested.is_empty() {
+    let mut suggested_fixes = if suggested.is_empty() {
         vec![]
     } else {
         vec![
@@ -751,6 +815,7 @@ pub fn run(input: &Input<'_>) -> Report {
             .to_string(),
         ]
     };
+    suggested_fixes.extend(stale_fixes);
     Report {
         ok,
         units: units_out,
@@ -1310,6 +1375,49 @@ pub fn run_texts(
     suppl: Option<&str>,
     promulgated: Option<&str>,
 ) -> Report {
+    run_text_input(&TextInput {
+        base_xml,
+        amendment,
+        expected_xml,
+        taisho,
+        other_laws,
+        enforced,
+        suppl,
+        promulgated,
+        ..Default::default()
+    })
+}
+
+/// `run_texts` の入力をまとめたもの（起草時の発射台つき）
+#[derive(Default)]
+pub struct TextInput<'a> {
+    pub base_xml: &'a str,
+    pub amendment: &'a str,
+    pub expected_xml: Option<&'a str>,
+    pub taisho: Option<&'a str>,
+    pub other_laws: &'a [String],
+    pub enforced: Option<&'a str>,
+    pub suppl: Option<&'a str>,
+    pub promulgated: Option<&'a str>,
+    /// 起草時の発射台の XML（あれば `Stale` 検査）
+    pub base_draft_xml: Option<&'a str>,
+    /// 他法令の起草時の版
+    pub other_laws_draft: &'a [String],
+}
+
+pub fn run_text_input(t: &TextInput<'_>) -> Report {
+    let TextInput {
+        base_xml,
+        amendment,
+        expected_xml,
+        taisho,
+        other_laws,
+        enforced,
+        suppl,
+        promulgated,
+        base_draft_xml,
+        other_laws_draft,
+    } = *t;
     let base = match parse_response(base_xml) {
         Ok(d) => d,
         Err(e) => {
@@ -1395,6 +1503,17 @@ pub fn run_texts(
             )),
         }
     }
+    let base_draft = base_draft_xml.and_then(|x| parse_response(x).ok());
+    let mut space_draft = None;
+    if !other_laws_draft.is_empty() {
+        let mut s = LawSpace::new();
+        for x in other_laws_draft {
+            if let Ok(d) = parse_response(x) {
+                s.add(d);
+            }
+        }
+        space_draft = Some(s);
+    }
     let mut report = run(&Input {
         base: &base,
         units: labels,
@@ -1405,6 +1524,8 @@ pub fn run_texts(
         enforced,
         suppl,
         promulgated,
+        base_draft: base_draft.as_ref(),
+        space_draft: space_draft.as_ref(),
     });
     report.checks.insert(
         0,

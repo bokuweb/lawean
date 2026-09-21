@@ -390,6 +390,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^第(?P<ch>{N})章に次の一条を加え(?:る)?$"),
+            ("insert_chapter_after", r"^第(?P<ch>{N})章の次に次の一章を加え(?:る)?$"),
+            ("renumber_chapter", r"^第(?P<ch>{N})章を第(?P<q>{N})章と(?:し|する)$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
             ("insert_arts_after", r"^(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
@@ -556,6 +558,14 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 "append_art" => Op::AppendArticle {
                     chapter: num("ch"),
                     text: Vec::new(),
+                },
+                "insert_chapter_after" => Op::InsertChapterAfter {
+                    after: num("ch"),
+                    text: Vec::new(),
+                },
+                "renumber_chapter" => Op::RenumberChapter {
+                    from: num("ch"),
+                    to: num("q"),
                 },
                 "replace_whole" => {
                     let l = g("loc");

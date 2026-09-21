@@ -6,7 +6,7 @@
 
 use wasm_bindgen::prelude::*;
 
-/// 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日） }。出力は `Report` の JSON
+/// 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日）, base_draft?（起草時の発射台）, other_laws_draft?: [xml] }。出力は `Report` の JSON
 #[wasm_bindgen]
 pub fn check(input_json: &str) -> String {
     let v: serde_json::Value = match serde_json::from_str(input_json) {
@@ -22,16 +22,26 @@ pub fn check(input_json: &str) -> String {
                 .collect()
         })
         .unwrap_or_default();
-    let report = lawean_check::run_texts(
-        s("base").unwrap_or(""),
-        s("amendment").unwrap_or(""),
-        s("expected"),
-        s("taisho"),
-        &others,
-        s("enforced"),
-        s("suppl"),
-        s("promulgated"),
-    );
+    let others_draft: Vec<String> = v["other_laws_draft"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let report = lawean_check::run_text_input(&lawean_check::TextInput {
+        base_xml: s("base").unwrap_or(""),
+        amendment: s("amendment").unwrap_or(""),
+        expected_xml: s("expected"),
+        taisho: s("taisho"),
+        other_laws: &others,
+        enforced: s("enforced"),
+        suppl: s("suppl"),
+        promulgated: s("promulgated"),
+        base_draft_xml: s("base_draft"),
+        other_laws_draft: &others_draft,
+    });
     serde_json::to_string(&report).unwrap()
 }
 

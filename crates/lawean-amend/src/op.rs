@@ -52,6 +52,10 @@ pub enum Op {
     },
     /// 「第N章に次の一条を加える」
     AppendArticle { chapter: u32, text: Vec<String> },
+    /// 「第N章の次に次の一章を加える」+ 章の内容（「第M章　題名」「第一節　…」「（見出し）」「第K条　本文」…）
+    InsertChapterAfter { after: u32, text: Vec<String> },
+    /// 「第N章を第M章とする」
+    RenumberChapter { from: u32, to: u32 },
     /// 「第N条の次に次の一条を加える」
     InsertArticleAfter {
         after: ArticleNum,
@@ -110,7 +114,10 @@ impl Op {
     /// この操作が触る被改正法の条（目次・章末への追加は None）
     pub fn article(&self) -> Option<&ArticleNum> {
         match self {
-            Op::ReplaceToc { .. } | Op::AppendArticle { .. } => None,
+            Op::ReplaceToc { .. }
+            | Op::AppendArticle { .. }
+            | Op::InsertChapterAfter { .. }
+            | Op::RenumberChapter { .. } => None,
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
             | Op::AppendSentence { at, .. }
@@ -135,6 +142,7 @@ impl Op {
             Op::AppendParagraph { .. }
                 | Op::InsertParagraphAfter { .. }
                 | Op::AppendArticle { .. }
+                | Op::InsertChapterAfter { .. }
                 | Op::InsertArticleAfter { .. }
                 | Op::AppendSentence { .. }
                 | Op::ReplaceArticle { .. }
@@ -147,6 +155,7 @@ impl Op {
             Op::AppendParagraph { text, .. }
             | Op::InsertParagraphAfter { text, .. }
             | Op::AppendArticle { text, .. }
+            | Op::InsertChapterAfter { text, .. }
             | Op::InsertArticleAfter { text, .. }
             | Op::AppendSentence { text, .. }
             | Op::ReplaceArticle { text, .. }

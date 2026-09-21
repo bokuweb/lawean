@@ -82,6 +82,17 @@ fn segment(op: &Op, last: bool) -> String {
                 end("加え", "加える")
             )
         }
+        Op::InsertChapterAfter { after, .. } => format!(
+            "第{}章の次に次の一章を{}",
+            to_kanji(*after),
+            end("加え", "加える")
+        ),
+        Op::RenumberChapter { from, to } => format!(
+            "第{}章を第{}章と{}",
+            to_kanji(*from),
+            to_kanji(*to),
+            end("し", "する")
+        ),
         Op::AppendArticle { chapter, .. } => format!(
             "第{}章に次の一条を{}",
             to_kanji(*chapter),
@@ -183,6 +194,7 @@ fn content_of(op: &Op) -> &[String] {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
         | Op::AppendArticle { text, .. }
+        | Op::InsertChapterAfter { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::AppendSentence { text, .. }
         | Op::ReplaceArticle { text, .. }

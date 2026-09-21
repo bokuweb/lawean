@@ -19,6 +19,10 @@ struct Case {
     taisho: Option<String>,
     other_laws: Vec<String>,
     enforced: Option<String>,
+    #[serde(default)]
+    base_draft: Option<String>,
+    #[serde(default)]
+    other_laws_draft: Vec<String>,
     expect: Expect,
 }
 
@@ -29,16 +33,18 @@ fn fixture(rel: &str) -> String {
 
 fn run_case(c: &Case) -> Report {
     let others: Vec<String> = c.other_laws.iter().map(|p| fixture(p)).collect();
-    run_texts(
-        &fixture(&c.base),
-        &fixture(&c.amendment),
-        c.expected.as_deref().map(fixture).as_deref(),
-        c.taisho.as_deref().map(fixture).as_deref(),
-        &others,
-        c.enforced.as_deref(),
-        None,
-        None,
-    )
+    let others_draft: Vec<String> = c.other_laws_draft.iter().map(|p| fixture(p)).collect();
+    run_text_input(&TextInput {
+        base_xml: &fixture(&c.base),
+        amendment: &fixture(&c.amendment),
+        expected_xml: c.expected.as_deref().map(fixture).as_deref(),
+        taisho: c.taisho.as_deref().map(fixture).as_deref(),
+        other_laws: &others,
+        enforced: c.enforced.as_deref(),
+        base_draft_xml: c.base_draft.as_deref().map(fixture).as_deref(),
+        other_laws_draft: &others_draft,
+        ..Default::default()
+    })
 }
 
 #[test]
@@ -108,6 +114,40 @@ fn failure_details_name_the_cause() {
     let r = get("hane-wrong-number");
     let d = detail(&r, Kind::Hane);
     assert!(d.contains("改め文にあるのは「第四項」"), "{d}");
+    // 令3-37 附則第63条が令2-62 の改め文に施した 3 つの手当てを、起草時・施行時の発射台の突き合わせから生成する
+    let r = get("r2-62-vs-r3-37-stale");
+    let d = detail(&r, Kind::Stale);
+    assert!(
+        d.contains("空振り") && d.contains("「、区分所有法第六十三条第五項」が無い"),
+        "{d}"
+    );
+    assert!(
+        d.contains("「第二十八条第五項」→「第二十八条第七項」"),
+        "{d}"
+    );
+    assert!(
+        d.contains("「第四項」→「第六項」") && d.contains("「第六項」→「第八項」"),
+        "{d}"
+    );
+    assert!(
+        r.suggested_fixes
+            .iter()
+            .any(|f| f == "第百七十八条中「第二十八条第五項」を「第二十八条第七項」に改める。"),
+        "{:?}",
+        r.suggested_fixes
+    );
+    let r = get("r4-68-takken-commutes");
+    let d = detail(&r, Kind::Stale);
+    assert!(d.contains("独立") && d.contains("applyUnit_comm"), "{d}");
+    let r = get("r5-53-art125-future-base");
+    assert_eq!(
+        r.checks
+            .iter()
+            .find(|c| c.kind == Kind::Stale)
+            .unwrap()
+            .status,
+        Status::Warn
+    );
     let r = get("wrong-ref");
     assert!(
         detail(&r, Kind::Base).contains("第38条第11項"),

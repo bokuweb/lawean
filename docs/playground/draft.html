@@ -46,6 +46,8 @@
     </div>
     <label for="laws">他法令（参照の波及を見る。発射台を引いている法令は自動で選ぶ。複数選択）</label>
     <select id="laws" multiple size="4"></select>
+    <label for="future">施行日までに施行される未施行の改正（任意）。選ぶと、改め文はその版に当たるものとして検査し、上の発射台は「起草時の版」になる（先行改正との競合: 空振り・別の項・参照のずれ・可換性）</label>
+    <select id="future"></select>
     <button id="run">検査する</button>
     <button id="z3" class="secondary">Z3 で確かめる（ブラウザ内の z3。初回に 33MB 読む）</button>
     <span class="status" id="status"></span>
@@ -72,6 +74,14 @@ const BASES = [
   ['laws/323AC0000000201.xml', '医師法'],
   ['laws/324AC0000000108.xml', '古物営業法'],
   ['revisions/325AC1000000100_20210602_503AC0000000051.xml', '公職選挙法（2021-06-02）'],
+];
+// 未施行の改正が溶け込んだ版（e-Gov は未施行のリビジョンも返す）。起草時の発射台との競合を見るのに使う
+const FUTURES = [
+  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '借地借家法 2028-06-13（令5-53 第125条 施行後。条ずれ）'],
+  ['revisions/403AC0000000090_20260521_504AC0000000048.xml', '借地借家法 2026-05-21（令4-48 第74条 施行後 = 現行）'],
+  ['revisions/403AC0000000090_20220518_503AC0000000037.xml', '借地借家法 2022-05-18（令3-37 第35条 施行後）'],
+  ['revisions/327AC1000000176_20250401_506AC0000000053.xml', '宅建業法 2025-04-01（令6-53 施行後）'],
+  ['revisions/414AC0000000078_20220401_502AC0000000008.xml', '建替え円滑化法 2022-04-01（令3-37 施行後）'],
 ];
 // 発射台ごとの初期値: 実際に成立した改正法の改め文と、その附則（施行期日）・公布日・施行日
 const PRESETS = {
@@ -228,8 +238,10 @@ async function run() {
   $('status').textContent = '検査中…';
   try {
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
+    const future = $('future').value ? await load($('future').value) : null;
     const input = {
-      base: baseXml, amendment: $('amend').value, expected: null, taisho: null, other_laws,
+      base: future || baseXml, base_draft: future ? baseXml : null,
+      amendment: $('amend').value, expected: null, taisho: null, other_laws,
       enforced: $('enforced').value || null, suppl: $('suppl').value.trim() || null, promulgated: $('promulgated').value || null,
     };
     lastInput = input;
@@ -254,6 +266,7 @@ async function run() {
   await setup();
   fill($('base'), BASES, false);
   fill($('laws'), LAWS, false);
+  fill($('future'), FUTURES, true);
   $('basefile').onchange = async (e) => { const f = e.target.files[0]; if (f) setBase(await f.text()); };
   $('filter').oninput = showOutline;
   $('run').onclick = run;

@@ -20,7 +20,7 @@ export function candidates(xml) {
 }
 
 /**
- * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日） }。出力は `Report` の JSON
+ * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日）, base_draft?（起草時の発射台）, other_laws_draft?: [xml] }。出力は `Report` の JSON
  * @param {string} input_json
  * @returns {string}
  */

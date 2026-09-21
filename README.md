@@ -22,7 +22,8 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で検出する。実データは高齢者居住安定確保法・借地借家法施行令 | 実装（Lean は未） |
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
-| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 16 件（通る）と、失敗例 14 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
+| [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を、起草時と施行時の版から生成して再現。独立なら可換（Lean `applyUnit_comm`、`Pending.lean` で実データ） | 実装 |
+| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 18 件（通る）と、失敗例 15 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
 | [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。実例のケース集と、[発射台を選んで改正法を書いて検査する](docs/playground/draft.html) 画面（Z3 もブラウザ内）。公開: https://bokuweb.github.io/lawean/ | — |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
@@ -47,7 +48,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-space](crates/lawean-space) | **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）。法令空間、法令をまたぐ参照の解決、改正による条・項の移動と本文変化の追跡、参照切れ・ずれ・意味変化・時期不整合の報告、上書きの循環検出。テスト計画 1〜5 が実データ + 自作改正案で通る |
 | [lawean-render](crates/lawean-render) | **逆変換**（[ADR-0012](docs/adr/0012-structured-authoring.md)）。`Op` → 改め文（実改正 2 件で parse ∘ render = id）、Semantic IR → 日本語（原文と並べてレビュー） |
 | [lawean-verify](crates/lawean-verify) | Verification IR（[docs/07](docs/07-verification.md)）。Semantic IR を SMT-LIB に落とし z3 で性質を証明・反証。手書き IR で 第3・4・9・22条の性質 6 件（証明 5、意図した反例 1）。**無矛盾検査** `conflicts`（相反する効果が同時に適用される世界を探す）。**期間の計算** `temporal`（民法 140〜143 条を暦の式に。初日不算入・応当日・月末）と**効力の区間** `validity`（参照元が効力を持つのに参照先が違う日を反例に。公職選挙法の 3 年の空白）。手書き IR のバグを 2 件検出（第4条の「これ」、第4条の括弧書きとただし書きの優先） |
-| [lawean-check](crates/lawean-check) | **検査 API**（サービスが呼ぶもの、[docs/12](docs/12-cases.md)）。発射台・順序・衝突・ハネ・溶け込み・改正後との一致・新旧対照表・他法令の 9 検査を `Report` に。`cargo run -p lawean-check --example check -- --case <id>` |
+| [lawean-check](crates/lawean-check) | **検査 API**（サービスが呼ぶもの、[docs/12](docs/12-cases.md)）。発射台・順序・衝突・ハネ・溶け込み・改正後との一致・新旧対照表・他法令・施行期日・罰則・先行改正（[docs/13](docs/13-pending-amendments.md)）の検査を `Report` に。`cargo run -p lawean-check --example check -- --case <id>` |
 | [lawean-leanrt](crates/lawean-leanrt) | **証明した定義そのものを呼ぶ**（[ADR-0017](docs/adr/0017-lean-to-c-is-the-runtime.md)）。`lean/Lawean/Ffi.lean` の `@[export]` → `lake build Lawean:static` → C の皮 → Rust。`lawean-check` は Lean がリンクされていればこちらで溶け込む（`Report.engine = "lean"`）。公職選挙法 1167 項で 6 ms |
 | [lawean-wasm](crates/lawean-wasm) | `lawean-check` を wasm32 に（playground 用）。溶け込みは `docs/playground/lean/` の Lean WASM を JS 越しに呼ぶ |
 | [lawean-resolve](crates/lawean-resolve) | Resolved IR。条項参照（前項・同条・第N条第M項・附則第N条・他法令）の認識と解決、overrides の逆引き、scope → Rule 集合、定義語の有効 scope。借地借家法の参照 233 件を未解決 0 で解決 |
@@ -88,7 +89,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 13. ~~identity patch~~（[ADR-0013](docs/adr/0013-identity-patches.md)）: 割り込み（未確定施行日・整備法）で発射台がずれても同じ項に当たるよう、改正単位を stable_id で書く。独立なら可換を Lean で証明。Rust の束縛 `ident::bind` も実データ 3 件で通る
 14. **法令の意味を Lean に**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ ~~M3: 改正 × 意味の frame 定理を令3-37 で~~（5 性質を再証明なしで移送）→ M4: Lean → C（Rust の写しを消す）
 15. **層 2**（[docs/11](docs/11-layer2.md)）: 形態素解析 + 格助詞で候補 → grande で判定。docs/10 の M1〜M3 と並行、M5 で合流
-16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 16 件が通り、失敗例 14 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
+16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 18 件が通り、失敗例 15 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
     - ~~ハネの手当てを生成する~~（ADR-0012）: Rust が正しい置換を生成して改め文と突き合わせ、足りなければ改め文の形で提案。Lean `Refs.lean` で「描画が変わるのは参照先の番号が動いたときだけ」（完全性）を証明、令3-37 の実データで生成 = 実際の置換
     - ~~他法令への波及を Lean に~~（docs/09）: `Space.lean` の法令空間と `impact` の分類（健全性・完全性）。施行令の参照のずれと高齢者居住安定確保法の参照切れを実データで
     - ~~M4: Lean → C → Rust / WASM~~（[ADR-0017](docs/adr/0017-lean-to-c-is-the-runtime.md)）: `lawean-leanrt` が証明した `applyUnit` / `checkUnit` を C 経由で呼び `lawean-check` の本線に。playground もブラウザ内で Lean の WASM（Emscripten）が溶け込みを計算する。Rust の写しは代役

@@ -55,7 +55,7 @@ export function fill(sel, items, allowNone) {
 export const $ = id => document.getElementById(id);
 export function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
-export const KIND_JA = { parse:'改め文', base:'発射台', order:'施行順序', conflict:'衝突', hane:'ハネ', consolidate:'溶け込み', expected:'改正後との一致', taisho:'新旧対照表', cross_law:'他法令', enforcement:'施行期日', penalty:'罰則' };
+export const KIND_JA = { parse:'改め文', base:'発射台', order:'施行順序', conflict:'衝突', hane:'ハネ', consolidate:'溶け込み', expected:'改正後との一致', taisho:'新旧対照表', cross_law:'他法令', enforcement:'施行期日', stale:'先行改正', penalty:'罰則' };
 export const FIELD_JA = { duration_value:'期間の値', duration:'期間（裸）', period:'事象からの期間', elapsed:'経過', within:'期限', window:'窓', before:'前', within_before:'前の期間', nth_day:'N日目', every:'周期', approx:'目途', compare:'期間の比較', calendar_day:'暦日', era_date:'元号日付', enforcement:'施行期日', sanction:'刑', penalty_target:'罰則の対象規定', penalty_act:'罰則の行為', money:'金額', ratio:'割合', rate:'利率', quantity:'数量' };
 
 // 層 1 の候補（法令の全文から）。原文根拠つきで、値は確定しない

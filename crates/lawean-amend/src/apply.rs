@@ -2,6 +2,7 @@
 //! 対象が無ければ失敗する（発射台の不一致）。適用後は XML を経由して再パースし、stable_id を振り直す。
 
 use crate::op::*;
+use lawean_resolve::numeral::kanji_to_u32;
 use lawean_source::xml::{Element, Node};
 use lawean_source::*;
 use std::collections::BTreeMap;
@@ -130,6 +131,27 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let a = parse_article(text)?;
                 let ch = chapter_mut(doc, *chapter)?;
                 ch.children.push(Provision::Article(a));
+            }
+            Op::InsertChapterAfter { after, text } => {
+                let ch = parse_chapter(text)?;
+                let pos = doc
+                    .main_provision
+                    .iter()
+                    .position(|p| matches!(p, Provision::Container(c) if c.kind == ContainerKind::Chapter && c.num.as_deref() == Some(&after.to_string())))
+                    .ok_or(ApplyError::ChapterNotFound(*after))?;
+                doc.main_provision.insert(pos + 1, Provision::Container(ch));
+            }
+            Op::RenumberChapter { from, to } => {
+                let ch = chapter_mut(doc, *from)?;
+                ch.num = Some(to.to_string());
+                if let Some(t) = &mut ch.title {
+                    let label = inline_text(t);
+                    let rest = label.trim_start_matches(|c: char| c != '\u{3000}');
+                    *t = vec![Inline::Text(format!(
+                        "第{}章{rest}",
+                        lawean_resolve::numeral::to_kanji(*to)
+                    ))];
+                }
             }
             Op::InsertArticleAfter { after, text } => {
                 article_mut(doc, after)?;
@@ -689,6 +711,96 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
             .map(ArticleChild::Paragraph)
             .collect(),
     })
+}
+
+/// 「第N章　題名」「第一節　題名」「第一款」「第一目」の行
+fn container_line(l: &str) -> Option<(ContainerKind, String, String)> {
+    let (t, title) = l.split_once('\u{3000}')?;
+    let t = t.strip_prefix('第')?;
+    let kind = match t.chars().last()? {
+        '編' => ContainerKind::Part,
+        '章' => ContainerKind::Chapter,
+        '節' => ContainerKind::Section,
+        '款' => ContainerKind::Subsection,
+        '目' => ContainerKind::Division,
+        _ => return None,
+    };
+    let n = kanji_to_u32(&t[..t.len() - t.chars().last()?.len_utf8()])?;
+    Some((kind, n.to_string(), title.to_string()))
+}
+
+fn container_depth(k: ContainerKind) -> u8 {
+    match k {
+        ContainerKind::Part => 0,
+        ContainerKind::Chapter => 1,
+        ContainerKind::Section => 2,
+        ContainerKind::Subsection => 3,
+        ContainerKind::Division => 4,
+    }
+}
+
+/// 「次の一章を加える」の内容: 章・節・款・目の題名の行で入れ子の容器を作り、条はその中に置く
+pub(crate) fn parse_chapter(lines: &[String]) -> Result<Container, ApplyError> {
+    fn new_container(kind: ContainerKind, num: String, title: String) -> Container {
+        let label = lawean_resolve::numeral::to_kanji(num.parse().unwrap_or(0));
+        Container {
+            stable_id: StableId(String::new()),
+            kind,
+            num: Some(num),
+            title: Some(vec![Inline::Text(format!(
+                "第{label}{}\u{3000}{title}",
+                match kind {
+                    ContainerKind::Part => "編",
+                    ContainerKind::Chapter => "章",
+                    ContainerKind::Section => "節",
+                    ContainerKind::Subsection => "款",
+                    ContainerKind::Division => "目",
+                }
+            ))]),
+            attrs: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+    // 容器のスタックと、今の容器に入れる条の行
+    let mut stack: Vec<Container> = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
+    fn flush(stack: &mut [Container], pending: &mut Vec<String>) -> Result<(), ApplyError> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let arts = parse_articles(pending)?;
+        pending.clear();
+        let top = stack
+            .last_mut()
+            .ok_or_else(|| ApplyError::BadContent("章の題名が無い".into()))?;
+        top.children
+            .extend(arts.into_iter().map(Provision::Article));
+        Ok(())
+    }
+    fn close_to(stack: &mut Vec<Container>, depth: u8) {
+        while stack.len() > 1 && container_depth(stack.last().unwrap().kind) >= depth {
+            let c = stack.pop().unwrap();
+            stack
+                .last_mut()
+                .unwrap()
+                .children
+                .push(Provision::Container(c));
+        }
+    }
+    for l in lines {
+        if let Some((kind, num, title)) = container_line(l) {
+            flush(&mut stack, &mut pending)?;
+            close_to(&mut stack, container_depth(kind));
+            stack.push(new_container(kind, num, title));
+        } else {
+            pending.push(l.clone());
+        }
+    }
+    flush(&mut stack, &mut pending)?;
+    close_to(&mut stack, 2);
+    stack
+        .pop()
+        .ok_or_else(|| ApplyError::BadContent("章の題名が無い".into()))
 }
 
 /// 「次の二条を加える」の内容を条ごとに分ける（「（見出し）」の行と「第N条　…」の行で区切る）

@@ -272,6 +272,144 @@ pub fn from_document(doc: &LegalDocument) -> IdentRevision {
     IdentRevision { nodes }
 }
 
+/// 2 つのリビジョン（起草時の版と施行時の版）の差を、起草時の版の id で書いた操作列にする。
+/// 改め文が手元に無い先行改正 B を、X と同じ id の世界に持ち込むためのもの（docs/13）。
+/// 対応は条ごとに本文が同じ項どうし、残りは本文の近い項どうし（順序を保つ）。
+/// 本文の違う項は `replace`、対応の無い新しい項は直前の項の後ろに `insertAfter`、消えた項は `delete`、条番号の違いは `renumber`。
+/// 当てた結果の `render` は施行時の版と一致する（テスト `derived_unit_reproduces_revision`）
+pub fn derive_unit(draft: &IdentRevision, enf: &IdentRevision, amend_id: &str) -> Vec<IdentOp> {
+    fn sim(a: &str, b: &str) -> f64 {
+        let ga: Vec<(char, char)> = a
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .collect();
+        let gb: Vec<(char, char)> = b
+            .chars()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .map(|w| (w[0], w[1]))
+            .collect();
+        if ga.is_empty() || gb.is_empty() {
+            return if a == b { 1.0 } else { 0.0 };
+        }
+        let mut counts: BTreeMap<(char, char), i64> = BTreeMap::new();
+        for g in &ga {
+            *counts.entry(*g).or_default() += 1;
+        }
+        let mut common = 0i64;
+        for g in &gb {
+            if let Some(c) = counts.get_mut(g) {
+                if *c > 0 {
+                    *c -= 1;
+                    common += 1;
+                }
+            }
+        }
+        2.0 * common as f64 / (ga.len() + gb.len()) as f64
+    }
+    // 条（art）ごとに、施行時の項 → 起草時の項（index）
+    let n_e = enf.nodes.len();
+    let mut e_to_d: Vec<Option<usize>> = vec![None; n_e];
+    let mut used_d = vec![false; draft.nodes.len()];
+    // 同じ本文（同じ条の中で）
+    for (ei, en) in enf.nodes.iter().enumerate() {
+        if let Some(di) = draft
+            .nodes
+            .iter()
+            .enumerate()
+            .position(|(di, dn)| !used_d[di] && dn.art == en.art && dn.text == en.text)
+        {
+            used_d[di] = true;
+            e_to_d[ei] = Some(di);
+        }
+    }
+    // 残りは近い本文（同じ条、順序を保つ）
+    for (ei, en) in enf.nodes.iter().enumerate() {
+        if e_to_d[ei].is_some() {
+            continue;
+        }
+        let lo = (0..ei)
+            .rev()
+            .find_map(|k| e_to_d[k])
+            .map(|d| d + 1)
+            .unwrap_or(0);
+        let hi = (ei + 1..n_e)
+            .find_map(|k| e_to_d[k])
+            .unwrap_or(draft.nodes.len());
+        let best = (lo..hi)
+            .filter(|di| !used_d[*di] && draft.nodes[*di].art == en.art)
+            .map(|di| (di, sim(&draft.nodes[di].text, &en.text)))
+            .filter(|(_, s)| *s >= 0.6)
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        if let Some((di, _)) = best {
+            used_d[di] = true;
+            e_to_d[ei] = Some(di);
+        }
+    }
+    // 条番号の違い（条ずれ）も拾う: 本文が同じで条だけ違う項
+    for (ei, en) in enf.nodes.iter().enumerate() {
+        if e_to_d[ei].is_some() {
+            continue;
+        }
+        if let Some(di) = draft
+            .nodes
+            .iter()
+            .enumerate()
+            .position(|(di, dn)| !used_d[di] && dn.text == en.text)
+        {
+            used_d[di] = true;
+            e_to_d[ei] = Some(di);
+        }
+    }
+    let mut ops = Vec::new();
+    let mut prev: Option<String> = None;
+    let mut k = 0u32;
+    for (ei, en) in enf.nodes.iter().enumerate() {
+        match e_to_d[ei] {
+            Some(di) => {
+                let dn = &draft.nodes[di];
+                if dn.text != en.text {
+                    ops.push(IdentOp::Replace {
+                        id: dn.id.clone(),
+                        expected: dn.text.clone(),
+                        new: en.text.clone(),
+                    });
+                }
+                if dn.art != en.art {
+                    ops.push(IdentOp::Renumber {
+                        id: dn.id.clone(),
+                        art: en.art.clone(),
+                    });
+                }
+                prev = Some(dn.id.clone());
+            }
+            None => {
+                k += 1;
+                let new_id = format!("{amend_id}/art:{}/new:{k}", en.art);
+                let anchor = match &prev {
+                    Some(p) => p.clone(),
+                    None => continue, // 先頭に加える形は無い（目次があるので実際は起きない）
+                };
+                ops.push(IdentOp::InsertAfter {
+                    anchor,
+                    new_id: new_id.clone(),
+                    art: en.art.clone(),
+                    text: en.text.clone(),
+                });
+                prev = Some(new_id);
+            }
+        }
+    }
+    for (di, dn) in draft.nodes.iter().enumerate() {
+        if !used_d[di] {
+            ops.push(IdentOp::Delete { id: dn.id.clone() });
+        }
+    }
+    ops
+}
+
 /// 改正法が振った id と e-Gov の id の対応。束縛した操作を発射台に当てた結果と、e-Gov の改正後リビジョンを
 /// 文書順で突き合わせる（`render` が一致していることが前提）。返すのは (当てた結果の id, e-Gov の id)
 pub fn id_map(
@@ -539,6 +677,58 @@ impl Binder<'_> {
                     chapter_mut(&mut self.doc, *chapter)?
                         .children
                         .push(Provision::Article(a));
+                }
+                Op::InsertChapterAfter { after, text } => {
+                    // 章の挿入 = 直前の章の最後の項の後ろに、新しい章の全部の項を順に並べる
+                    let ch = crate::apply::parse_chapter(text)?;
+                    let prev = chapter_mut(&mut self.doc, *after)?;
+                    let mut anchor = last_para_id_in(&prev.children)
+                        .ok_or(ApplyError::ChapterNotFound(*after))?;
+                    fn walk(b: &mut Binder<'_>, ps: &mut [Provision], anchor: &mut String) {
+                        for p in ps {
+                            match p {
+                                Provision::Container(c) => walk(b, &mut c.children, anchor),
+                                Provision::Article(a) => {
+                                    let mut children = Vec::new();
+                                    for c in std::mem::take(&mut a.children) {
+                                        let ArticleChild::Paragraph(p) = c else {
+                                            children.push(c);
+                                            continue;
+                                        };
+                                        let (id, p) = b.new_para(&a.num, p);
+                                        b.ops.push(IdentOp::InsertAfter {
+                                            anchor: anchor.clone(),
+                                            new_id: id.clone(),
+                                            art: a.num.to_num_string(),
+                                            text: para_text(&p),
+                                        });
+                                        *anchor = id;
+                                        children.push(ArticleChild::Paragraph(p));
+                                    }
+                                    a.children = children;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    let mut ch = ch;
+                    let mut inner = std::mem::take(&mut ch.children);
+                    walk(self, &mut inner, &mut anchor);
+                    ch.children = inner;
+                    let pos = self
+                        .doc
+                        .main_provision
+                        .iter()
+                        .position(|p| matches!(p, Provision::Container(c) if c.kind == ContainerKind::Chapter && c.num.as_deref() == Some(&after.to_string())))
+                        .ok_or(ApplyError::ChapterNotFound(*after))?;
+                    self.doc
+                        .main_provision
+                        .insert(pos + 1, Provision::Container(ch));
+                }
+                // 章の番号だけ。id の世界では何もしない
+                Op::RenumberChapter { from, to } => {
+                    let ch = chapter_mut(&mut self.doc, *from)?;
+                    ch.num = Some(to.to_string());
                 }
                 Op::InsertArticleAfter { after, text } => {
                     // 条の挿入 = 直前の条の最後の項の後ろに新しい項を並べる（「次の二条」なら順に）

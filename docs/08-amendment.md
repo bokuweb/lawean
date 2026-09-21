@@ -66,6 +66,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 第N条から第M条までをK条ずつ繰り下げる | `ShiftArticles { from, to, by }`（枝番も基数ごと動く） |
 | 第N条の次に次のK条を加える + 本文 | `InsertArticleAfter { after, text }`（本文を条ごとに分ける） |
 | 第N条の見出し中「A」を「B」に改める / 見出しを「A」に改める | `ReplaceCaption` / `SetCaption` |
+| 第N章の次に次の一章を加える + 章の内容（「第M章　題名」「第一節　…」「第一款」「第一目」「（見出し）」「第K条　本文」） / 第N章を第M章とする | `InsertChapterAfter { after, text }`（章・節・款・目の題名の行で入れ子の容器）/ `RenumberChapter` |
 | 第N条[第M項]後段（前段）を次のように改める + 本文 | `ReplaceSentencePart { at, part, text }`。2 行目以降は読替え表（上欄は条項の参照で行を切る） |
 
 令和5年法律第53号 第125条（`r5-53-art125`）で、この 5 種を含む 34 操作の条ずれが e-Gov と一致する。
@@ -88,6 +89,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | ハネ（自法令内） | 項に印を付けて改正単位を適用し、旧 → 新の項番号対応を得る。絶対参照は指す先の番号が変わるもの、相対参照は参照元と参照先の**距離**が変わるものを候補にする（第38条の「前二項」のように両方が同じだけ繰り下がるものは候補にしない。「同項」は先行詞に追随するので独立には扱わない）。候補ごとに、改正単位の Replace で手当て済みかを判定。**条ずれ**（`RenumberArticle` / `ShiftArticles`）も同じ形: 旧 → 新の条番号対応（`article_mapping`）で、本則の絶対参照「第N条…」のうち指す先の番号が変わるものを候補にし、手当ては「第N条」を新番号に置き換えた字句。過去の改正法の附則は改正当時の番号のままにする慣行なので見ない。**助言**（`advisory`）: 1 項だけの条に項を加えると、その条を丸ごと指す「前条」「第N条」は第一項を指すなら「第一項」を添える慣行（令3-37 第44条は第53〜57条の 6 箇所をそう改め、第75条の「第十五条から第十七条まで」は省令の根拠の列挙なのでそのまま）。参照先は変わらないので手当てが無くても Warn 止まり | `hane_candidates` |
 | ハネ（他法令） | 被改正法令の条・項を参照している他法令の箇所（対象法令群は `other_laws` に渡したもの）。参照切れ・ずれごとに手当ての字句を生成し、**同じ改正法の中で他法令を改正する単位**（改め文の `target_title` が他法令に一致するもの）に同じ置換があれば手当て済み（`r5-53-art125-129`: 第129条が特別措置法の「第五十九条」を「第六十二条」に改める） | `lawean-space::impact` + `lawean-check` CrossLaw |
 | シナリオ | 未確定の施行日を含む改正単位の順序パターンごとに apply し、全順序で成功して結果が一致するか（合流）。失敗する順序があれば調整規定が要る | `scenario::explore`（列挙）、Lean `applyOp_comm`（列挙を省ける十分条件） |
+| 先行改正との競合 | 起草時の発射台と施行時の発射台の両方に束縛し、空振り・別の項・加える本文の参照のずれ・同じ項を検出。独立なら可換（[13](13-pending-amendments.md)） | `lawean-check::stale`、Lean `Pending.lean` |
 | 矛盾 | 各リビジョンについて 07 の検査（Semantic IR + Z3） | `lawean-verify` |
 
 ## 5. Lean の役割

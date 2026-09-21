@@ -17,5 +17,6 @@ import Lawean.RefsExamples
 import Lawean.Space
 import Lawean.SpaceExamples
 import Lawean.Koshoku
+import Lawean.Pending
 import Lawean.Check
 import Lawean.Ffi
