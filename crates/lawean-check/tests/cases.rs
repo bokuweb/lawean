@@ -188,6 +188,51 @@ fn drafting_with_own_suppl_provision() {
         .unwrap();
     assert_eq!(e.status, Status::Pass, "{e:?}");
     assert!(e.details[0].contains("被改正法の条で"), "{e:?}");
+    // ただし書きが改め文に無い条（第九十五条）を挙げている: 単位は本文に落ちて範囲外（Fail）、加えて条番号の齟齬を明細に
+    let suppl3 = "第一条　この法律は、令和三年九月一日から施行する。ただし、第九十五条の規定は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。";
+    let real = fixture("revisions/403AC0000000090_20210519_503AC0000000037.xml");
+    let amend35 = fixture("amendments/503AC0000000037_art35.txt");
+    let r = run_texts(
+        &real,
+        &amend35,
+        None,
+        None,
+        &[],
+        Some("2022-05-18"),
+        Some(suppl3),
+        Some("2021-05-19"),
+    );
+    let e = r
+        .checks
+        .iter()
+        .find(|c| c.kind == Kind::Enforcement)
+        .unwrap();
+    assert_eq!(e.status, Status::Fail, "{e:?}");
+    assert!(
+        e.details
+            .iter()
+            .any(|d| d.contains("第九十五条の規定") && d.contains("改め文のどの単位にも無い")),
+        "{e:?}"
+    );
+    // 正しく第三十五条なら範囲内で、齟齬の明細も出ない
+    let suppl4 = suppl3.replace("第九十五条", "第三十五条");
+    let r = run_texts(
+        &real,
+        &amend35,
+        None,
+        None,
+        &[],
+        Some("2022-05-18"),
+        Some(&suppl4),
+        Some("2021-05-19"),
+    );
+    let e = r
+        .checks
+        .iter()
+        .find(|c| c.kind == Kind::Enforcement)
+        .unwrap();
+    assert_eq!(e.status, Status::Pass, "{e:?}");
+    assert_eq!(e.details.len(), 1);
     // 公布予定日が無ければ検査しない（Skip）
     let r = run_texts(
         &base,

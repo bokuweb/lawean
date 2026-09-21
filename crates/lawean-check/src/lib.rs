@@ -934,6 +934,43 @@ fn check_enforcement_with(
         };
         details.push(format!("{label}: {range}。{verdict}"));
     }
+    // 附則の号・ただし書きが挙げる条のうち、改め文のどの単位にも当たらないもの（「第九十五条の規定は」と書いたが
+    // 改め文にあるのは第三十五条、など）。改め文が改正法の一部なら正しいこともあるので Warn
+    let unit_arts: Vec<u32> = units
+        .iter()
+        .filter_map(|(l, _)| {
+            l.trim_start_matches('第')
+                .split('条')
+                .next()
+                .and_then(kanji_num)
+        })
+        .collect();
+    let target_arts: Vec<String> = units
+        .iter()
+        .flat_map(|(_, u)| u.instructions.iter().flat_map(|i| i.ops.iter()))
+        .filter_map(|o| o.article().map(|a| a.to_num_string()))
+        .collect();
+    let mut dangling = 0;
+    for it in &spec.items {
+        use lawean_extract::suppl::{scope_articles, scope_is_target_side, scope_target_articles};
+        let hit = if scope_is_target_side(&it.scope) {
+            scope_target_articles(&it.scope)
+                .iter()
+                .any(|a| target_arts.contains(a))
+        } else {
+            scope_articles(&it.scope)
+                .iter()
+                .any(|r| !r.suppl && unit_arts.iter().any(|a| r.from <= *a && *a <= r.to))
+        };
+        if !hit {
+            dangling += 1;
+            details.push(format!(
+                "附則の「{}」が挙げる条は改め文のどの単位にも無い（改正法の別の条を指しているのでなければ、条番号の誤り。改め文にあるのは {}）",
+                it.scope.chars().take(40).collect::<String>(),
+                units.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("・")
+            ));
+        }
+    }
     if fails > 0 {
         check(
             Kind::Enforcement,
@@ -941,11 +978,15 @@ fn check_enforcement_with(
             "施行日が附則の施行期日の範囲外",
             details,
         )
-    } else if warns > 0 {
+    } else if warns > 0 || dangling > 0 {
         check(
             Kind::Enforcement,
             Status::Warn,
-            "施行期日を読めない単位がある",
+            if warns > 0 {
+                "施行期日を読めない単位がある"
+            } else {
+                "附則が挙げる条が改め文に無い"
+            },
             details,
         )
     } else {
