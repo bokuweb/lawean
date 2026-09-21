@@ -430,12 +430,53 @@ pub fn run(input: &Input<'_>) -> Report {
     } else if !cur_rev.wf() {
         check(Kind::Consolidate, Status::Fail, "id が重複している", vec![])
     } else {
-        check(
-            Kind::Consolidate,
-            Status::Pass,
-            format!("溶け込んだ（本則 {} 項）", cur_rev.nodes.len()),
-            vec![],
-        )
+        // 条の連番: 溶け込みで新しく崩れたもの（「第二条の次に次の一条を加える」で第四条と番号を振った、など）は Fail。
+        // 発射台にもともとある崩れは e-Gov のデータの都合なので明細に添えるだけ
+        use lawean_amend::numbering::check_art_strings;
+        let before: Vec<String> = check_art_strings(base_rev.nodes.iter().map(|n| n.art.as_str()))
+            .into_iter()
+            .map(|i| i.message)
+            .collect();
+        let after: Vec<String> = check_art_strings(cur_rev.nodes.iter().map(|n| n.art.as_str()))
+            .into_iter()
+            .map(|i| i.message)
+            .collect();
+        let new_issues: Vec<String> = after
+            .iter()
+            .filter(|m| !before.contains(m))
+            .cloned()
+            .collect();
+        let old_issues: Vec<String> = after
+            .iter()
+            .filter(|m| before.contains(m))
+            .cloned()
+            .collect();
+        if !new_issues.is_empty() {
+            let mut d: Vec<String> = new_issues
+                .iter()
+                .map(|m| format!("溶け込みで生じた: {m}"))
+                .collect();
+            d.extend(old_issues.iter().map(|m| format!("発射台から: {m}")));
+            check(
+                Kind::Consolidate,
+                Status::Fail,
+                "溶け込み後の条番号が連番でない",
+                d,
+            )
+        } else {
+            check(
+                Kind::Consolidate,
+                Status::Pass,
+                format!(
+                    "溶け込んだ（本則 {} 項、条番号は連番）",
+                    cur_rev.nodes.len()
+                ),
+                old_issues
+                    .iter()
+                    .map(|m| format!("発射台から: {m}"))
+                    .collect(),
+            )
+        }
     });
 
     // 期待するリビジョンとの一致

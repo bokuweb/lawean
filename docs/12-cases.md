@@ -20,7 +20,7 @@
 | Hane（ハネ） | 項の繰り下げでずれる参照に、**正しい番号への**手当てがあるか。無ければ**手当てを生成して改め文の形で出す**（`suggested_fixes`） | `hane_candidates`（`render_fix` で置換先を生成し、改め文の置換と突き合わせる） |
 | Consolidate | id の重複なし | `IdentRevision::wf` |
 | Expected | e-Gov の改正後リビジョンと本則が一致するか | `render` の比較 |
-| Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか。逆に**溶け込みから新旧対照表を生成**もする（`Report.taisho_generated`。転記ではないので誤記が起きない。生成した表は必ず Taisho を通り、手で起こした fixtures/taisho と同じ項が挙がる） | 位置 → 本文の突き合わせ |
+| Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか。逆に**溶け込みから新旧対照表を生成**もする（`Report.taisho_generated`。転記ではないので誤記が起きない。生成した表は必ず Taisho を通る。**見た目の整備は後回し**、docs/TODO） | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
 | Penalty（罰則） | 罰則が指す規定に罰則の行為が無い（空振り）。改正で生じたものが Fail | `lawean-extract::penalty`（[07](07-verification.md) 罰則） |
 | Enforcement（施行期日） | 施行日が改正法の附則第一条（「公布の日から起算して一年を超えない範囲内において政令で定める日」）の許容区間にあるか。単位ごとに号の範囲欄から引く | `lawean-extract::suppl` + 暦（[07](07-verification.md) 時間表現の抽出。Z3 の暦と一致することは `lawean-verify` のテスト） |
@@ -52,7 +52,8 @@ Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`Ref
 | `wrong-ref` | **引用条項の誤り** | 「第三十八条第一項の次に」を「第十一項の次に」 | Base | 2021 年のデジタル改革関連法案で報告された参照条項の誤り（45 箇所、[時事](https://www.jiji.com/jc/article?k=2021030900903&g=pol)）の型 |
 | `taisho-wrong` | **新旧対照表の誤記** | 改め文は正しく、添付の新旧対照表の「新」欄 2 行を誤らせる | Taisho | 同上。2021 年の誤りは主に新旧対照表・参照条文にあった |
 | `conflict-22` | **衝突** | 2 つの改正法が第22条第1項「書面によって」を別々に改める | Conflict | 同じ項への 2 改正。黙って片方を勝たせず値として残す（[ADR-0013](adr/0013-identity-patches.md)） |
-| `delete-28-dangling` | **他法令の参照切れ** | 第28条を削る改正案 + 高齢者居住安定確保法 | CrossLaw | 借地借家法の中だけ見れば溶け込む（[09](09-cross-law-impact.md) 計画 5） |
+| `delete-28-dangling` | **他法令の参照切れ** | 第28条を削る改正案 + 高齢者居住安定確保法 | Consolidate, CrossLaw | 借地借家法の中だけ見れば溶け込む（[09](09-cross-law-impact.md) 計画 5） |
+| `insert-article-wrong-number` | **条番号の崩れ** | 「第二条の次に次の一条を加える」の新しい条を「第四条」と振る | Consolidate | 溶け込み後の本則の条が連番か（枝番の規則: 第N条の次は第N+1条か第N条の二、第N条のMの次は第N条のM+1・第N条のMの二・第N+1条、「第N条から第M条まで　削除」は範囲。`lawean-amend::numbering`）。発射台にもともとある崩れは区別。実データ 14 法令は全部連番 |
 | `enforced-out-of-range` | **施行期日の違反** | 令3-37 第35条の施行日を 2022-06-01 に | Enforcement | 附則第一条第四号「一年を超えない範囲内」の上限は 2022-05-18（実際の施行日はこの日ちょうど）。施行令で定める日が附則を越える型 |
 
 Lean 側: `hane-missing` は `Cases.lean` の `hane_missing_consolidates`（溶け込む）と `hane_missing_differs_only_at_38_5`（違うのは第38条の 1 項だけ）、

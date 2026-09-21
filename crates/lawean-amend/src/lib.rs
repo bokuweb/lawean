@@ -3,6 +3,7 @@
 pub mod apply;
 pub mod hane;
 pub mod ident;
+pub mod numbering;
 pub mod op;
 pub mod parse;
 pub mod scenario;

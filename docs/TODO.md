@@ -83,3 +83,4 @@
 - [ ] `TimeCond::Within` / `Elapsed` を `temporal` の日付制約に自動展開し、`Value::Period` を日付で持つ（今は月数の Int と別）
 - [x] 施行日の許容区間を附則から取る（`lawean-extract::suppl`、`lawean-check` の Enforcement）。廃止・経過措置の区間（`validity::Interval` の `to`）はまだ手で与える
 - [ ] Lean の WASM: 大きな法令（公職選挙法 1167 項）で Emscripten の既定スタック（64KB）では落ちるので `-sSTACK_SIZE=32MB` にした。落ちたときは JS が Rust の写しに戻す。Lean 側の再帰の深さ（`List` の非末尾再帰）を減らせば既定に戻せる
+- [ ] **新旧対照表の生成は後回し**（2026-09-22 の判断）。`Report.taisho_generated` は溶け込みから作れる最小形（項単位の新/旧、`check_taisho` の形式）で置いてあるが、見た目（欄の対照・傍線・条見出し）や部分改正の表現は詰めていない。優先は精度と実際の改正での検証
