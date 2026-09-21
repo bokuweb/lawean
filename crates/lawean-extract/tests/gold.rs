@@ -42,6 +42,7 @@ fn dev_gold_matches_exactly() {
         "dev_327AC1000000176",
         "dev_323AC0000000138",
         "dev_325AC0000000158",
+        "dev_323AC0000000201",
     ] {
         let (n, c) = run(g);
         assert!(n >= 15, "{g}: {n}");
@@ -57,7 +58,7 @@ fn dev_gold_matches_exactly() {
 fn eval_gold_stays_above_the_recorded_floor() {
     let mut total = Counts::default();
     for g in [
-        "eval_323AC0000000201",
+        "eval_324AC0000000108",
         "eval_504CO0000000187",
         "eval_504M60000010029",
     ] {
@@ -66,9 +67,9 @@ fn eval_gold_stays_above_the_recorded_floor() {
         total.fp += c.fp;
         total.fn_ += c.fn_;
     }
-    // 2026-09-22: 医師法（規則を直さずに測った）tp 26 fp 2 fn 2 → P 0.93 / R 0.93。
-    // 誤り: 「二年ごとの」（ごとに だけ）、「二十四時間以内」（時間の単位）、「平成元年法律第六十四号」（法令番号の除外が「元年」を見ない）
-    assert!(total.tp + total.fn_ >= 27);
+    // 2026-09-22: 古物営業法（規則を直さずに測った）tp 45 fp 2 fn 2 → P 0.96 / R 0.96。
+    // 誤り: 「前二条の帳簿等を最終の記載をした日から三年間」（目的語「〜を」が事象に入る。「を」の節境界は refine_events が縮める）
+    assert!(total.tp + total.fn_ >= 45);
     assert!(total.precision() >= 0.85, "{total:?}");
     assert!(total.recall() >= 0.85, "{total:?}");
 }

@@ -104,7 +104,7 @@ grande の確率を `confidence` に。閾値未満は `Ambiguous` のまま人�
 
 | 指標 | 母集団 | 固定先 |
 |---|---|---|
-| **適合率・再現率（L1、候補）** | `fixtures/gold`: 規則作成に使った法令（dev: 高齢者居住安定確保法 60 文）と使っていない法令（eval: 大規模災害借地借家特別措置法・借地借家法施行令・同施行規則 20 文）。文書単位で分け、(field, raw) の完全一致。負例（数字はあるが候補が無い文）を含む | `lawean-extract/tests/gold.rs`（dev は完全一致、eval は下限）。`cargo run -p lawean-extract --example eval`。法令を 1 つずつ初見で測っては直して dev に移すを繰り返した（経過は `fixtures/gold/README.md`: 初見で 0.63〜0.93、直後は 0.98〜1.0）。**2026-09-22 の eval（医師法、初見）: P 0.93 / R 0.93**。落ちるのはほぼ事象の句の境界（並列・括弧書き・節境界）で、係り受け（L1.5）の仕事 |
+| **適合率・再現率（L1、候補）** | `fixtures/gold`: 規則作成に使った法令（dev: 高齢者居住安定確保法 60 文）と使っていない法令（eval: 大規模災害借地借家特別措置法・借地借家法施行令・同施行規則 20 文）。文書単位で分け、(field, raw) の完全一致。負例（数字はあるが候補が無い文）を含む | `lawean-extract/tests/gold.rs`（dev は完全一致、eval は下限）。`cargo run -p lawean-extract --example eval`。法令を 1 つずつ初見で測っては直して dev に移すを繰り返した（経過は `fixtures/gold/README.md`: 初見で 0.63〜0.93、直後は 0.98〜1.0）。**2026-09-22 の eval（古物営業法、初見、46 件）: P 0.95 / R 0.95**。落ちるのはほぼ事象の句の境界（並列・括弧書き・節境界）で、係り受け（L1.5）の仕事 |
 | 構造一致率（L1） | 手書き 8 条 | `lawean-extract/tests` |
 | 判定精度（L2） | 「できる」44 文、照応 20 件程度 | `lawean-decide/tests`（ラベルは fixtures） |
 | Unknown 率 | 借地借家法本則 211 文 | `lawean-extract/tests` |
