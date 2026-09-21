@@ -200,6 +200,7 @@ pub fn run(input: &Input<'_>) -> Report {
     let mut order_fail = Vec::new();
     let mut conflict_fail = Vec::new();
     let mut hane_fail = Vec::new();
+    let mut hane_warn = Vec::new();
     let mut hane_ok = 0usize;
     let mut suggested: Vec<lawean_amend::Op> = Vec::new();
     let mut stopped = false;
@@ -218,6 +219,16 @@ pub fn run(input: &Input<'_>) -> Report {
         for c in hane_candidates(&cur_doc, unit) {
             if c.handled {
                 hane_ok += 1;
+            } else if c.advisory {
+                // 参照先は変わらない。1 項だけの条に項を加えたので、条を丸ごと指す参照に「第一項」を添える慣行
+                hane_warn.push(format!(
+                    "{label}: {} の「{}」は {} を丸ごと指す。項を加えるので、第一項を指すなら「{}」に精密化する（参照先は変わらないので誤りではない）",
+                    c.sentence.0.rsplit("/main/").next().unwrap_or(&c.sentence.0),
+                    c.text,
+                    c.target.0.rsplit("/main/").next().unwrap_or(&c.target.0),
+                    c.fix.clone().unwrap_or_default()
+                ));
+                // 助言なので suggested_fixes（改め文に足すべき手当て）には入れない
             } else {
                 let expected = match &c.fix {
                     Some(f) => format!("正しい手当ては「{}」→「{f}」", c.text),
@@ -431,7 +442,16 @@ pub fn run(input: &Input<'_>) -> Report {
     } else {
         check(Kind::Conflict, Status::Fail, "衝突がある", conflict_fail)
     });
-    checks.push(if hane_fail.is_empty() {
+    checks.push(if hane_fail.is_empty() && !hane_warn.is_empty() {
+        check(
+            Kind::Hane,
+            Status::Warn,
+            format!(
+                "ハネ改正の手当て漏れは無い（候補 {hane_ok} 件は手当て済み）が、精密化の助言がある"
+            ),
+            hane_warn,
+        )
+    } else if hane_fail.is_empty() {
         check(
             Kind::Hane,
             Status::Pass,

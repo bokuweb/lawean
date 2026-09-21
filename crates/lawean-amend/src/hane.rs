@@ -28,6 +28,9 @@ pub struct HaneCandidate {
     pub new_target_paragraph: Option<u32>,
     /// 条ずれの候補なら、改正後に指すべき条（項の候補では None）
     pub new_target_article: Option<ArticleNum>,
+    /// 助言（参照先は変わらないが、法制執務の慣行として手当てするもの）。
+    /// 1 項だけの条に項を加えると、その条を丸ごと指していた「前条」「第N条」は第一項を指すべきなら「第一項」を添える
+    pub advisory: bool,
     /// 生成した手当て: 参照の字句をこれに置き換えればよい（削られた項への参照は None = 人が決める）
     pub fix: Option<String>,
     /// 生成した手当てを改め文の操作にしたもの（番号は改正前。繰り下げの文より前に置く）
@@ -155,6 +158,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
         .filter(|(_, m)| m.iter().any(|(k, v)| k != v))
         .collect();
     let mut out = article_hane_candidates(doc, unit, &replaced);
+    out.extend(refine_candidates(doc, unit, &replaced));
     if mappings.is_empty() {
         return out;
     }
@@ -265,6 +269,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                             target: t.clone(),
                             new_target_paragraph: new_tp,
                             new_target_article: None,
+                            advisory: false,
                             fix,
                             fix_op,
                             handled,
@@ -428,6 +433,7 @@ fn article_hane_candidates(
                     target: t.clone(),
                     new_target_paragraph: None,
                     new_target_article: Some(new_tgt),
+                    advisory: false,
                     fix,
                     fix_op,
                     handled,
@@ -438,4 +444,129 @@ fn article_hane_candidates(
     }
     out.dedup();
     out
+}
+
+/// 1 項だけの条に項を加える改正で、その条を丸ごと指す参照（「前条」「第五十二条」）を列挙する（助言）。
+/// 令3-37 第44条は第52条に第2項を加え、第53〜57条の「前条」「第五十二条」を「前条第一項」「第五十二条第一項」にしている。
+/// 手当ては参照の字句に「第一項」を添えたもの。参照先の条は変わらないので、無くても誤りではない
+fn refine_candidates(
+    doc: &LegalDocument,
+    unit: &AmendUnit,
+    replaced: &[(Loc, String, String)],
+) -> Vec<HaneCandidate> {
+    let mut grown: Vec<ArticleNum> = Vec::new();
+    for ins in &unit.instructions {
+        for op in &ins.ops {
+            if let Op::AppendParagraph { article, .. } | Op::InsertParagraphAfter { article, .. } =
+                op
+            {
+                let single = paragraph_count(&doc.main_provision, article) == Some(1);
+                if single && !grown.contains(article) {
+                    grown.push(article.clone());
+                }
+            }
+        }
+    }
+    if grown.is_empty() {
+        return Vec::new();
+    }
+    let index = Index::build(doc);
+    let mut out = Vec::new();
+    for g in doc.sentence_groups() {
+        let mut ante = Antecedent::default();
+        for s in &g.sentences {
+            let id = &s.sentence.stable_id;
+            if id.0.contains("/suppl:") {
+                continue;
+            }
+            let Some(src_art) = art_of(&id.0) else {
+                continue;
+            };
+            let text = s.sentence.plain_text();
+            for r in resolve_sentence_with(&index, id, &text, &mut ante) {
+                let Resolution::Internal(ids) = &r.resolution else {
+                    continue;
+                };
+                if !matches!(
+                    r.span.parsed.kind,
+                    RefKind::PrevArticle(_)
+                        | RefKind::NextArticle
+                        | RefKind::Article { suppl: false, .. }
+                ) {
+                    continue;
+                }
+                // 条を丸ごと指す参照（id が条で終わる）だけ。「第五十二条第一項」はもう精密
+                let Some(t) = ids.first() else { continue };
+                if t.0.contains("/para:") {
+                    continue;
+                }
+                let Some(tgt) = art_of(&t.0) else { continue };
+                if !grown.contains(&tgt) || tgt == src_art {
+                    continue;
+                }
+                let sp = para_of(&id.0);
+                let at_here = |loc: &Loc| {
+                    loc.article == src_art
+                        && match &loc.paragraph {
+                            Some(ParaRef::Num(n)) => sp == Some(*n),
+                            None => true,
+                        }
+                };
+                let found: Vec<&String> = replaced
+                    .iter()
+                    .filter(|(loc, from_text, _)| at_here(loc) && from_text == &r.span.text)
+                    .map(|(_, _, to)| to)
+                    .collect();
+                let rewritten = replaced.iter().any(|(loc, from_text, _)| {
+                    at_here(loc) && from_text != &r.span.text && from_text.contains(&r.span.text)
+                });
+                let fix = format!("{}第一項", r.span.text);
+                let handled = rewritten || found.iter().any(|to| to.contains("第一項"));
+                out.push(HaneCandidate {
+                    sentence: id.clone(),
+                    text: r.span.text.clone(),
+                    target: t.clone(),
+                    new_target_paragraph: None,
+                    new_target_article: None,
+                    advisory: true,
+                    fix_op: sp.map(|p| Op::Replace {
+                        at: Loc {
+                            article: src_art.clone(),
+                            paragraph: Some(ParaRef::Num(p)),
+                            item: None,
+                        },
+                        from: r.span.text.clone(),
+                        to: fix.clone(),
+                    }),
+                    fix: Some(fix),
+                    handled,
+                    found_to: found.first().map(|s| s.to_string()),
+                });
+            }
+        }
+    }
+    out.dedup();
+    out
+}
+
+fn paragraph_count(ps: &[Provision], num: &ArticleNum) -> Option<usize> {
+    for p in ps {
+        match p {
+            Provision::Container(c) => {
+                if let Some(n) = paragraph_count(&c.children, num) {
+                    return Some(n);
+                }
+            }
+            Provision::Article(a) if &a.num == num => {
+                return Some(
+                    a.children
+                        .iter()
+                        .filter(|c| matches!(c, ArticleChild::Paragraph(_)))
+                        .count(),
+                )
+            }
+            _ => {}
+        }
+    }
+    None
 }

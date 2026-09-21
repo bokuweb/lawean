@@ -106,7 +106,11 @@ fn hane_candidates_for_art38_are_exactly_the_two_handled_ones() {
             .collect()
     );
 
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     for c in &cands {
         eprintln!(
             "{} 「{}」 → {} (new para {:?}) handled={}",
@@ -143,7 +147,11 @@ fn removing_the_fixups_makes_hane_unhandled() {
         ins.ops.retain(|o| !matches!(o, Op::Replace { .. }));
     }
     let before = revision("403AC0000000090_20210519_503AC0000000037");
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     assert_eq!(cands.len(), 2);
     assert!(cands.iter().all(|c| !c.handled));
 }
@@ -236,7 +244,11 @@ fn units_touching_different_articles_are_confluent() {
 fn generated_hane_fixes_match_the_real_amendment() {
     let units = parse_units(&fixture("amendments/503AC0000000037_art35.txt")).unwrap();
     let before = revision("403AC0000000090_20210519_503AC0000000037");
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     let fixes: Vec<(String, String, Option<String>)> = cands
         .iter()
         .map(|c| {
@@ -295,7 +307,11 @@ fn generated_hane_fixes_match_the_real_amendment() {
 fn h30_act75_koshoku_senkyo_missed_the_penalty_reference() {
     let units = parse_units(&fixture("amendments/430AC0100000075.txt")).unwrap();
     let before = revision("325AC1000000100_20180620_430AC0000000059");
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     let unhandled: Vec<&HaneCandidate> = cands.iter().filter(|c| !c.handled).collect();
     // 唯一の未手当てが、実際に見落とされた第244条の参照
     assert_eq!(unhandled.len(), 1, "{cands:#?}");
@@ -434,4 +450,27 @@ fn reiwa4_act68_five_laws_reproduce_egov_revisions() {
         let got = apply_unit(&revision(before), unit, "test").unwrap();
         assert_same_main(&got, &revision(after));
     }
+}
+
+/// 1 項だけの条に項を加えると、その条を丸ごと指す「前条」「第N条」は助言の候補になる。
+/// 令3-37 第44条（高齢者居住法）は第52条に第2項を加え、第53〜57条の 6 箇所を「前条第一項」「第五十二条第一項」にしている。
+/// 第17条にも第2項を加えるが、第75条の「第十五条から第十七条まで」（省令の根拠規定の列挙）はそのまま = 助言止まりでよい例
+#[test]
+fn appending_a_paragraph_to_a_single_paragraph_article_advises_refinement() {
+    let units = parse_units(&fixture("amendments/503AC0000000037_art44.txt")).unwrap();
+    let before = parse_response(&fixture(
+        "laws/413AC0000000026_20210519_503AC0000000037.xml",
+    ))
+    .unwrap();
+    let cands = hane_candidates(&before, &units[0]);
+    let adv: Vec<&HaneCandidate> = cands.iter().filter(|c| c.advisory).collect();
+    assert_eq!(adv.len(), 7, "{adv:#?}");
+    assert_eq!(adv.iter().filter(|c| c.handled).count(), 6);
+    let left = adv.iter().find(|c| !c.handled).unwrap();
+    assert!(left.sentence.0.contains("/art:75/"));
+    assert_eq!(left.text, "第十七条");
+    assert_eq!(left.fix.as_deref(), Some("第十七条第一項"));
+    assert!(adv
+        .iter()
+        .any(|c| c.text == "前条" && c.fix.as_deref() == Some("前条第一項") && c.handled));
 }
