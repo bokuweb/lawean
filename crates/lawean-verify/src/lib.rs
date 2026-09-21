@@ -2,6 +2,7 @@
 
 pub mod check;
 pub mod consistency;
+pub mod enforcement;
 pub mod smt;
 pub mod temporal;
 pub mod validity;

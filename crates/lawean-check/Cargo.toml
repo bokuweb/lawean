@@ -13,5 +13,6 @@ lawean-amend = { path = "../lawean-amend" }
 lawean-space = { path = "../lawean-space" }
 lawean-render = { path = "../lawean-render" }
 lawean-leanrt = { path = "../lawean-leanrt" }
+lawean-extract = { path = "../lawean-extract" }
 serde.workspace = true
 serde_json.workspace = true

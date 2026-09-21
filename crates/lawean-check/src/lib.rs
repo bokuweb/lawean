@@ -14,6 +14,7 @@
 //! | `Expected` | `IdentRevision::render` の比較 | e-Gov の改正後リビジョンと本文が違う |
 //! | `Taisho`（新旧対照表） | 本文の突き合わせ | 新旧対照表の「新」欄が溶け込み後の本文と違う（2021 年のデジタル改革関連法案の誤りの型） |
 //! | `CrossLaw`（他法令） | `lawean-space::impact` | 他法令からの参照切れ・ずれ |
+//! | `Enforcement`（施行期日） | `lawean-extract::suppl` + 暦 | 施行日が改正法の附則「公布の日から起算して一年を超えない範囲内」の外 |
 //!
 //! Lean との関係: `Consolidate` / `Conflict` / `Order` の溶け込みは、Lean ランタイムがリンクされていれば
 //! **証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、Lean → C）で計算し、無ければ Rust の写しで計算する
@@ -38,6 +39,7 @@ pub enum Kind {
     Expected,
     Taisho,
     CrossLaw,
+    Enforcement,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -548,6 +550,18 @@ pub fn run(input: &Input<'_>) -> Report {
         _ => check(Kind::CrossLaw, Status::Skip, "他法令が無い", vec![]),
     });
 
+    // 施行期日: 改正法の附則（改正後リビジョンに載る）から各単位の許容区間を出し、施行日がその中にあるか
+    checks.push(match (input.expected, input.enforced) {
+        (Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
+        (None, Some(_)) => check(
+            Kind::Enforcement,
+            Status::Skip,
+            "改正法の附則を読む改正後リビジョンが無い",
+            vec![],
+        ),
+        _ => check(Kind::Enforcement, Status::Skip, "施行日が無い", vec![]),
+    });
+
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let diff = id_diff(&base_rev, &cur_rev);
     let suggested_fixes = if suggested.is_empty() {
@@ -776,6 +790,126 @@ fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
         },
         para,
     ))
+}
+
+/// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
+/// 単位が複数なら、最後の単位の区間に施行日が入り、それより前の単位はその日までに施行できる（下限 ≤ 施行日）こと
+fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit)]) -> Check {
+    use lawean_extract::calendar::{fmt, parse};
+    use lawean_extract::suppl::{admissible, kanji_num, spec_for_law_id};
+    let Some(day) = parse(day) else {
+        return check(
+            Kind::Enforcement,
+            Status::Fail,
+            format!("施行日が読めない: {day}"),
+            vec![],
+        );
+    };
+    // 改正法の法令 ID は改正後リビジョンの id（403AC0000000090_20230220_504AC0000000048）の末尾
+    let amend_id = exp
+        .version_id
+        .as_deref()
+        .and_then(|v| v.rsplit('_').next())
+        .unwrap_or_default();
+    let Some(spec) = spec_for_law_id(exp, amend_id) else {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            format!("改正後リビジョンに改正法（{amend_id}）の附則が無い"),
+            vec![],
+        );
+    };
+    let Some(p) = spec.promulgated else {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            "改正法の公布日が読めない",
+            vec![],
+        );
+    };
+    let (mut details, mut fails, mut warns) = (Vec::new(), 0, 0);
+    let n = units.len();
+    for (i, (label, _)) in units.iter().enumerate() {
+        let art = label
+            .trim_start_matches('第')
+            .split('条')
+            .next()
+            .and_then(kanji_num);
+        let Some(art) = art else {
+            warns += 1;
+            details.push(format!("{label}: 改正法の条番号が読めない"));
+            continue;
+        };
+        let Some((clause, scope)) = spec.for_article(art, None) else {
+            warns += 1;
+            details.push(format!("{label}: 附則に施行期日が無い"));
+            continue;
+        };
+        let where_ = match scope {
+            Some(_) => "附則第一条の号",
+            None => "附則第一条本文",
+        };
+        let Some(enf) = &clause.enforcement else {
+            warns += 1;
+            details.push(format!(
+                "{label}: {where_}「{}」は読めない（他法令の施行日に依る）",
+                clause.text
+            ));
+            continue;
+        };
+        let Some((lo, hi)) = admissible(p, enf) else {
+            warns += 1;
+            details.push(format!(
+                "{label}: {where_}「{}」の区間が出せない",
+                clause.text
+            ));
+            continue;
+        };
+        let range = format!(
+            "{where_}「{}」→ {}〜{}（公布 {}）",
+            clause.text,
+            fmt(lo),
+            fmt(hi),
+            fmt(p)
+        );
+        let last = i + 1 == n;
+        let verdict = if last {
+            if lo <= day && day <= hi {
+                format!("施行日 {} は範囲内", fmt(day))
+            } else {
+                fails += 1;
+                format!("施行日 {} は範囲外", fmt(day))
+            }
+        } else if lo <= day {
+            format!("施行日 {} までに施行できる", fmt(day))
+        } else {
+            fails += 1;
+            format!("施行日 {} にはまだ施行できない", fmt(day))
+        };
+        details.push(format!("{label}: {range}。{verdict}"));
+    }
+    if fails > 0 {
+        check(
+            Kind::Enforcement,
+            Status::Fail,
+            "施行日が附則の施行期日の範囲外",
+            details,
+        )
+    } else if warns > 0 {
+        check(
+            Kind::Enforcement,
+            Status::Warn,
+            "施行期日を読めない単位がある",
+            details,
+        )
+    } else {
+        check(
+            Kind::Enforcement,
+            Status::Pass,
+            "施行日は附則の施行期日の範囲内",
+            details,
+        )
+    }
 }
 
 /// 文字列だけで動く版（WASM・playground 用）。`other_laws` は他法令の XML

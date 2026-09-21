@@ -29,7 +29,8 @@
 | 対象 | 手段 | 出力 |
 |---|---|---|
 | 節末動詞と格 | 形態素解析（vibrato、Rust）で条件節を分かち書き、節末の動詞（原形）を述語名、直前の「が／を／に／から／まで／と／で」句を引数候補に | `Pred(name, args)`。引数は `EntityRef`（定義語に当たれば）か `Var` |
-| 期間・金額・数量 | 正規表現（「三十年」「六月」「年一割」「二百平方メートル」）。漢数字は `lawean-resolve::numeral` | `Value::Duration` / `Money` / `Int`。Lean へは月数・円の Int |
+| 期間・時点・施行 | **済**: `lawean-extract::temporal::time_exprs`（正規表現。「〜の日から起算して六月を経過した日」「一年前から六月前までの間」「公布の日から起算して一年を超えない範囲内において政令で定める日から施行する」。利率・法令番号・読替えの中の字句は除く）。被覆 借地借家法 100%、公職選挙法 87%、民法 89%（[07](07-verification.md) 時間表現の抽出）。附則 → 施行日は `suppl` | `TimeExpr`（`Period` / `Elapsed` / `Within` / `Window` / `Before` / `Compare` / `Enforcement` …）。Z3 の暦へは `lawean-verify::enforcement`。残りは先行詞が文をまたぐもの（「同項の期間」）で L2 |
+| 金額・数量 | 正規表現（「年一割」「二百平方メートル」）。漢数字は `lawean-resolve::numeral` | `Value::Money` / `Int` |
 | 比較 | 「以上／以下／未満／を超える／より長い／より短い」 | `Cmp(a, op, b)`。「これ」「その期間」は照応（L2 へ） |
 | 参照 | 層 1 の解決結果をそのまま | `Ref(Rule)` / `RuleValue(Rule)` |
 | 定義語 | 定義規定（`Column`）と「以下「X」という。」の有効 scope（`lawean-resolve`） | `EntityRef::Definition` |

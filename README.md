@@ -22,7 +22,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で検出する。実データは高齢者居住安定確保法・借地借家法施行令 | 実装（Lean は未） |
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
-| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 4 件（通る）と、実際の改め文から作った失敗例 8 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
+| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 5 件（通る）と、失敗例 9 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
 | [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。ケースを選び、改め文を書き換えて検査する | — |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
@@ -38,7 +38,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 |---|---|
 | [lawean-source](crates/lawean-source) | Source IR。e-Gov 法令 XML の lossless なパース・出力。`fixtures/` の 2 法令で往復テスト済み |
 | [lawean-semantic](crates/lawean-semantic) | Semantic IR の型、手書き用の構築子、Source IR に対する参照整合性の検査。借地借家法 8 条分の手書きデータ入り |
-| [lawean-extract](crates/lawean-extract) | 層 1 の規則ベース抽出（[ADR-0008](docs/adr/0008-extraction-strategy.md)）。文末の効果種別（20 種）、条件節、「〜の規定にかかわらず」→ overrides、「契約の条件にかかわらず」→ Contract、譲歩、参照を文ごとに認識し、条件の中身が `Unknown` の骨組み Rule を作る。借地借家法の平叙文 211 のうち 97% を分類 |
+| [lawean-extract](crates/lawean-extract) | 層 1 の規則ベース抽出（[ADR-0008](docs/adr/0008-extraction-strategy.md)）。文末の効果種別（20 種）、条件節、「〜の規定にかかわらず」→ overrides、「契約の条件にかかわらず」→ Contract、譲歩、参照を文ごとに認識し、条件の中身が `Unknown` の骨組み Rule を作る。借地借家法の平叙文 211 のうち 97% を分類。**時間表現**（期間・時点・施行期日）も規則で取り（借地借家法 100%、公職選挙法 87%、民法 89%）、附則第一条から施行日の許容区間を暦で出す（`suppl`） |
 | [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
 | [lawean-amend](crates/lawean-amend) | **改正**（[docs/08](docs/08-amendment.md)）。改め文パーサ（閉じた語彙 11 種）、Source IR への apply、発射台・順序・ハネの検査。実際の改正 3 件で e-Gov の改正後リビジョンと一致。`ident`: 番号ベースの `Op` を発射台の stable_id に束縛して identity patch にする（繰り下げは消え、字句置換は本文全体の `replace` に、全部改正は `delete` + `insertAfter`）。Lean の `Ident.applyUnit` の写しで前検査 |
 | [lean/](lean/) | patch 代数（`Revision` / `Op` / `applyOp`）とメタ定理。触る条が違う 2 操作の可換性 `applyOp_comm` を証明。**identity patch**（[ADR-0013](docs/adr/0013-identity-patches.md)）: 対象を stable_id で指し、独立な 2 改正単位の可換性 `applyUnit_comm`、衝突は値、依存は半順序（`scheduleOk`）。**`Consolidate.lean`**: 実データ（`Data/`）を `Ident.applyUnit` に通し、e-Gov の改正後リビジョンとの一致・依存・独立・衝突を `native_decide` で検査 |

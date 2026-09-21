@@ -81,4 +81,4 @@
 - [ ] `law_revisions` API の調査（過去版取得）→ 改正 patch
 - [ ] 民法第142条（休日）。遡りは応当日で逆算する扱いで `temporal::before` に実装済み（判例・実務の扱い。要確認）
 - [ ] `TimeCond::Within` / `Elapsed` を `temporal` の日付制約に自動展開し、`Value::Period` を日付で持つ（今は月数の Int と別）
-- [ ] 効力の区間（`validity::Interval`）を附則・施行日から自動で取る
+- [x] 施行日の許容区間を附則から取る（`lawean-extract::suppl`、`lawean-check` の Enforcement）。廃止・経過措置の区間（`validity::Interval` の `to`）はまだ手で与える

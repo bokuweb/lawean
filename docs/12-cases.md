@@ -22,6 +22,7 @@
 | Expected | e-Gov の改正後リビジョンと本則が一致するか | `render` の比較 |
 | Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
+| Enforcement（施行期日） | 施行日が改正法の附則第一条（「公布の日から起算して一年を超えない範囲内において政令で定める日」）の許容区間にあるか。単位ごとに号の範囲欄から引く | `lawean-extract::suppl` + 暦（[07](07-verification.md) 時間表現の抽出。Z3 の暦と一致することは `lawean-verify` のテスト） |
 
 Order / Conflict / Consolidate の溶け込みは、Lean ランタイムがリンクされていれば**証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）で計算する（`Report.engine = "lean"`）。無ければ Rust の写し。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
 Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`RefsExamples.lean` が「生成した手当て = 令3-37 の実際の置換」を確かめる。
@@ -51,11 +52,12 @@ Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`Ref
 | `taisho-wrong` | **新旧対照表の誤記** | 改め文は正しく、添付の新旧対照表の「新」欄 2 行を誤らせる | Taisho | 同上。2021 年の誤りは主に新旧対照表・参照条文にあった |
 | `conflict-22` | **衝突** | 2 つの改正法が第22条第1項「書面によって」を別々に改める | Conflict | 同じ項への 2 改正。黙って片方を勝たせず値として残す（[ADR-0013](adr/0013-identity-patches.md)） |
 | `delete-28-dangling` | **他法令の参照切れ** | 第28条を削る改正案 + 高齢者居住安定確保法 | CrossLaw | 借地借家法の中だけ見れば溶け込む（[09](09-cross-law-impact.md) 計画 5） |
+| `enforced-out-of-range` | **施行期日の違反** | 令3-37 第35条の施行日を 2022-06-01 に | Enforcement | 附則第一条第四号「一年を超えない範囲内」の上限は 2022-05-18（実際の施行日はこの日ちょうど）。施行令で定める日が附則を越える型 |
 
 Lean 側: `hane-missing` は `Cases.lean` の `hane_missing_consolidates`（溶け込む）と `hane_missing_differs_only_at_38_5`（違うのは第38条の 1 項だけ）、
 `conflict-22` は `conflict_22_has_conflict`（どちらの順でも第22条第1項が衝突）と `conflict_22_resolved`（調整規定で解消）。
 `wrong-base` / `r4-48-reversed` は `Consolidate.lean` の `art35_on_wrong_base_conflicts` / `art74_before_art73_fails`。
-束縛の段階で止まる失敗（`wrong-ref`）と資料の検査（`taisho-wrong`）、他法令（`delete-28-dangling`）は Rust だけ。
+束縛の段階で止まる失敗（`wrong-ref`）と資料の検査（`taisho-wrong`）、他法令（`delete-28-dangling`）、施行期日（`enforced-out-of-range`）は Rust だけ。
 
 ## 4. playground
 
