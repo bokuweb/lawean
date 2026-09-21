@@ -4,52 +4,12 @@
 <meta charset="utf-8">
 <title>lawean 改正案の検査 playground</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root { --bg:#fafaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#dcdcd5; --pass:#1a7f37; --fail:#b3261e; --warn:#9a6700; --skip:#8a8a84; --accent:#2b4c7e; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--fg); line-height:1.55; }
-  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
-  header h1 { font-size:18px; margin:0; }
-  header .sub { color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: 1fr 1fr; gap:0; min-height: calc(100vh - 60px); }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  section { padding:16px 20px; }
-  section.left { border-right:1px solid var(--line); }
-  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
-  select, textarea, input { width:100%; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; color:var(--fg); }
-  textarea { min-height: 220px; resize: vertical; }
-  textarea.small { min-height: 110px; }
-  .row { display:flex; gap:10px; }
-  .row > * { flex:1; }
-  button { font: 14px -apple-system, sans-serif; padding:8px 16px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; margin-top:12px; }
-  button.secondary { background:#fff; color:var(--accent); }
-  .case-note { font-size:13px; color:var(--muted); margin:6px 0 0; }
-  .case-note b { color:var(--fg); }
-  .verdict { font-size:22px; font-weight:700; margin:0 0 8px; }
-  .verdict.pass { color:var(--pass); } .verdict.fail { color:var(--fail); }
-  ul.checks { list-style:none; padding:0; margin:0; }
-  ul.checks li { padding:8px 10px; border-top:1px solid var(--line); }
-  ul.checks li .head { display:flex; gap:8px; align-items:baseline; }
-  .mark { width:1.4em; display:inline-block; font-weight:700; }
-  .pass .mark { color:var(--pass); } .fail .mark { color:var(--fail); } .warn .mark { color:var(--warn); } .skip .mark { color:var(--skip); }
-  .skip { color:var(--skip); }
-  .kind { font: 12px ui-monospace, monospace; color:var(--muted); min-width:7em; }
-  ul.details { margin:4px 0 0 2.2em; padding:0; list-style: "– "; font-size:13px; }
-  ul.details li { color:#3a3a36; }
-  details { margin-top:12px; }
-  summary { cursor:pointer; color:var(--accent); font-size:13px; }
-  pre { font: 12px/1.5 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; max-height:320px; overflow:auto; }
-  .diff .add { color:var(--pass); } .diff .del { color:var(--fail); } .diff .chg { color:var(--warn); }
-  .lean { font-size:12px; color:var(--muted); margin-top:10px; }
-  .lean code { font-size:11px; }
-  .status { font-size:12px; color:var(--muted); }
-table.cands { border-collapse: collapse; font-size: 12px; width: 100%; } table.cands th, table.cands td { border-bottom: 1px solid #ddd; padding: 2px 6px; text-align: left; vertical-align: top; } table.cands td.ctx { color: #666; max-width: 32em; } table.cands td:first-child, table.cands td:nth-child(3), table.cands td:last-child { white-space: nowrap; } table.cands tr.low td { color: #999; }
-</style>
+<link rel="stylesheet" href="playground.css">
 </head>
 <body>
 <header>
   <h1>改正案の検査 playground</h1>
-  <span class="sub">実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> の WASM。溶け込みは <b>Lean の C 出力を WASM にした証明済みの <code>applyUnit</code></b> で計算する（ADR-0017）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
+  <span class="sub"><a href="draft.html"><b>発射台を選んで改正法を書く playground はこちら</b></a>。実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> の WASM。溶け込みは <b>Lean の C 出力を WASM にした証明済みの <code>applyUnit</code></b> で計算する（ADR-0017）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
 </header>
 <main>
   <section class="left">
@@ -89,33 +49,8 @@ table.cands { border-collapse: collapse; font-size: 12px; width: 100%; } table.c
   </section>
 </main>
 <script type="module">
-import init, { check, candidates } from './pkg/lawean_wasm.js';
-import createLean from './lean/lawean_lean.js';
-
-// 溶け込みは Lean の C 出力を Emscripten で組んだ WASM（証明した applyUnit そのもの、ADR-0017）で計算する。
-// Rust 側（lawean-leanrt）は globalThis のこの 4 つを呼ぶ。読み込めなければ Rust の写しに戻る（Report.engine で分かる）
-let leanEngine = null;
-async function loadLean() {
-  try {
-    const M = await createLean();
-    const rc = M.cwrap('lawean_leanrt_init', 'number', [])();
-    if (rc !== 0) throw new Error('lean init failed: ' + rc);
-    const wrap = (name) => {
-      const f = M.cwrap(name, 'number', ['string', 'string']);
-      const free = M.cwrap('lawean_leanrt_free', null, ['number']);
-      return (a, b) => { const p = f(a, b); const s = M.UTF8ToString(p); free(p); return s; };
-    };
-    leanEngine = { apply: wrap('lawean_leanrt_apply_unit'), check: wrap('lawean_leanrt_check_unit'), relation: wrap('lawean_leanrt_relation') };
-  } catch (e) {
-    console.warn('Lean wasm not available, falling back to the Rust mirror', e);
-  }
-  globalThis.lawean_lean_available = () => leanEngine !== null;
-  globalThis.lawean_lean_apply_unit = (rev, unit) => leanEngine.apply(rev, unit);
-  globalThis.lawean_lean_check_unit = (rev, unit) => leanEngine.check(rev, unit);
-  globalThis.lawean_lean_relation = (a, b) => leanEngine.relation(a, b);
-}
-
-const FIX = '../../fixtures/';
+import { setup, load, fill, $, esc, KIND_JA, renderReport, check } from './common.js';
+let lastBaseXml = '';
 const REVISIONS = [
   ['revisions/403AC0000000090_20170602_429AC0000000045.xml', '2017-06-02（平成29年法律第45号）'],
   ['revisions/403AC0000000090_20200401_429AC0000000045.xml', '2020-04-01（同）'],
@@ -138,7 +73,6 @@ const LAWS = [
   ['laws/504M60000010029.xml', '借地借家法施行規則'],
   ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
 ];
-const KIND_JA = { parse:'改め文', base:'発射台', order:'施行順序', conflict:'衝突', hane:'ハネ', consolidate:'溶け込み', expected:'改正後との一致', taisho:'新旧対照表', cross_law:'他法令', enforcement:'施行期日', penalty:'罰則' };
 const LEAN = {
   'r3-37-art35': 'Consolidate.lean: consolidates_503AC0000000037_art35, wf_503AC0000000037_art35',
   'r4-48-art73': 'Consolidate.lean: consolidates_504AC0000000048_art73',
@@ -157,17 +91,6 @@ const LEAN = {
   'r3-51-koshoku-senkyo-fix': 'Koshoku.lean: consolidates_503AC0000000051（本則 1167 項が e-Gov と一致）',
 };
 
-const $ = id => document.getElementById(id);
-const cache = new Map();
-async function load(rel) {
-  if (!cache.has(rel)) cache.set(rel, fetch(FIX + rel).then(r => { if (!r.ok) throw new Error(rel + ': ' + r.status); return r.text(); }));
-  return cache.get(rel);
-}
-function fill(sel, items, allowNone) {
-  sel.innerHTML = '';
-  if (allowNone) sel.append(new Option('（無し）', ''));
-  for (const [v, t] of items) sel.append(new Option(t, v));
-}
 let cases = [];
 let current = null;
 
@@ -201,53 +124,16 @@ async function run() {
   $('status').textContent = '';
 }
 
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-
-const FIELD_JA = { duration_value:'期間の値', duration:'期間（裸）', period:'事象からの期間', elapsed:'経過', within:'期限', window:'窓', before:'前', within_before:'前の期間', nth_day:'N日目', every:'周期', approx:'目途', compare:'期間の比較', calendar_day:'暦日', era_date:'元号日付', enforcement:'施行期日', sanction:'刑', penalty_target:'罰則の対象規定', penalty_act:'罰則の行為', money:'金額', ratio:'割合', rate:'利率', quantity:'数量' };
-// 層 1 の候補（発射台の全文から）。原文根拠つきで、値は確定しない
-let lastBaseXml = '';
-function candidatesSection() {
-  let cs;
-  try { cs = JSON.parse(candidates(lastBaseXml)); } catch (e) { return ''; }
-  if (!Array.isArray(cs)) return '';
-  let h = `<details><summary>発射台の全文から取った候補（層 1、${cs.length} 件: 時間表現・罰則・金額。原文根拠つき、値は確定しない）</summary><table class="cands"><tr><th>種類</th><th>原文</th><th>正規化</th><th>事象・役割</th><th>文脈</th><th>信頼</th></tr>`;
-  for (const c of cs.slice(0, 400)) {
-    h += `<tr class="${c.confidence}"><td>${FIELD_JA[c.field] || c.field}</td><td>${esc(c.raw)}</td><td>${esc(c.normalized ?? '')}${c.unit ? ' ' + esc(c.unit) : ''}</td><td>${esc(c.source_label ?? '')}${c.role ? ' / ' + esc(c.role) : ''}</td><td class="ctx" title="${esc(c.evidence.sentence)}">${esc(c.evidence.context)}</td><td>${c.confidence}</td></tr>`;
-  }
-  if (cs.length > 400) h += `<tr><td colspan="6">…ほか ${cs.length - 400} 件</td></tr>`;
-  return h + '</table></details>';
-}
 
 function render(r, ms) {
-  if (r.error) { $('report').innerHTML = `<pre>${esc(r.error)}</pre>`; return; }
   const expect = current ? (r.ok === current.expect.ok && JSON.stringify(r.checks.filter(c => c.status === 'fail').map(c => c.kind)) === JSON.stringify(current.expect.fail)) : null;
-  const engine = r.engine === 'lean' ? '溶け込み: Lean（証明した applyUnit の WASM）' : '溶け込み: Rust の写し';
-  let h = `<p class="verdict ${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'} <span class="status">${ms.toFixed(0)} ms・${engine}${expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）'}</span></p>`;
-  h += '<ul class="checks">';
-  for (const c of r.checks) {
-    const mark = { pass:'✓', fail:'✗', warn:'!', skip:'–' }[c.status];
-    h += `<li class="${c.status}"><div class="head"><span class="mark">${mark}</span><span class="kind">${KIND_JA[c.kind] || c.kind}</span><span>${esc(c.message)}</span></div>`;
-    if (c.details.length) h += '<ul class="details">' + c.details.map(d => `<li>${esc(d)}</li>`).join('') + '</ul>';
-    h += '</li>';
-  }
-  h += '</ul>';
-  if (r.suggested_fixes && r.suggested_fixes.length) h += `<details open><summary>生成したハネの手当て（この改め文を繰り下げの文より前に足す）</summary><pre>${esc(r.suggested_fixes.join('\n'))}</pre></details>`;
-  if (current && LEAN[current.id]) h += `<p class="lean">Lean 側の対応: <code>${esc(LEAN[current.id])}</code></p>`;
-  if (r.diff.length) {
-    h += `<details open><summary>発射台からの差分（${r.diff.length} 項）</summary><pre class="diff">` +
-      r.diff.map(d => `<span class="${d.startsWith('追加') ? 'add' : d.startsWith('削除') ? 'del' : 'chg'}">${esc(d)}</span>`).join('\n') + '</pre></details>';
-  }
-  for (const u of r.units) {
-    h += `<details><summary>${esc(u.label)}: ${u.instructions} 文・${u.ops} 操作 → id 操作 ${u.ident_ops.length} 個（Lean の AmendUnit）</summary><pre>${esc(u.ident_ops.join('\n') || '（束縛できなかった）')}</pre></details>`;
-  }
-  h += `<details><summary>報告の JSON</summary><pre>${esc(JSON.stringify(r, null, 1))}</pre></details>`;
-  h += candidatesSection();
-  $('report').innerHTML = h;
+  const note = expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）';
+  const extra = current && LEAN[current.id] ? `<p class="lean">Lean 側の対応: <code>${esc(LEAN[current.id])}</code></p>` : '';
+  $('report').innerHTML = renderReport(r, ms, { note, extra, baseXml: lastBaseXml });
 }
 
 (async () => {
-  await init();
-  await loadLean();
+  await setup();
   fill($('base'), REVISIONS, false);
   fill($('expected'), REVISIONS, true);
   fill($('laws'), LAWS, false);

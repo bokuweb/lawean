@@ -23,7 +23,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
 | [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 5 件（通る）と、失敗例 9 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
-| [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。ケースを選び、改め文を書き換えて検査する | — |
+| [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。実例のケース集と、[発射台を選んで改正法を書いて検査する](docs/playground/draft.html) 画面 | — |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 | [docs/design-notes.html](docs/design-notes.html) | 方針と設計のやさしい解説（HTML）。最小の Lean 例、異常検出の例、identity patch の解説つき | — |

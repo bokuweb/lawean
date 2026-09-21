@@ -973,6 +973,7 @@ dependencies = [
 name = "lawean-wasm"
 version = "0.1.0"
 dependencies = [
+ "lawean-amend",
  "lawean-check",
  "lawean-extract",
  "lawean-source",

@@ -36,6 +36,8 @@ fn run_case(c: &Case) -> Report {
         c.taisho.as_deref().map(fixture).as_deref(),
         &others,
         c.enforced.as_deref(),
+        None,
+        None,
     )
 }
 
@@ -127,4 +129,75 @@ fn failure_details_name_the_cause() {
         d.contains("413AC0000000026") && d.contains("参照切れ"),
         "{d}"
     );
+}
+
+/// 起草中の改正法: 発射台を選び、改め文と附則を書き、公布予定日と施行日を与えて検査する（playground の draft の経路）。
+/// 附則「公布の日から起算して一年を超えない範囲内において政令で定める日」に対し、施行日が上限の内か外か
+#[test]
+fn drafting_with_own_suppl_provision() {
+    let base = fixture("403AC0000000090.xml");
+    let amendment = "第一条　借地借家法（平成三年法律第九十号）の一部を次のように改正する。\n　　第三条中「三十年」を「四十年」に改める。\n";
+    let suppl = "第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。";
+    let ok = run_texts(
+        &base,
+        amendment,
+        None,
+        None,
+        &[],
+        Some("2027-03-31"),
+        Some(suppl),
+        Some("2026-10-01"),
+    );
+    assert!(ok.ok, "{:#?}", ok.checks);
+    let e = ok
+        .checks
+        .iter()
+        .find(|c| c.kind == Kind::Enforcement)
+        .unwrap();
+    assert_eq!(e.status, Status::Pass, "{e:?}");
+    assert!(e.details[0].contains("2026-10-01〜2027-09-30"), "{e:?}");
+    // 上限を過ぎた施行日
+    let bad = run_texts(
+        &base,
+        amendment,
+        None,
+        None,
+        &[],
+        Some("2027-10-01"),
+        Some(suppl),
+        Some("2026-10-01"),
+    );
+    assert!(!bad.ok);
+    assert_eq!(bad.status(Kind::Enforcement), Some(Status::Fail));
+    // ただし書きで第三条だけ公布の日: 施行日が公布日ならその単位は範囲内
+    let suppl2 = "第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。ただし、第三条の改正規定は、公布の日から施行する。";
+    let r = run_texts(
+        &base,
+        amendment,
+        None,
+        None,
+        &[],
+        Some("2026-10-01"),
+        Some(suppl2),
+        Some("2026-10-01"),
+    );
+    let e = r
+        .checks
+        .iter()
+        .find(|c| c.kind == Kind::Enforcement)
+        .unwrap();
+    assert_eq!(e.status, Status::Pass, "{e:?}");
+    assert!(e.details[0].contains("被改正法の条で"), "{e:?}");
+    // 公布予定日が無ければ検査しない（Skip）
+    let r = run_texts(
+        &base,
+        amendment,
+        None,
+        None,
+        &[],
+        Some("2027-03-31"),
+        Some(suppl),
+        None,
+    );
+    assert_eq!(r.status(Kind::Enforcement), Some(Status::Skip));
 }

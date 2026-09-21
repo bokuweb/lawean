@@ -20,7 +20,7 @@ export function candidates(xml) {
 }
 
 /**
- * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced? }。出力は `Report` の JSON
+ * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日） }。出力は `Report` の JSON
  * @param {string} input_json
  * @returns {string}
  */
@@ -31,6 +31,27 @@ export function check(input_json) {
         const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.check(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * 法令の題名・法令番号と、本則の条・項の一覧（起草の画面で条文を見ながら改め文を書くため）。
+ * 出力: { title, law_num, law_id, articles: [{ id, num, label, caption, paragraphs: [{ id, num, text }] }] }
+ * @param {string} xml
+ * @returns {string}
+ */
+export function outline(xml) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(xml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.outline(ptr0, len0);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);

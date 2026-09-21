@@ -23,7 +23,7 @@ emcc -O2 -c "$ROOT/crates/lawean-leanrt/csrc/uv_stubs.c" -o "$OUT/uv_stubs.o"
 mkdir -p "$ROOT/docs/playground/lean"
 emcc -O2 "$OUT"/*.o -L"$W/lib/lean" -lInit -lleanrt \
   -o "$ROOT/docs/playground/lean/lawean_lean.js" \
-  -sMODULARIZE=1 -sEXPORT_ES6=1 -sALLOW_MEMORY_GROWTH=1 \
+  -sMODULARIZE=1 -sEXPORT_ES6=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=33554432 \
   -sEXPORTED_FUNCTIONS=_lawean_leanrt_init,_lawean_leanrt_apply_unit,_lawean_leanrt_check_unit,_lawean_leanrt_relation,_lawean_leanrt_free,_malloc,_free \
   -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToUTF8,lengthBytesUTF8
 rm -rf "$OUT"

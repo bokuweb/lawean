@@ -13,5 +13,6 @@ crate-type = ["cdylib", "rlib"]
 lawean-check = { path = "../lawean-check" }
 lawean-extract = { path = "../lawean-extract" }
 lawean-source = { path = "../lawean-source" }
+lawean-amend = { path = "../lawean-amend" }
 serde_json.workspace = true
 wasm-bindgen = "0.2"

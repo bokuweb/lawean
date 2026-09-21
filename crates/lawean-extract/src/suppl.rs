@@ -325,6 +325,55 @@ fn spec_of(sp: &SupplProvision, own_promulgated: Option<Date>) -> EnforcementSpe
     spec
 }
 
+/// 起草中の改正法の附則（平文）から施行期日を読む。「第一条　この法律は、…から施行する。ただし、…は、…から施行する。」
+/// 最初の「施行する」の文が本文、ただし書き・続く文の「X は、…から」の列挙が号に相当する。公布日は起草者が与える（公布予定日）
+pub fn spec_from_text(text: &str, promulgated: Option<Date>) -> EnforcementSpec {
+    let mut spec = EnforcementSpec {
+        amend_law_num: None,
+        promulgated,
+        main: None,
+        items: vec![],
+    };
+    let sentences: Vec<String> = text
+        .split(['。', '\n'])
+        .map(|s| {
+            s.trim()
+                .trim_start_matches(|c: char| c == '第' || c.is_whitespace())
+        })
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            // 「第一条　この法律は、…」の見出しを落とす
+            let s = s.trim();
+            let s = Regex::new(r"^[一二三四五六七八九十]+条[　 ]*")
+                .unwrap()
+                .replace(s, "");
+            format!("{s}。")
+        })
+        .collect();
+    for s in &sentences {
+        if !s.contains("施行する") {
+            continue;
+        }
+        if spec.main.is_none() {
+            spec.main = Some(EnforcementClause {
+                enforcement: parse_enforcement(s),
+                text: s.clone(),
+            });
+            continue;
+        }
+        for (scope, e) in enforcement_list(s) {
+            spec.items.push(EnforcementItem {
+                scope,
+                clause: EnforcementClause {
+                    enforcement: Some(e),
+                    text: s.clone(),
+                },
+            });
+        }
+    }
+    spec
+}
+
 /// 法令自身の公布日（`Law` 要素の Era / Year / PromulgateMonth / PromulgateDay）
 pub fn own_promulgation(doc: &LegalDocument) -> Option<Date> {
     let attr = |k: &str| {

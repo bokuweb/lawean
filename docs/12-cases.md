@@ -62,7 +62,9 @@ Lean 側: `hane-missing` は `Cases.lean` の `hane_missing_consolidates`（溶�
 
 ## 4. playground
 
-`docs/playground/index.html`。ケースを選ぶと発射台・改め文・新旧対照表・他法令が入り、「検査する」で報告（各検査の ✓✗、明細、発射台からの差分、束縛した id 操作、対応する Lean の定理名）が出る。
+`docs/playground/draft.html`（**発射台を選び、改正法を書いて検査する**）: fixtures の法令（借地借家法・区分所有法・宅建業法・高齢者法・旅館業法・質屋営業法・医師法・古物営業法・公職選挙法…、手元の e-Gov XML も可）を発射台に、本則の条を見ながら改め文を書き（条をクリックで雛形）、附則（施行期日）と公布予定日・施行日を与えて検査する。改正後の本文（変わった条）と層 1 の候補も出る。起草中の附則は改正後リビジョンの附則より優先して `Enforcement` が読む（`run_texts` の `suppl` / `promulgated`）。
+
+`docs/playground/index.html`（実例のケース集）。ケースを選ぶと発射台・改め文・新旧対照表・他法令が入り、「検査する」で報告（各検査の ✓✗、明細、発射台からの差分、束縛した id 操作、対応する Lean の定理名）が出る。
 改め文を書き換えて再検査できる（例: ハネの「第三項」を「第四項」にすると Expected と Taisho が落ちる）。
 
 判定はブラウザ内の WASM（`crates/lawean-wasm` = `lawean-check` を wasm32 にしたもの、1.4MB）で、サーバーは静的ファイルだけ。1 ケース数十 ms。

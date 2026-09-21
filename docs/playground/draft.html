@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>lawean 改正法を書いて検査する playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="playground.css">
+<style>
+  main { grid-template-columns: 1fr 1fr; }
+  .outline { border:1px solid var(--line); border-radius:6px; background:#fff; max-height: 300px; overflow:auto; font-size:12px; }
+  .outline .art { padding:4px 8px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .outline .art:hover { background:#f2f4f8; }
+  .outline .art b { color:var(--accent); }
+  .outline .art .cap { color:var(--muted); margin-left:6px; }
+  .outline .para { color:#3a3a36; margin:2px 0 0 1em; white-space:pre-wrap; }
+  .grammar { font-size:12px; color:var(--muted); }
+  .grammar code { background:#fff; border:1px solid var(--line); border-radius:3px; padding:0 3px; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 0; }
+  input[type=file] { font: 12px sans-serif; border:none; padding:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>改正法を書いて検査する playground</h1>
+  <span class="sub">発射台（改正前の法令）を選び、改め文と附則を書き、公布予定日・施行日を与えて検査する。判定はブラウザ内の WASM（溶け込みは Lean の証明済み <code>applyUnit</code>）。<a href="index.html">実例のケース集はこちら</a></span>
+</header>
+<main>
+  <section class="left">
+    <label for="base">発射台（fixtures の e-Gov 法令 XML）</label>
+    <select id="base"></select>
+    <p class="hint">手元の e-Gov XML（<code>law_data</code> API の応答）を読ませることもできる: <input type="file" id="basefile" accept=".xml,text/xml"></p>
+    <label>条文（クリックで改め文の雛形を挿入。<input id="filter" placeholder="絞り込み（例: 三十年、第三十八条）" style="width:14em;display:inline;padding:2px 6px"></label>
+    <div class="outline" id="outline"><p class="status" style="padding:8px">発射台を選ぶと本則の条が出る。</p></div>
+    <label for="amend">改め文（改正法の本則）</label>
+    <textarea id="amend" spellcheck="false"></textarea>
+    <p class="grammar">読める形: <code>第N条[第M項][第K号]中「A」を「B」に改める</code>、<code>「A」の下に「B」を加える</code>、<code>「A」を削る</code>、<code>第N条に次の一項を加える</code>、<code>第N条第M項の次に次の一項を加える</code>、<code>第N条の次に次の一条を加える</code>、<code>第N章に次の一条を加える</code>、<code>第N条を次のように改める</code>、<code>第N条中第P項を第Q項とし、第A項から第B項までをK項ずつ繰り下げ</code>、<code>第N条[第M項]を削る</code>、<code>目次中「A」を「B」に改める</code>、<code>後段として次のように加える</code>。加える条文は次の行に全角スペース 1 つでインデント。</p>
+    <label for="suppl">附則（施行期日）</label>
+    <textarea id="suppl" class="small" spellcheck="false">第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。</textarea>
+    <p class="grammar">読める形: <code>公布の日から施行する</code>、<code>令和N年M月D日から施行する</code>、<code>公布の日から起算してN年を経過した日から</code>、<code>公布の日から起算してN年を超えない範囲内において政令で定める日から</code>、<code>令和N年M月D日までの間において政令で定める日から</code>、ただし書き <code>ただし、第N条の改正規定は、公布の日から施行する</code>。</p>
+    <div class="row">
+      <div><label for="promulgated">公布予定日</label><input id="promulgated" placeholder="YYYY-MM-DD"></div>
+      <div><label for="enforced">施行日（予定）</label><input id="enforced" placeholder="YYYY-MM-DD"></div>
+    </div>
+    <label for="laws">他法令（参照の波及を見る。複数選択）</label>
+    <select id="laws" multiple size="4"></select>
+    <button id="run">検査する</button>
+    <span class="status" id="status"></span>
+  </section>
+  <section class="right">
+    <div id="report"><p class="status">発射台を選び、改め文を書いて「検査する」。</p></div>
+  </section>
+</main>
+<script type="module">
+import { setup, load, fill, $, esc, renderReport, check, outline } from './common.js';
+
+const BASES = [
+  ['403AC0000000090.xml', '借地借家法（現行 2026-05-21）'],
+  ['revisions/403AC0000000090_20210519_503AC0000000037.xml', '借地借家法（2021-05-19、令3-37 の発射台）'],
+  ['revisions/403AC0000000090_20220518_503AC0000000037.xml', '借地借家法（2022-05-18）'],
+  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律'],
+  ['laws/327AC1000000176.xml', '宅地建物取引業法'],
+  ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律'],
+  ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
+  ['laws/323AC0000000138.xml', '旅館業法'],
+  ['laws/325AC0000000158.xml', '質屋営業法'],
+  ['laws/323AC0000000201.xml', '医師法'],
+  ['laws/324AC0000000108.xml', '古物営業法'],
+  ['revisions/325AC1000000100_20210602_503AC0000000051.xml', '公職選挙法（2021-06-02）'],
+];
+const LAWS = [
+  ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律'],
+  ['laws/504CO0000000187.xml', '借地借家法施行令'],
+  ['laws/504M60000010029.xml', '借地借家法施行規則'],
+  ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
+  ['403AC0000000090.xml', '借地借家法（現行）'],
+  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律'],
+  ['laws/327AC1000000176.xml', '宅地建物取引業法'],
+];
+
+let baseXml = '';
+let info = null;
+
+function header() {
+  if (!info) return '';
+  return `第一条　${info.title}（${info.law_num}）の一部を次のように改正する。\n`;
+}
+
+function showOutline() {
+  if (!info) return;
+  const q = $('filter').value.trim();
+  let h = '';
+  for (const a of info.articles) {
+    const text = a.paragraphs.map(p => p.text).join('\n');
+    if (q && !(a.label.includes(q) || a.caption.includes(q) || text.includes(q))) continue;
+    h += `<div class="art" data-num="${esc(a.label)}"><b>${esc(a.label)}</b><span class="cap">${esc(a.caption)}</span>` +
+      a.paragraphs.map(p => `<div class="para">${p.num !== '1' ? p.num + '　' : ''}${esc(p.text.length > 160 && !q ? p.text.slice(0, 160) + '…' : p.text)}</div>`).join('') + '</div>';
+  }
+  $('outline').innerHTML = h || '<p class="status" style="padding:8px">該当なし</p>';
+  for (const el of $('outline').querySelectorAll('.art')) {
+    el.onclick = () => {
+      const ta = $('amend');
+      if (!ta.value.trim()) ta.value = header();
+      if (!ta.value.endsWith('\n')) ta.value += '\n';
+      ta.value += `　　${el.dataset.num}中「」を「」に改める。\n`;
+      ta.focus();
+    };
+  }
+}
+
+async function setBase(xml) {
+  baseXml = xml;
+  const o = JSON.parse(outline(xml));
+  if (o.error) { $('outline').innerHTML = `<pre>${esc(o.error)}</pre>`; info = null; return; }
+  info = o;
+  if (!$('amend').value.trim() || $('amend').value.startsWith('第一条　')) $('amend').value = header();
+  showOutline();
+  $('report').innerHTML = `<p class="status">${esc(info.title)}（${esc(info.law_num)}、本則 ${info.articles.length} 条）。改め文を書いて「検査する」。</p>`;
+}
+
+async function run() {
+  $('status').textContent = '検査中…';
+  try {
+    const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
+    const input = {
+      base: baseXml, amendment: $('amend').value, expected: null, taisho: null, other_laws,
+      enforced: $('enforced').value || null, suppl: $('suppl').value.trim() || null, promulgated: $('promulgated').value || null,
+    };
+    const t0 = performance.now();
+    const r = JSON.parse(check(JSON.stringify(input)));
+    let extra = '';
+    if (r.after && r.after.length && r.diff && r.diff.length) {
+      // 変わった条の改正後の本文
+      // diff の「第22条第2項」「第142条の4第7項」から条番号（after の形 "22" / "142_4"）を取る
+      const touched = new Set(r.diff.map(d => (d.match(/第(\d+(?:の\d+)*)条/) || [])[1]).filter(Boolean).map(n => n.replaceAll('の', '_')));
+      const rows = r.after.filter(([art]) => touched.has(art));
+      if (rows.length) extra = `<details open><summary>改正後の本文（変わった条、${touched.size} 条）</summary><pre>${rows.map(([a, t]) => '第' + esc(a.replaceAll('_', '条の')) + '条　' + esc(t)).join('\n\n')}</pre></details>`;
+    }
+    $('report').innerHTML = renderReport(r, performance.now() - t0, { extra, baseXml });
+  } catch (e) {
+    $('report').innerHTML = `<p class="verdict fail">エラー</p><pre>${String(e)}</pre>`;
+  }
+  $('status').textContent = '';
+}
+
+(async () => {
+  await setup();
+  fill($('base'), BASES, false);
+  fill($('laws'), LAWS, false);
+  $('base').onchange = async () => setBase(await load($('base').value));
+  $('basefile').onchange = async (e) => { const f = e.target.files[0]; if (f) setBase(await f.text()); };
+  $('filter').oninput = showOutline;
+  $('run').onclick = run;
+  const today = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+  $('promulgated').value = iso(today);
+  $('enforced').value = iso(new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()));
+  await setBase(await load(BASES[0][0]));
+})();
+</script>
+</body>
+</html>

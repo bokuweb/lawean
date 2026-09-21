@@ -127,6 +127,10 @@ pub struct Input<'a> {
     /// 他法令（波及を見る）。`enforced` は改正の施行日
     pub space: Option<&'a LawSpace>,
     pub enforced: Option<&'a str>,
+    /// 起草中の改正法の附則（平文）。あれば改正後リビジョンの附則より優先して施行期日を読む
+    pub suppl: Option<&'a str>,
+    /// 公布（予定）日 `YYYY-MM-DD`。附則の「公布の日から起算して…」の起点
+    pub promulgated: Option<&'a str>,
 }
 
 fn check(kind: Kind, status: Status, message: impl Into<String>, details: Vec<String>) -> Check {
@@ -553,12 +557,17 @@ pub fn run(input: &Input<'_>) -> Report {
     });
 
     // 施行期日: 改正法の附則（改正後リビジョンに載る）から各単位の許容区間を出し、施行日がその中にあるか
-    checks.push(match (input.expected, input.enforced) {
-        (Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
-        (None, Some(_)) => check(
+    checks.push(match (input.suppl, input.expected, input.enforced) {
+        (Some(suppl), _, Some(day)) => {
+            let p = input.promulgated.and_then(lawean_extract::calendar::parse);
+            let spec = lawean_extract::suppl::spec_from_text(suppl, p);
+            check_enforcement_with(&spec, "起草中の附則", day, &input.units)
+        }
+        (None, Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
+        (None, None, Some(_)) => check(
             Kind::Enforcement,
             Status::Skip,
-            "改正法の附則を読む改正後リビジョンが無い",
+            "改正法の附則（起草中の附則か、改正後リビジョン）が無い",
             vec![],
         ),
         _ => check(Kind::Enforcement, Status::Skip, "施行日が無い", vec![]),
@@ -804,16 +813,7 @@ fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
 /// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
 /// 単位が複数なら、最後の単位の区間に施行日が入り、それより前の単位はその日までに施行できる（下限 ≤ 施行日）こと
 fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit)]) -> Check {
-    use lawean_extract::calendar::{fmt, parse};
-    use lawean_extract::suppl::{admissible, kanji_num, spec_for_law_id};
-    let Some(day) = parse(day) else {
-        return check(
-            Kind::Enforcement,
-            Status::Fail,
-            format!("施行日が読めない: {day}"),
-            vec![],
-        );
-    };
+    use lawean_extract::suppl::spec_for_law_id;
     // 改正法の法令 ID は改正後リビジョンの id（403AC0000000090_20230220_504AC0000000048）の末尾
     let amend_id = exp
         .version_id
@@ -828,14 +828,41 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
             vec![],
         );
     };
+    check_enforcement_with(&spec, "改正後リビジョンに載る改正法の附則", day, units)
+}
+
+fn check_enforcement_with(
+    spec: &lawean_extract::suppl::EnforcementSpec,
+    source: &str,
+    day: &str,
+    units: &[(String, AmendUnit)],
+) -> Check {
+    use lawean_extract::calendar::{fmt, parse};
+    use lawean_extract::suppl::{admissible, kanji_num};
+    let Some(day) = parse(day) else {
+        return check(
+            Kind::Enforcement,
+            Status::Fail,
+            format!("施行日が読めない: {day}"),
+            vec![],
+        );
+    };
     let Some(p) = spec.promulgated else {
         return check(
             Kind::Enforcement,
             Status::Skip,
-            "改正法の公布日が読めない",
+            format!("{source}: 公布日が無い（起草中なら公布予定日を与える）"),
             vec![],
         );
     };
+    if spec.main.is_none() {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            format!("{source}: 「…から施行する」の文が無い"),
+            vec![],
+        );
+    }
     let (mut details, mut fails, mut warns) = (Vec::new(), 0, 0);
     let n = units.len();
     for (i, (label, unit)) in units.iter().enumerate() {
@@ -1007,6 +1034,8 @@ pub fn run_texts(
     taisho: Option<&str>,
     other_laws: &[String],
     enforced: Option<&str>,
+    suppl: Option<&str>,
+    promulgated: Option<&str>,
 ) -> Report {
     let base = match parse_response(base_xml) {
         Ok(d) => d,
@@ -1069,6 +1098,8 @@ pub fn run_texts(
         taisho,
         space: space.as_ref(),
         enforced,
+        suppl,
+        promulgated,
     });
     report.checks.insert(
         0,
