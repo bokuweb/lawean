@@ -282,8 +282,7 @@ pub fn act_words(act: &str) -> Vec<String> {
         .flat_map(|a| a.split("若しくは"))
         .filter_map(|a| {
             a.split(|c: char| !is_kanji(c))
-                .filter(|r| r.chars().count() >= 2)
-                .next_back()
+                .rfind(|r| r.chars().count() >= 2)
                 .map(str::to_string)
         })
         .collect()
