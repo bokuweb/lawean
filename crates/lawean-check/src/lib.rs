@@ -1027,6 +1027,7 @@ fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {
 }
 
 /// 文字列だけで動く版（WASM・playground 用）。`other_laws` は他法令の XML
+#[allow(clippy::too_many_arguments)]
 pub fn run_texts(
     base_xml: &str,
     amendment: &str,
