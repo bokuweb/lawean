@@ -166,7 +166,8 @@ pub fn scope_articles(scope: &str) -> Vec<ArtRange> {
 /// 範囲欄が被改正法の条で書かれているか（「第三十四条の二第一項の改正規定」）。
 /// 単独法の改正法（「宅地建物取引業法の一部を改正する法律」）の附則はこの形、整備法の号は改正法の条で書く
 pub fn scope_is_target_side(scope: &str) -> bool {
-    scope.contains("改正規定")
+    // 括弧の中の「（…の改正規定に限る。）」は改正法の条を限定しているだけ（整備法の号）。括弧を落として見る
+    strip_parens(scope).contains("改正規定")
 }
 
 /// 被改正法の条で書かれた範囲欄から、条番号（枝番は「N_M」）を取る
@@ -180,8 +181,14 @@ pub fn scope_target_articles(scope: &str) -> Vec<String> {
     let mut out = Vec::new();
     for c in r.captures_iter(&s) {
         // 「同法第百二十九条の改正規定」「宅地建物取引業法第六十四条の三第三項」— 法令名の直後も被改正法の条。
-        // 「附則第三条の規定」は改正法の附則の条なので除く
-        if s[..c.get(0).unwrap().start()].ends_with("附則") {
+        // 「附則第三条の規定」は改正法の附則の条なので除く。「附則第八条第一項、第五十九条から第六十三条まで」のように
+        // 「附則」の後に「、」「及び」で連なる条も附則の条（「並びに」で群が切れるまで）
+        let head = &s[..c.get(0).unwrap().start()];
+        let group_start = head
+            .rfind("並びに")
+            .map(|i| i + "並びに".len())
+            .unwrap_or(0);
+        if head[group_start..].contains("附則") {
             continue;
         }
         let Some(base) = kanji_num(&c[1]) else {

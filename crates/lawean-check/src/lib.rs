@@ -698,7 +698,7 @@ pub fn run(input: &Input<'_>) -> Report {
         (Some(suppl), _, Some(day)) => {
             let p = input.promulgated.and_then(lawean_extract::calendar::parse);
             let spec = lawean_extract::suppl::spec_from_text(suppl, p);
-            check_enforcement_with(&spec, "起草中の附則", day, &input.units)
+            check_enforcement_with(&spec, "起草中の附則", day, &input.units, true)
         }
         (None, Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
         (None, None, Some(_)) => check(
@@ -1016,7 +1016,13 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
             vec![],
         );
     };
-    check_enforcement_with(&spec, "改正後リビジョンに載る改正法の附則", day, units)
+    check_enforcement_with(
+        &spec,
+        "改正後リビジョンに載る改正法の附則",
+        day,
+        units,
+        false,
+    )
 }
 
 fn check_enforcement_with(
@@ -1024,6 +1030,7 @@ fn check_enforcement_with(
     source: &str,
     day: &str,
     units: &[(String, AmendUnit)],
+    drafted: bool,
 ) -> Check {
     use lawean_extract::calendar::{fmt, parse};
     use lawean_extract::suppl::{admissible, kanji_num};
@@ -1123,7 +1130,8 @@ fn check_enforcement_with(
         details.push(format!("{label}: {range}。{verdict}"));
     }
     // 附則の号・ただし書きが挙げる条のうち、改め文のどの単位にも当たらないもの（「第九十五条の規定は」と書いたが
-    // 改め文にあるのは第三十五条、など）。改め文が改正法の一部なら正しいこともあるので Warn
+    // 改め文にあるのは第三十五条、など）。起草中の附則（改め文と一緒に書いたもの）でだけ見る。
+    // 成立した改正法の附則（改正後リビジョンから読んだもの）は改め文が改正法の一部なので、挙げる条が無いのは普通
     let unit_arts: Vec<u32> = units
         .iter()
         .filter_map(|(l, _)| {
@@ -1139,7 +1147,7 @@ fn check_enforcement_with(
         .filter_map(|o| o.article().map(|a| a.to_num_string()))
         .collect();
     let mut dangling = 0;
-    for it in &spec.items {
+    for it in spec.items.iter().filter(|_| drafted) {
         use lawean_extract::suppl::{scope_articles, scope_is_target_side, scope_target_articles};
         let hit = if scope_is_target_side(&it.scope) {
             scope_target_articles(&it.scope)
