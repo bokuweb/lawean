@@ -112,7 +112,7 @@ pub fn amount_candidates(
         |taken: &[(usize, usize)], s: usize, e: usize| taken.iter().any(|(a, b)| s < *b && *a < e);
     // 「第N号」「第N条」の数詞は番号
     let numbered = |s: usize| text[..s].ends_with('第');
-    let mut push = |out: &mut Vec<Candidate>, taken: &mut Vec<(usize, usize)>, c: Candidate| {
+    let push = |out: &mut Vec<Candidate>, taken: &mut Vec<(usize, usize)>, c: Candidate| {
         let (s, e) = (c.evidence.start, c.evidence.end);
         if !overlaps(taken, s, e) && !numbered(s) {
             taken.push((s, e));
