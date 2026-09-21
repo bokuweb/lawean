@@ -17,7 +17,7 @@ jobs:
           lake-package-directory: lean
           use-mathlib-cache: false
       - run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - run: lean --version
+      - run: cd lean && lean --version
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: sudo apt-get install -y z3

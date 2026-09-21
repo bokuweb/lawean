@@ -18,7 +18,13 @@ fn main() {
         println!("cargo:rustc-cfg=no_lean");
         return;
     }
-    let prefix = match Command::new("lean").arg("--print-prefix").output() {
+    let lean_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean");
+    // elan は cwd の lean-toolchain でツールチェーンを選ぶので lean/ で聞く
+    let prefix = match Command::new("lean")
+        .arg("--print-prefix")
+        .current_dir(&lean_dir)
+        .output()
+    {
         Ok(o) if o.status.success() => String::from_utf8(o.stdout).unwrap().trim().to_string(),
         _ => {
             println!(
@@ -28,7 +34,6 @@ fn main() {
             return;
         }
     };
-    let lean_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lean");
     let status = Command::new("lake")
         .args(["build", "Lawean:static"])
         .current_dir(&lean_dir)
