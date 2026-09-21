@@ -387,3 +387,51 @@ fn reiwa5_act53_art125_reproduces_egov_revision() {
         .iter()
         .any(|c| c.text == "第五十五条第一項" && c.fix.as_deref() == Some("第五十八条第一項")));
 }
+
+/// 令和4年法律第68号（刑法等の一部改正に伴う整備法、拘禁刑）: 5 法令を改正する 1 つの改め文。
+/// 位置の列挙（「、」「及び」「第N条から第M条までの規定」「第七号ロ」）と、
+/// 「次に掲げる法律の規定中「懲役」を「拘禁刑」に改める」＋号の列挙形（医師法）
+#[test]
+fn reiwa4_act68_five_laws_reproduce_egov_revisions() {
+    let units = parse_units(&fixture("amendments/504AC0000000068_5laws.txt")).unwrap();
+    assert_eq!(units.len(), 5);
+    let ishi = units.iter().find(|u| u.target_title == "医師法").unwrap();
+    assert_eq!(ishi.article_of_amending_law, "第二百二十一条");
+    assert!(ishi.instructions[0]
+        .ops
+        .iter()
+        .any(|o| matches!(o, Op::Replace { at, .. }
+        if matches!(&at.article, ArticleNum::Range { from, to }
+            if from.to_num_string() == "31" && to.to_num_string() == "33"))));
+    for (law, before, after) in [
+        (
+            "古物営業法",
+            "324AC0000000108_20240401_505AC0000000063",
+            "324AC0000000108_20250601_504AC0000000068",
+        ),
+        (
+            "質屋営業法",
+            "325AC0000000158_20240401_505AC0000000063",
+            "325AC0000000158_20250601_504AC0000000068",
+        ),
+        (
+            "旅館業法",
+            "323AC0000000138_20231213_505AC0000000052",
+            "323AC0000000138_20250601_504AC0000000068",
+        ),
+        (
+            "宅地建物取引業法",
+            "327AC1000000176_20250401_506AC0000000053",
+            "327AC1000000176_20250601_504AC0000000068",
+        ),
+        (
+            "医師法",
+            "323AC0000000201_20250401_503AC0000000049",
+            "323AC0000000201_20250601_504AC0000000068",
+        ),
+    ] {
+        let unit = units.iter().find(|u| u.target_title == law).unwrap();
+        let got = apply_unit(&revision(before), unit, "test").unwrap();
+        assert_same_main(&got, &revision(after));
+    }
+}

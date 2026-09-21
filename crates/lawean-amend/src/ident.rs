@@ -435,7 +435,11 @@ impl Binder<'_> {
                         new: toc_text(&self.doc).unwrap_or_default(),
                     });
                 }
-                Op::Replace { at, from, to } => self.replace(at, from, to, &mut snapshots)?,
+                Op::Replace { at, from, to } => {
+                    for at in crate::apply::expand_range(&self.doc, at) {
+                        self.replace(&at, from, to, &mut snapshots)?
+                    }
+                }
                 Op::InsertAfterPhrase { at, anchor, text } => {
                     self.replace(at, anchor, &format!("{anchor}{text}"), &mut snapshots)?
                 }

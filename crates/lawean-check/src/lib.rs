@@ -1346,16 +1346,25 @@ pub fn run_texts(
         .unwrap_or_default();
     let mut labels: Vec<(String, AmendUnit)> = Vec::new();
     let mut other_units: Vec<(String, String, AmendUnit)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     for u in units {
         let label = u.article_of_amending_law.clone();
-        let other = (u.target_title != base_title)
-            .then(|| space.as_ref().and_then(|s| s.resolve_name(&u.target_title)))
-            .flatten()
+        if u.target_title == base_title || base_title.is_empty() {
+            labels.push((label, u));
+            continue;
+        }
+        let other = space
+            .as_ref()
+            .and_then(|s| s.resolve_name(&u.target_title))
             .filter(|id| Some(id.to_string()) != base.law_id)
             .map(str::to_string);
         match other {
             Some(id) => other_units.push((label, id, u)),
-            None => labels.push((label, u)),
+            // 発射台でも他法令でもない法令の改正（同じ改正法の別の条）。見ない
+            None => skipped.push(format!(
+                "{label}（{}）は発射台でも他法令でもない法令の改正なので見ない",
+                u.target_title
+            )),
         }
     }
     let mut report = run(&Input {
@@ -1374,8 +1383,16 @@ pub fn run_texts(
         check(
             Kind::Parse,
             Status::Pass,
-            format!("改め文を {} 単位に読んだ", report.units.len()),
-            vec![],
+            format!(
+                "改め文を {} 単位に読んだ{}",
+                report.units.len(),
+                if skipped.is_empty() {
+                    String::new()
+                } else {
+                    format!("（他に {} 単位は別の法令の改正）", skipped.len())
+                }
+            ),
+            skipped,
         ),
     );
     report

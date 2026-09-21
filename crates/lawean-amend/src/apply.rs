@@ -48,14 +48,16 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
             Op::Replace { at, from, to } => {
-                let art = article_mut(doc, &at.article)?;
-                let idx = para_index(art, &at.paragraph, &mut snapshots)?;
-                let n = replace_in_article_item(art, idx, at.item.as_deref(), from, to);
-                if n == 0 {
-                    return Err(ApplyError::PhraseNotFound {
-                        at: loc_name(at),
-                        phrase: from.clone(),
-                    });
+                for at in expand_range(doc, at) {
+                    let art = article_mut(doc, &at.article)?;
+                    let idx = para_index(art, &at.paragraph, &mut snapshots)?;
+                    let n = replace_in_article_item(art, idx, at.item.as_deref(), from, to);
+                    if n == 0 {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: loc_name(&at),
+                            phrase: from.clone(),
+                        });
+                    }
                 }
             }
             Op::InsertAfterPhrase { at, anchor, text } => {
@@ -643,6 +645,22 @@ pub(crate) fn renumber_article(
     Ok(())
 }
 
+/// 位置の条が範囲（「第三十一条から第三十三条まで」）なら、発射台にあるその範囲の条ごとの位置に展開する
+pub(crate) fn expand_range(doc: &LegalDocument, at: &Loc) -> Vec<Loc> {
+    match &at.article {
+        ArticleNum::Range { from, to } => crate::numbering::article_nums(doc)
+            .into_iter()
+            .filter(|n| matches!(n, ArticleNum::Single { .. }) && n >= from && n <= to)
+            .map(|n| Loc {
+                article: n,
+                paragraph: at.paragraph.clone(),
+                item: at.item.clone(),
+            })
+            .collect(),
+        _ => vec![at.clone()],
+    }
+}
+
 /// 「第百四十二条の四」
 pub fn article_label(n: &ArticleNum) -> String {
     use lawean_resolve::numeral::to_kanji;
@@ -653,6 +671,9 @@ pub fn article_label(n: &ArticleNum) -> String {
                 s.push_str(&format!("の{}", to_kanji(*b)));
             }
             s
+        }
+        ArticleNum::Range { from, to } => {
+            format!("{}から{}まで", article_label(from), article_label(to))
         }
         other => format!("第{}条", other.to_num_string()),
     }

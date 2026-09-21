@@ -28,6 +28,14 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     static HEADER: OnceLock<Regex> = OnceLock::new();
     let header =
         HEADER.get_or_init(|| re(r"^(第{N}条)　(.+?)(（[^）]*）)?の一部を次のように改正する。$"));
+    // 「第N条　次に掲げる法律の規定中「A」を「B」に改める。」+「一　X法（…）第M条…」の列挙形（令4-68 第221条など）。
+    // 号ごとに、その法律を改正する単位を作る
+    static LIST_HEADER: OnceLock<Regex> = OnceLock::new();
+    let list_header = LIST_HEADER
+        .get_or_init(|| re(r"^(第{N}条)　次に掲げる法律の規定中「(.+?)」を「(.+?)」に改める。$"));
+    static LIST_ITEM: OnceLock<Regex> = OnceLock::new();
+    let list_item = LIST_ITEM.get_or_init(|| re(r"^{N}　(.+?)（[^）]*）(第.+)$"));
+    let mut list: Option<(String, String, String)> = None;
     let mut units: Vec<AmendUnit> = Vec::new();
     for raw in text.lines() {
         let indent = raw
@@ -38,7 +46,24 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         if line.is_empty() || line.starts_with('（') && indent == 0 {
             continue;
         }
+        if let Some(c) = list_header.captures(line) {
+            list = Some((c[1].to_string(), c[2].to_string(), c[3].to_string()));
+            continue;
+        }
+        if let (Some((art, a, b)), Some(c)) = (&list, list_item.captures(line)) {
+            if indent == 1 {
+                let text = format!("{}中「{a}」を「{b}」に改める。", &c[2]);
+                let ops = parse_instruction(&text)?;
+                units.push(AmendUnit {
+                    article_of_amending_law: art.clone(),
+                    target_title: c[1].to_string(),
+                    instructions: vec![Instruction { text, ops }],
+                });
+                continue;
+            }
+        }
         if let Some(c) = header.captures(line) {
+            list = None;
             units.push(AmendUnit {
                 article_of_amending_law: c[1].to_string(),
                 target_title: c[2].to_string(),
@@ -92,7 +117,75 @@ fn split_segments(s: &str) -> Vec<String> {
     if !cur.is_empty() {
         out.push(cur);
     }
-    out
+    // 「第五条第一項第五号、第十八条第一項第六号及び第五十二条第七号ロ中「A」を…」の「、」は位置の列挙。
+    // 「」も動詞も含まない位置だけの断片は、次の断片につなぐ
+    let mut merged: Vec<String> = Vec::new();
+    let mut pending = String::new();
+    for seg in out {
+        let loc_only = (seg.starts_with('第') || seg.starts_with('同'))
+            && !seg.contains('「')
+            && !seg.ends_with(['し', 'る', 'め', 'え', 'り', 'げ']);
+        if loc_only {
+            pending.push_str(&seg);
+            pending.push('、');
+            continue;
+        }
+        merged.push(format!("{pending}{seg}"));
+        pending.clear();
+    }
+    if !pending.is_empty() {
+        merged.push(pending.trim_end_matches('、').to_string());
+    }
+    merged
+}
+
+/// 位置の列挙「第七条第一項及び第二項並びに第八条」「第三十一条から第三十三条までの規定及び第三十六条」
+/// 「第五条第一項第五号、第十八条第一項第六号及び第五十二条第七号ロ」を位置の列にする。
+/// 「第N条から第M条まで」は条の範囲（`ArticleNum::Range`。当てるときに発射台の条に展開）、
+/// 「第N項から第M項まで」は項ごとに展開する
+fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
+    static RANGE: OnceLock<Regex> = OnceLock::new();
+    let range = RANGE.get_or_init(|| re(r"^(?P<a>.+?)から(?P<b>.+?)まで$"));
+    let mut out = Vec::new();
+    let s = s.trim_end_matches("の規定");
+    for tok in s
+        .split("並びに")
+        .flat_map(|x| x.split("及び"))
+        .flat_map(|x| x.split('、'))
+    {
+        let tok = tok.trim_end_matches("の規定");
+        if tok.is_empty() {
+            continue;
+        }
+        if let Some(c) = range.captures(tok) {
+            let (a, b) = (c["a"].to_string(), c["b"].to_string());
+            let la = loc(&a, ante)?;
+            let lb = loc(&b, ante)?;
+            match (la.paragraph.clone(), lb.paragraph.clone()) {
+                (Some(ParaRef::Num(p)), Some(ParaRef::Num(q))) => {
+                    for n in p..=q {
+                        out.push(Loc {
+                            article: la.article.clone(),
+                            paragraph: Some(ParaRef::Num(n)),
+                            item: None,
+                        });
+                    }
+                }
+                (None, None) => out.push(Loc {
+                    article: ArticleNum::Range {
+                        from: Box::new(la.article),
+                        to: Box::new(lb.article),
+                    },
+                    paragraph: None,
+                    item: None,
+                }),
+                _ => return Err(ParseError::Unrecognized(tok.to_string())),
+            }
+            continue;
+        }
+        out.push(loc(tok, ante)?);
+    }
+    Ok(out)
 }
 
 struct Ante {
@@ -121,7 +214,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     // 号（「第三号」「第二号の二」「同号」）とただし書・各号列記以外の部分は位置として読むが、操作は項全体に当てる
     // （字句の置換は項の中の全出現に及ぶ。号を限定した置換は未対応で、号の外にも同じ字句があれば置き換わる）
     let r = LOC.get_or_init(|| {
-        re(r"^(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|同項)?(?:第({N}号(?:の{N})*)|同号)?(?:ただし書|各号列記以外の部分|本文)?$")
+        re(r"^(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|同項)?(?:第({N}号(?:の{N})*)|同号)?[イロハニホヘトチリヌルヲワカヨタレソツネナラム]?(?:ただし書|各号列記以外の部分|本文)?$")
     });
     let Some(c) = r.captures(s) else {
         return Err(ParseError::Unrecognized(s.to_string()));
@@ -303,8 +396,9 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         // 字句の置換・追加・削除は正規表現でなく手で読む（置換先に「」が入れ子になることがある）。
         // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する。見出しの中は別
         let loc_part = seg.split("中「").next().unwrap_or("");
-        if (!loc_part.contains("及び") || seg.starts_with('「')) && !loc_part.contains("見出し")
-        {
+        let listed =
+            loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで");
+        if (!listed || seg.starts_with('「')) && !loc_part.contains("見出し") {
             if let Some(op) = parse_phrase_op(seg, &mut ante)? {
                 ops.push(op);
                 continue;
@@ -321,9 +415,12 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             };
             let num = |n: &str| kanji_to_u32(&g(n)).unwrap_or(0);
             // 「第百条第三項及び第百三条第四項中「A」を「B」に改める」: 位置ごとに同じ操作
-            if (*name == "replace" || *name == "insert_phrase") && g("loc").contains("及び") {
-                for l in g("loc").split("及び") {
-                    let at = loc(l, &mut ante)?;
+            if (*name == "replace" || *name == "insert_phrase")
+                && (g("loc").contains("及び")
+                    || g("loc").contains('、')
+                    || g("loc").contains("まで"))
+            {
+                for at in expand_locs(&g("loc"), &mut ante)? {
                     ops.push(if *name == "replace" {
                         Op::Replace {
                             at,
