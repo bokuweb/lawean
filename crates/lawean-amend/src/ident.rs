@@ -444,46 +444,51 @@ impl Binder<'_> {
                     self.replace(at, anchor, &format!("{anchor}{text}"), &mut snapshots)?
                 }
                 Op::AppendParagraph { article, text } => {
-                    let (id, p) = self.new_para(article, parse_paragraph(text)?);
-                    let art = article_mut(&mut self.doc, article)?;
-                    snapshot(art, &mut snapshots);
-                    let anchor = paragraphs(art)
-                        .last()
-                        .map(|p| id_of(p))
-                        .ok_or_else(|| ApplyError::BadContent("項の無い条に加える".into()))?;
-                    self.ops.push(IdentOp::InsertAfter {
-                        anchor,
-                        new_id: id,
-                        art: article.to_num_string(),
-                        text: para_text(&p),
-                    });
-                    art.children.push(ArticleChild::Paragraph(p));
-                    snapshots
-                        .get_mut(&article.to_num_string())
-                        .unwrap()
-                        .push(None);
+                    for p in parse_paragraphs(text)? {
+                        let (id, p) = self.new_para(article, p);
+                        let art = article_mut(&mut self.doc, article)?;
+                        snapshot(art, &mut snapshots);
+                        let anchor = paragraphs(art)
+                            .last()
+                            .map(|p| id_of(p))
+                            .ok_or_else(|| ApplyError::BadContent("項の無い条に加える".into()))?;
+                        self.ops.push(IdentOp::InsertAfter {
+                            anchor,
+                            new_id: id,
+                            art: article.to_num_string(),
+                            text: para_text(&p),
+                        });
+                        art.children.push(ArticleChild::Paragraph(p));
+                        snapshots
+                            .get_mut(&article.to_num_string())
+                            .unwrap()
+                            .push(None);
+                    }
                 }
                 Op::InsertParagraphAfter {
                     article,
                     after,
                     text,
                 } => {
-                    let (id, p) = self.new_para(article, parse_paragraph(text)?);
-                    let art = article_mut(&mut self.doc, article)?;
-                    let idx = para_index(art, &Some(after.clone()), &mut snapshots)?.unwrap();
-                    let anchor = id_of(paragraph_mut(art, idx));
-                    self.ops.push(IdentOp::InsertAfter {
-                        anchor,
-                        new_id: id,
-                        art: article.to_num_string(),
-                        text: para_text(&p),
-                    });
-                    let pos = nth_paragraph_child(art, idx) + 1;
-                    art.children.insert(pos, ArticleChild::Paragraph(p));
-                    snapshots
-                        .get_mut(&article.to_num_string())
-                        .unwrap()
-                        .insert(idx + 1, None);
+                    for (k, p) in parse_paragraphs(text)?.into_iter().enumerate() {
+                        let (id, p) = self.new_para(article, p);
+                        let art = article_mut(&mut self.doc, article)?;
+                        let idx =
+                            para_index(art, &Some(after.clone()), &mut snapshots)?.unwrap() + k;
+                        let anchor = id_of(paragraph_mut(art, idx));
+                        self.ops.push(IdentOp::InsertAfter {
+                            anchor,
+                            new_id: id,
+                            art: article.to_num_string(),
+                            text: para_text(&p),
+                        });
+                        let pos = nth_paragraph_child(art, idx) + 1;
+                        art.children.insert(pos, ArticleChild::Paragraph(p));
+                        snapshots
+                            .get_mut(&article.to_num_string())
+                            .unwrap()
+                            .insert(idx + 1, None);
+                    }
                 }
                 // 番号だけを動かす操作。id の世界では何もしない（番号は描画時に数える）
                 Op::RenumberParagraph { article, from, to } => {

@@ -74,7 +74,12 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         let Some(unit) = units.last_mut() else {
             return Err(ParseError::NoHeader);
         };
-        let is_instruction = indent == 2 && line.ends_with('。') && !line.starts_with('（');
+        // インデント 2 で「。」で終わる行が指示。ただし「一　…。」の号の行（加える項の中の号）は内容
+        let is_item_line = line.split_once('\u{3000}').is_some_and(|(t, _)| {
+            !t.is_empty() && t.chars().all(|c| "一二三四五六七八九十".contains(c))
+        });
+        let is_instruction =
+            indent == 2 && line.ends_with('。') && !line.starts_with('（') && !is_item_line;
         if is_instruction {
             let ops = parse_instruction(line)?;
             unit.instructions.push(Instruction {
@@ -103,7 +108,8 @@ fn split_segments(s: &str) -> Vec<String> {
     for c in s.trim_end_matches('。').chars() {
         match c {
             '「' => q += 1,
-            '」' => q -= 1,
+            // 余る閉じ括弧は字句の一部（take_quoted と同じ扱い）
+            '」' => q = (q - 1).max(0),
             '（' => p += 1,
             '）' => p -= 1,
             '、' if q == 0 && p == 0 => {
@@ -284,7 +290,15 @@ fn take_quoted(s: &str) -> Option<(String, &str)> {
             '」' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some((rest[..i].to_string(), &rest[i + '」'.len_utf8()..]));
+                    // 「の売買の相手方」」のように閉じ括弧が余る = 字句そのものが「」を含む（読替え規定の書き換え）。
+                    // 余る「」」は字句に入れる
+                    let mut end = i;
+                    let mut after = &rest[i + '」'.len_utf8()..];
+                    while let Some(more) = after.strip_prefix('」') {
+                        end += '」'.len_utf8();
+                        after = more;
+                    }
+                    return Some((rest[..end].to_string(), after));
                 }
             }
             _ => {}
@@ -373,8 +387,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
             ("renumber_art", r"^(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
-            ("insert_para_after", r"^(?P<loc>.+?)の次に次の一項を加え(?:る)?$"),
-            ("append_para", r"^(?P<loc>.+?)に次の一項を加え(?:る)?$"),
+            ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
+            ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^第(?P<ch>{N})章に次の一条を加え(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),

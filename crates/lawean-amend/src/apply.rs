@@ -80,12 +80,13 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::AppendParagraph { article, text } => {
                 let art = article_mut(doc, article)?;
                 snapshot(art, &mut snapshots);
-                let p = parse_paragraph(text)?;
-                art.children.push(ArticleChild::Paragraph(p));
-                snapshots
-                    .get_mut(&article.to_num_string())
-                    .unwrap()
-                    .push(None);
+                for p in parse_paragraphs(text)? {
+                    art.children.push(ArticleChild::Paragraph(p));
+                    snapshots
+                        .get_mut(&article.to_num_string())
+                        .unwrap()
+                        .push(None);
+                }
             }
             Op::InsertParagraphAfter {
                 article,
@@ -94,13 +95,14 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             } => {
                 let art = article_mut(doc, article)?;
                 let idx = para_index(art, &Some(after.clone()), &mut snapshots)?.unwrap();
-                let p = parse_paragraph(text)?;
-                let pos = nth_paragraph_child(art, idx) + 1;
-                art.children.insert(pos, ArticleChild::Paragraph(p));
-                snapshots
-                    .get_mut(&article.to_num_string())
-                    .unwrap()
-                    .insert(idx + 1, None);
+                for (k, p) in parse_paragraphs(text)?.into_iter().enumerate() {
+                    let pos = nth_paragraph_child(art, idx + k) + 1;
+                    art.children.insert(pos, ArticleChild::Paragraph(p));
+                    snapshots
+                        .get_mut(&article.to_num_string())
+                        .unwrap()
+                        .insert(idx + k + 1, None);
+                }
             }
             Op::RenumberParagraph { article, from, to } => {
                 let art = article_mut(doc, article)?;
@@ -548,6 +550,87 @@ pub(crate) fn parse_paragraph(lines: &[String]) -> Result<Paragraph, ApplyError>
     Ok(p)
 }
 
+const KANJI_ITEM: &str = "一二三四五六七八九十";
+const KANA_SUBITEM: &str = "イロハニホヘトチリヌルヲワカヨタレソツネナラム";
+
+/// 「一　本文」「イ　本文」→ (番号の字, 本文)
+fn split_item_title<'a>(line: &'a str, letters: &str) -> Option<(&'a str, &'a str)> {
+    let (t, body) = line.split_once('\u{3000}')?;
+    (!t.is_empty() && t.chars().all(|c| letters.contains(c))).then_some((t, body))
+}
+
+fn make_item(depth: u8, n: usize, title: &str, body: &str) -> Item {
+    // 「場合　定める者」のように全角空白で 2 欄に分かれる号は Column（定義規定・区分の号）
+    let body = match body.split_once('\u{3000}') {
+        Some((a, b)) => ItemBody::Columns(
+            [a, b]
+                .iter()
+                .enumerate()
+                .map(|(k, t)| Column {
+                    stable_id: StableId(String::new()),
+                    num: Some((k + 1).to_string()),
+                    sentences: make_sentences(t.trim()),
+                    attrs: Vec::new(),
+                })
+                .collect(),
+        ),
+        None => ItemBody::Sentences(make_sentences(body.trim())),
+    };
+    Item {
+        stable_id: StableId(String::new()),
+        depth,
+        num: Some(n.to_string()),
+        title: Some(vec![Inline::Text(title.to_string())]),
+        body,
+        attrs: Vec::new(),
+        children: Vec::new(),
+    }
+}
+
+/// 「２　本文」「一　号」「イ　イロハ」…の行の列を項の列にする。数字で始まる行が項の頭、
+/// 漢数字＋全角空白は号、片仮名＋全角空白はその号の下のイロハ。先頭の行に番号が無ければ第1項
+pub(crate) fn parse_paragraphs(lines: &[String]) -> Result<Vec<Paragraph>, ApplyError> {
+    let mut out: Vec<Paragraph> = Vec::new();
+    for l in lines {
+        if let Some((t, body)) = split_item_title(l, KANJI_ITEM).filter(|_| !out.is_empty()) {
+            let p = out.last_mut().unwrap();
+            let n = p
+                .children
+                .iter()
+                .filter(|c| matches!(c, ParagraphChild::Item(_)))
+                .count()
+                + 1;
+            p.children
+                .push(ParagraphChild::Item(make_item(0, n, t, body)));
+            continue;
+        }
+        if let Some((t, body)) = split_item_title(l, KANA_SUBITEM).filter(|_| !out.is_empty()) {
+            let last_item =
+                out.last_mut()
+                    .unwrap()
+                    .children
+                    .iter_mut()
+                    .rev()
+                    .find_map(|c| match c {
+                        ParagraphChild::Item(i) => Some(i),
+                        _ => None,
+                    });
+            let Some(i) = last_item else {
+                return Err(ApplyError::BadContent(l.clone()));
+            };
+            let n = i.children.len() + 1;
+            i.children
+                .push(ItemChild::Subitem(make_item(1, n, t, body)));
+            continue;
+        }
+        out.push(parse_paragraph(std::slice::from_ref(l))?);
+    }
+    if out.is_empty() {
+        return Err(ApplyError::BadContent("empty".into()));
+    }
+    Ok(out)
+}
+
 /// 「２　本文」→ (Some(2), 本文)
 fn split_leading_number(line: &str) -> (Option<u32>, &str) {
     let mut chars = line.char_indices();
@@ -577,7 +660,7 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
     let mut caption = None;
     let mut title = None;
     let mut num = None;
-    let mut paragraphs: Vec<Paragraph> = Vec::new();
+    let mut body_lines: Vec<String> = Vec::new();
     for l in lines {
         if l.starts_with('（') && title.is_none() {
             caption = Some(vec![Inline::Text(l.clone())]);
@@ -589,11 +672,12 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
             // 「第六十八条の三」も読む
             num = Some(crate::parse::art_num(&t));
             title = Some(vec![Inline::Text(t)]);
-            paragraphs.push(parse_paragraph(&[body.to_string()])?);
+            body_lines.push(body.to_string());
         } else {
-            paragraphs.push(parse_paragraph(std::slice::from_ref(l))?);
+            body_lines.push(l.clone());
         }
     }
+    let paragraphs = parse_paragraphs(&body_lines)?;
     Ok(Article {
         stable_id: StableId(String::new()),
         num: num.ok_or_else(|| ApplyError::BadContent(lines.join("/")))?,
