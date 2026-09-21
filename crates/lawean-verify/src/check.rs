@@ -3,7 +3,9 @@
 use crate::smt::{Compiler, Smt};
 use lawean_resolve::ResolvedModel;
 use lawean_semantic::Expr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +66,7 @@ pub fn script(rm: &ResolvedModel<'_>, prop: &Property) -> String {
     s
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn z3_available() -> bool {
     Command::new("z3")
         .arg("--version")
@@ -72,11 +75,34 @@ pub fn z3_available() -> bool {
         .unwrap_or(false)
 }
 
+/// wasm32 では子プロセスが無い。SMT-LIB は `script` 等で作り、ブラウザ側の z3（z3-solver の WASM）に渡す
+#[cfg(target_arch = "wasm32")]
+pub fn z3_available() -> bool {
+    false
+}
+
+/// z3 の出力（`(check-sat)` + `(get-model)`）を判定に。ブラウザ側の z3 の出力にも使う
+pub fn parse_verdict(stdout: &str, stderr: &str) -> Verdict {
+    let first = stdout.lines().next().unwrap_or("").trim();
+    match first {
+        "unsat" => Verdict::Proved,
+        "sat" => Verdict::Counterexample(stdout.lines().skip(1).collect::<Vec<_>>().join("\n")),
+        _ => Verdict::Unknown(format!("{stdout}{stderr}")),
+    }
+}
+
 pub fn check(rm: &ResolvedModel<'_>, prop: &Property) -> Result<Verdict, CheckError> {
     run_z3(&script(rm, prop))
 }
 
 /// SMT-LIB を z3 に渡し、unsat → `Proved`、sat → `Counterexample(モデル)`
+#[cfg(target_arch = "wasm32")]
+pub fn run_z3(_src: &str) -> Result<Verdict, CheckError> {
+    Err(CheckError::NoSolver)
+}
+
+/// SMT-LIB を z3 に渡し、unsat → `Proved`、sat → `Counterexample(モデル)`
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_z3(src: &str) -> Result<Verdict, CheckError> {
     let mut child = Command::new("z3")
         .args(["-in", "-smt2"])
@@ -94,18 +120,10 @@ pub fn run_z3(src: &str) -> Result<Verdict, CheckError> {
     let out = child
         .wait_with_output()
         .map_err(|e| CheckError::Solver(e.to_string()))?;
-    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    let first = stdout.lines().next().unwrap_or("").trim();
-    match first {
-        "unsat" => Ok(Verdict::Proved),
-        "sat" => Ok(Verdict::Counterexample(
-            stdout.lines().skip(1).collect::<Vec<_>>().join("\n"),
-        )),
-        _ => Ok(Verdict::Unknown(format!(
-            "{stdout}{}",
-            String::from_utf8_lossy(&out.stderr)
-        ))),
-    }
+    Ok(parse_verdict(
+        &String::from_utf8_lossy(&out.stdout),
+        &String::from_utf8_lossy(&out.stderr),
+    ))
 }
 
 /// 反例モデルから、指定した変数の値を取り出す（表示用。雑なテキスト走査）

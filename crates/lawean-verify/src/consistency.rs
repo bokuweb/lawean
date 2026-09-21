@@ -133,6 +133,17 @@ pub fn conflict_script(
     s
 }
 
+/// 相反する効果を持つ全ての組の SMT-LIB（z3 は呼ばない。ブラウザ側の z3 に渡す用）
+pub fn conflict_scripts(rm: &ResolvedModel<'_>) -> Vec<(RuleId, RuleId, ConflictKind, String)> {
+    candidates(rm.model)
+        .into_iter()
+        .map(|(a, b, kind)| {
+            let s = conflict_script(rm, &a, &b, &kind);
+            (a, b, kind, s)
+        })
+        .collect()
+}
+
 /// 相反する効果を持つ全ての組について、同時に適用される世界があるかを z3 に問う
 pub fn conflicts(rm: &ResolvedModel<'_>) -> Result<Vec<Conflict>, CheckError> {
     let mut out = Vec::new();

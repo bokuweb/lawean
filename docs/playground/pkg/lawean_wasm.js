@@ -59,6 +59,33 @@ export function outline(xml) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * Z3 に渡す SMT-LIB（z3 はブラウザ側の z3-solver の WASM で走らせる）。
+ * 入力 JSON: { base, amendment, enforced?, suppl?, promulgated? }。
+ * 出力: [{ kind, name, script, sat_means, unsat_means }]。
+ *
+ * - `enforcement`: 単位ごとの施行日が附則の区間にあるか（Z3 の暦、民法第143条。Rust の暦と同じ答えになるはず）
+ * - `vacuity`: 改正後の本文から層 1 が出した Rule のうち、条件に型のある部分（期間の比較・経過）を持つものについて、
+ *   例外を差し引いても適用される世界が残るか（unsat = 空振り）
+ * - `conflict`: 相反する効果の組が同時に適用される世界があるか（sat = 齟齬）
+ * @param {string} input_json
+ * @returns {string}
+ */
+export function smt_scripts(input_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.smt_scripts(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

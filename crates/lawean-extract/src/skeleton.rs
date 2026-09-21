@@ -407,11 +407,17 @@ fn set_value(text: &str) -> Option<(String, Value)> {
 /// 条件節の中の型のある部分: 「存続期間を三十年以上として」→ Cmp、「〜の日から六月を経過した後」→ Elapsed
 fn typed_conditions(text: &str) -> Vec<Expr> {
     let mut out = Vec::new();
+    // 「存続期間を三十年以上五十年未満として」: 続く比較は同じ変数
+    let mut last_var: Option<String> = None;
     for e in temporal::time_exprs(text) {
         match &e.kind {
             TimeKind::Compare { dur, op } => {
                 let Some(d) = duration_of(dur) else { continue };
-                let var = var_before(text, &e);
+                let var = match var_before(text, &e) {
+                    Some(v) => v,
+                    None => last_var.clone().unwrap_or_else(|| "期間".to_string()),
+                };
+                last_var = Some(var.clone());
                 let op = match op {
                     temporal::CmpOp::Ge => CmpOp::Ge,
                     temporal::CmpOp::Le => CmpOp::Le,
@@ -431,8 +437,8 @@ fn typed_conditions(text: &str) -> Vec<Expr> {
     out
 }
 
-/// 比較の対象の変数名: 時間表現の直前の「Xを」「Xが」「Xは」の X（無ければ「期間」）
-fn var_before(text: &str, e: &TimeExpr) -> String {
+/// 比較の対象の変数名: 時間表現の直前の「Xを」「Xが」「Xは」の X（無ければ None）
+fn var_before(text: &str, e: &TimeExpr) -> Option<String> {
     let before = &text[..e.start];
     let cut = before
         .rfind(|c: char| "、。（）".contains(c))
@@ -442,9 +448,9 @@ fn var_before(text: &str, e: &TimeExpr) -> String {
     for p in ["を", "が", "は"] {
         if let Some(v) = seg.strip_suffix(p) {
             if !v.is_empty() && v.chars().count() <= 20 {
-                return v.rsplit('の').next().unwrap_or(v).to_string();
+                return Some(v.rsplit('の').next().unwrap_or(v).to_string());
             }
         }
     }
-    "期間".to_string()
+    None
 }

@@ -1026,6 +1026,21 @@ fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {
     }
 }
 
+/// 改め文を発射台に当てた改正後の文書（Rust の写しで。SMT の生成など、本文の再パースが要る用途）。
+/// 当たらない単位があればそこで止めて、そこまでの文書を返す
+pub fn consolidated_document(base_xml: &str, amendment: &str) -> Result<LegalDocument, String> {
+    let base = parse_response(base_xml).map_err(|e| e.to_string())?;
+    let units = parse_units(amendment).map_err(|e| e.to_string())?;
+    let mut doc = base;
+    for u in &units {
+        match lawean_amend::apply_unit(&doc, u, "after") {
+            Ok(d) => doc = d,
+            Err(_) => break,
+        }
+    }
+    Ok(doc)
+}
+
 /// 文字列だけで動く版（WASM・playground 用）。`other_laws` は他法令の XML
 #[allow(clippy::too_many_arguments)]
 pub fn run_texts(

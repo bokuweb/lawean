@@ -16,3 +16,7 @@ lawean-leanrt = { path = "../lawean-leanrt" }
 lawean-extract = { path = "../lawean-extract" }
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+lawean-extract = { path = "../lawean-extract" }
+lawean-verify = { path = "../lawean-verify" }

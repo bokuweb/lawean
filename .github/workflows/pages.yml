@@ -1,0 +1,35 @@
+# playground を GitHub Pages に出す。判定は全部ブラウザ内（Rust の WASM、Lean の WASM、z3-solver の WASM）なので静的ファイルだけ。
+# WASM は docs/playground/pkg（wasm-pack）と docs/playground/lean（Emscripten）にコミット済み。
+# URL: https://bokuweb.github.io/lawean/ → docs/playground/draft.html
+name: pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # playground は ../../fixtures/ を相対パスで読むので、docs/ と fixtures/ をそのままの階層で出す
+      - run: |
+          mkdir -p site
+          cp -r docs fixtures site/
+          cp docs/playground/root-index.html site/index.html
+          rm -f site/docs/playground/serve.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

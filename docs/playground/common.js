@@ -1,7 +1,7 @@
 // playground 共通: WASM の読み込み（Rust + Lean）、報告の描画、候補の表
-import init, { check, candidates, outline } from './pkg/lawean_wasm.js';
+import init, { check, candidates, outline, smt_scripts } from './pkg/lawean_wasm.js';
 import createLean from './lean/lawean_lean.js';
-export { check, candidates, outline };
+export { check, candidates, outline, smt_scripts };
 
 // 溶け込みは Lean の C 出力を Emscripten で組んだ WASM（証明した applyUnit そのもの、ADR-0017）で計算する。
 // Rust 側（lawean-leanrt）は globalThis のこの 4 つを呼ぶ。読み込めなければ Rust の写しに戻る（Report.engine で分かる）

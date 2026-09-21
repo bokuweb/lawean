@@ -847,6 +847,7 @@ dependencies = [
  "lawean-resolve",
  "lawean-source",
  "lawean-space",
+ "lawean-verify",
  "serde",
  "serde_json",
 ]
@@ -976,7 +977,10 @@ dependencies = [
  "lawean-amend",
  "lawean-check",
  "lawean-extract",
+ "lawean-resolve",
+ "lawean-semantic",
  "lawean-source",
+ "lawean-verify",
  "serde_json",
  "wasm-bindgen",
 ]

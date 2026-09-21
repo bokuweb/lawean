@@ -93,3 +93,152 @@ pub fn outline(xml: &str) -> String {
     })
     .to_string()
 }
+
+/// Z3 に渡す SMT-LIB（z3 はブラウザ側の z3-solver の WASM で走らせる）。
+/// 入力 JSON: { base, amendment, enforced?, suppl?, promulgated? }。
+/// 出力: [{ kind, name, script, sat_means, unsat_means }]。
+///
+/// - `enforcement`: 単位ごとの施行日が附則の区間にあるか（Z3 の暦、民法第143条。Rust の暦と同じ答えになるはず）
+/// - `vacuity`: 改正後の本文から層 1 が出した Rule のうち、条件に型のある部分（期間の比較・経過）を持つものについて、
+///   例外を差し引いても適用される世界が残るか（unsat = 空振り）
+/// - `conflict`: 相反する効果の組が同時に適用される世界があるか（sat = 齟齬）
+#[wasm_bindgen]
+pub fn smt_scripts(input_json: &str) -> String {
+    use lawean_extract::calendar::parse;
+    use lawean_extract::suppl::{admissible, spec_from_text};
+    use lawean_semantic::Expr;
+    let v: serde_json::Value = match serde_json::from_str(input_json) {
+        Ok(v) => v,
+        Err(e) => return format!("{{\"error\":\"{e}\"}}"),
+    };
+    let s = |k: &str| v[k].as_str();
+    let mut out = Vec::new();
+    // 施行期日
+    if let (Some(suppl), Some(day), Some(p)) = (
+        s("suppl"),
+        s("enforced").and_then(parse),
+        s("promulgated").and_then(parse),
+    ) {
+        let spec = spec_from_text(suppl, Some(p));
+        if let Ok(units) = lawean_amend::parse_units(s("amendment").unwrap_or("")) {
+            for u in &units {
+                let arts: Vec<String> = u
+                    .instructions
+                    .iter()
+                    .flat_map(|i| i.ops.iter())
+                    .filter_map(|o| o.article().map(|a| a.to_num_string()))
+                    .collect();
+                let by_target = spec
+                    .for_target_articles(&arts)
+                    .filter(|(_, sc)| sc.is_some());
+                let by_amending = u
+                    .article_of_amending_law
+                    .trim_start_matches('第')
+                    .split('条')
+                    .next()
+                    .and_then(lawean_extract::suppl::kanji_num)
+                    .and_then(|a| spec.for_article(a, None));
+                let Some((clause, _)) = by_target.or(by_amending) else {
+                    continue;
+                };
+                let Some(e) = &clause.enforcement else {
+                    continue;
+                };
+                let t = lawean_verify::temporal::DateExpr::lit(day.0, day.1, day.2);
+                let Some(adm) = lawean_verify::enforcement::admissible(p, e, &t) else {
+                    continue;
+                };
+                let range = admissible(p, e)
+                    .map(|(lo, hi)| {
+                        format!(
+                            "{}〜{}",
+                            lawean_extract::calendar::fmt(lo),
+                            lawean_extract::calendar::fmt(hi)
+                        )
+                    })
+                    .unwrap_or_default();
+                out.push(serde_json::json!({
+                    "kind": "enforcement",
+                    "name": format!("{}: 施行日 {} は附則「{}」の区間（Rust の暦では {range}）にあるか", u.article_of_amending_law, lawean_extract::calendar::fmt(day), clause.text.chars().take(40).collect::<String>()),
+                    "script": lawean_verify::temporal::script(&[], &[adm]),
+                    "sat_means": "範囲内（Z3 の暦でも許される）",
+                    "unsat_means": "範囲外",
+                }));
+            }
+        }
+    }
+    // 改正後の本文の Semantic IR（層 1 の骨組み）
+    let doc = match lawean_check::consolidated_document(
+        s("base").unwrap_or(""),
+        s("amendment").unwrap_or(""),
+    ) {
+        Ok(d) => d,
+        Err(e) => return format!("{{\"error\":\"{e}\"}}"),
+    };
+    let model = lawean_extract::to_model(&doc, &lawean_extract::extract(&doc));
+    let rm = lawean_resolve::ResolvedModel::new(&model);
+    fn typed(e: &Expr) -> bool {
+        match e {
+            Expr::Cmp(..) | Expr::Time(_) => true,
+            Expr::And(xs) | Expr::Or(xs) => xs.iter().any(typed),
+            Expr::Not(x) => typed(x),
+            _ => false,
+        }
+    }
+    for r in &model.rules {
+        // 自分の条件に型のある部分（期間の比較・経過）がある Rule だけ。条件が Unknown だけの Rule は自由変数なので
+        // 常に世界が残り、例外側の条件が取れていない（True）と常に空振りになって、どちらも意味が無い
+        if !typed(&r.condition) {
+            continue;
+        }
+        let sent = r
+            .provenance
+            .source
+            .0
+            .rsplit("/main/")
+            .next()
+            .unwrap_or("")
+            .to_string();
+        out.push(serde_json::json!({
+            "kind": "vacuity",
+            "name": format!("{sent}: 例外を差し引いて適用される世界が残るか（{}）", model.rules.iter().find(|x| x.id == r.id).map(|_| format!("{:?}", r.condition)).unwrap_or_default().chars().take(120).collect::<String>()),
+            "script": lawean_verify::consistency::vacuity_script(&rm, &r.id),
+            "sat_means": "残る",
+            "unsat_means": "空振り（例外に飲まれた、または条件が矛盾）",
+        }));
+    }
+    for (a, b, kind, script) in lawean_verify::consistency::conflict_scripts(&rm) {
+        let ra = rm
+            .rule(&a)
+            .map(|r| {
+                r.provenance
+                    .source
+                    .0
+                    .rsplit("/main/")
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let rb = rm
+            .rule(&b)
+            .map(|r| {
+                r.provenance
+                    .source
+                    .0
+                    .rsplit("/main/")
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        out.push(serde_json::json!({
+            "kind": "conflict",
+            "name": format!("{ra} と {rb}: {kind:?} が同時に適用される世界があるか"),
+            "script": script,
+            "sat_means": "ある（効力の齟齬。特則の overrides が要る）",
+            "unsat_means": "無い",
+        }));
+    }
+    serde_json::to_string(&out).unwrap()
+}
