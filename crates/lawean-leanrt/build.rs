@@ -6,6 +6,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LAWEAN_NO_LEAN");
+    println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-changed=csrc/shim.c");
     println!("cargo:rerun-if-changed=../../lean/Lawean/Ffi.lean");
     println!("cargo:rerun-if-changed=../../lean/Lawean/Ident.lean");

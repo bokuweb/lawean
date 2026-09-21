@@ -11,14 +11,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-      - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: sudo apt-get install -y z3
-      # Lean を入れて、証明した applyUnit を C 経由で呼ぶテスト（lawean-leanrt）も走らせる
+      # Lean を先に入れる: lawean-leanrt の build.rs が lake を呼び、証明した applyUnit を C 経由で呼ぶテストを走らせる
       - uses: leanprover/lean-action@v1
         with:
           lake-package-directory: lean
           use-mathlib-cache: false
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: sudo apt-get install -y z3
       - run: cargo test
   lean:
     runs-on: ubuntu-latest
