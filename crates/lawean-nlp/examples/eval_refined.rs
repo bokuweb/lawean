@@ -78,16 +78,12 @@ fn main() {
                 x.2
             );
         }
-        for c in [&r0.total] {
-            before.tp += c.tp;
-            before.fp += c.fp;
-            before.fn_ += c.fn_;
-        }
-        for c in [&r1.total] {
-            after.tp += c.tp;
-            after.fp += c.fp;
-            after.fn_ += c.fn_;
-        }
+        before.tp += r0.total.tp;
+        before.fp += r0.total.fp;
+        before.fn_ += r0.total.fn_;
+        after.tp += r1.total.tp;
+        after.fp += r1.total.fp;
+        after.fn_ += r1.total.fn_;
     }
     println!(
         "all: rule P {:.3} R {:.3} → +ginza P {:.3} R {:.3}",
