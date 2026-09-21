@@ -22,6 +22,32 @@
 各ノードに `Provenance { stable_id, by: Parser | Model("grande/e4b") | Human, confidence }`。
 判定できなかった選択肢は捨てず `Unknown(Ambiguous)` に両方残す（[ADR-0005](adr/0005-no-single-interpretation.md)）。
 
+### 候補の契約（2026-09-22）
+
+層 1・層 1.5・層 2 の抽出はすべて **原文根拠付きの候補** `lawean-extract::candidate::Candidate` を返す
+（項目は jlsi/elsa の variable-extractor、RFC0050 に揃えた。フィールドは法令用）:
+`field`（用途別）/ `category`（表示用の粗い分類）/ `value_kind` / `raw` / `normalized`（月数・日数・円・ISO 日付・stable_id）/
+`unit` / `role`（格・「対象規定」「行為」）/ `source_label`（事象の句・見出し）/ `evidence`（文の stable_id + UTF-8 バイト範囲 + 断片 + 前後の文脈）/
+`confidence`（high / medium / low）/ `reason`（規則名、固定）。
+候補は値を確定しない。採用は起草者か Semantic IR への写し（L3）が決める。`evidence.snippet == text[start..end]` はテストで確かめる。
+時間表現（`temporal`）と罰則（`penalty`）は変換済み、主体・客体・行為は `lawean-nlp`（下）が出す。
+
+### L1.5. 主体・客体・行為を係り受けで（`lawean-nlp`、2026-09-22）
+
+格助詞の正規表現ではなく GiNZA の係り受け（UD の `nsubj` / `obj` / `obl`）で取る。モデルは jewel（Python 不要の spaCy ランタイム、
+`bokuweb/jewel`）で `ja_ginza` 5.2.0 の bundle を読む（`JEWEL_GINZA_BUNDLE`。無ければ層 1 だけで動く。WASM には入れない）。
+法令の文に合わせた扱い:
+
+- **括弧書きを落として解析**し、位置は元の本文に戻す（法令の括弧書きは深く、係り受けを壊す）
+- **主題の引き継ぎ**: 主述語に主語が無く、従属節に「〜は」の主語があればそれを主述語の主語に（「建物の賃貸人は、…に代えて、…提供することができる」）。parser が「裁判所は、」を独立した ROOT にする遊離にも対応
+- **号の断片**「〜した者」: ROOT が名詞なら、それに係る連体節の述語を主述語に
+- 「戸別訪問をした」= サ変名詞 + する は名詞の側を述語に、複合語（「戸別」+「訪問」）は一語に
+- 空文・長すぎる文（4000 バイト超）・括弧だけの文は落とさず空を返す。決定的
+
+借地借家法の義務・禁止・可能・不能の文 73 のうち主述語の主語が取れたのは 48（66%）。残りは主語の無い文（ただし書、「〜することができる」の主体が文脈にあるもの）が大半。
+GiNZA の parser は文節の主辞に `_bunsetu` を付けた関係（`nsubj_bunsetu`）を出すが、jewel の抽出プロファイルには Python 側の `bunsetu_recognizer` が無いので、
+`lawean-nlp` で落としている。jewel 側にも `process_bunsetu` を足す PR を出した（bokuweb/jewel#23。README の export コマンドの numpy / Python の固定も）。
+
 ## 3. 段階
 
 ### L1. 規則で候補を出す（`lawean-extract` に足す）
@@ -69,6 +95,7 @@ grande の確率を `confidence` に。閾値未満は `Ambiguous` のまま人�
 
 | 指標 | 母集団 | 固定先 |
 |---|---|---|
+| **適合率・再現率（L1、候補）** | `fixtures/gold`: 規則作成に使った法令（dev: 高齢者居住安定確保法 60 文）と使っていない法令（eval: 大規模災害借地借家特別措置法・借地借家法施行令・同施行規則 20 文）。文書単位で分け、(field, raw) の完全一致。負例（数字はあるが候補が無い文）を含む | `lawean-extract/tests/gold.rs`（dev は完全一致、eval は下限）。`cargo run -p lawean-extract --example eval`。**2026-09-22: eval P 0.88 / R 0.88**（誤り 2 件はどちらも事象の句の境界。「地上権の放棄又は土地の賃貸借の解約の申入れがあった日」を最後の「又は」で切った、「〜の日から起算して一年以内」の事象を落とした）。eval の文を見て規則を直したらその文は dev に移す |
 | 構造一致率（L1） | 手書き 8 条 | `lawean-extract/tests` |
 | 判定精度（L2） | 「できる」44 文、照応 20 件程度 | `lawean-decide/tests`（ラベルは fixtures） |
 | Unknown 率 | 借地借家法本則 211 文 | `lawean-extract/tests` |

@@ -76,7 +76,7 @@ fn rules() -> &'static Rules {
             r"(?:(?P<n>{N})(?P<u>年|月)以下の(?P<imp>懲役|禁錮|拘禁刑))|(?:(?P<yen>{N})円以下の(?P<fine>罰金|科料|過料))|(?P<bare>懲役|禁錮|拘禁刑|罰金|科料|過料)"
         ))
         .unwrap(),
-        violate: Regex::new(r"の規定に違反して(?P<act>[^。]*?)(?:者|とき|場合)").unwrap(),
+        violate: Regex::new(r"の規定に違反して、?(?P<act>[^。]*?)(?:者|とき|場合)").unwrap(),
     })
 }
 
@@ -439,6 +439,93 @@ pub fn mismatches(doc: &LegalDocument) -> Vec<Mismatch> {
         }
     }
     out
+}
+
+// ---------------------------------------------------------------- 候補（共通の契約）
+
+use crate::candidate::{Candidate, Confidence, Field, ValueKind};
+
+impl Penalty {
+    /// 刑・対象規定・行為を共通の候補の形に
+    pub fn to_candidates(&self) -> Vec<Candidate> {
+        let mut out = Vec::new();
+        for s in &self.sanctions {
+            if let Some(start) = self.text.find(&s.text) {
+                let c = Candidate::new(
+                    Field::Sanction,
+                    &self.sentence,
+                    &self.text,
+                    start,
+                    start + s.text.len(),
+                    "penalty:sanction",
+                );
+                let c = match (&s.kind, s.max) {
+                    (SanctionKind::Imprisonment(k), Some(m)) => c
+                        .value(ValueKind::Months, m.to_string(), Some("months"))
+                        .role(k.clone()),
+                    (SanctionKind::Imprisonment(k), None) => c.role(k.clone()),
+                    (SanctionKind::Fine, Some(y)) => c
+                        .value(ValueKind::Yen, y.to_string(), Some("JPY"))
+                        .role("罰金"),
+                    (SanctionKind::PettyFine, Some(y)) => c
+                        .value(ValueKind::Yen, y.to_string(), Some("JPY"))
+                        .role("科料"),
+                    (SanctionKind::AdministrativeFine, Some(y)) => c
+                        .value(ValueKind::Yen, y.to_string(), Some("JPY"))
+                        .role("過料"),
+                    (k, None) => c.role(format!("{k:?}")),
+                };
+                let c = if s.max.is_none() {
+                    c.confidence(Confidence::Medium)
+                } else {
+                    c
+                };
+                out.push(if self.cumulative {
+                    c.label("併科")
+                } else {
+                    c
+                });
+            }
+        }
+        for t in &self.targets {
+            let r = rules();
+            if let Some(c) = r.violate.captures(&t.text) {
+                let m = c.get(0).unwrap();
+                // 対象規定: 「〜の規定に違反して」の直前まで（参照の解決結果を normalized に）
+                let refs: Vec<&str> = t.refs.iter().map(|r| r.0.as_str()).collect();
+                let target = Candidate::new(
+                    Field::PenaltyTarget,
+                    &t.sentence,
+                    &t.text,
+                    0,
+                    m.start(),
+                    "penalty:target",
+                )
+                .value(ValueKind::NodeRef, refs.join(" "), None)
+                .role("対象規定")
+                .confidence(if t.refs.is_empty() {
+                    Confidence::Low
+                } else {
+                    Confidence::High
+                });
+                out.push(target);
+                if let Some(a) = c.name("act") {
+                    let act_c = Candidate::new(
+                        Field::PenaltyAct,
+                        &t.sentence,
+                        &t.text,
+                        a.start(),
+                        a.end(),
+                        "penalty:act",
+                    )
+                    .value(ValueKind::Text, act_words(a.as_str()).join("／"), None)
+                    .role("行為");
+                    out.push(act_c);
+                }
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]

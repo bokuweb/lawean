@@ -4,7 +4,10 @@
 use crate::xml::Element;
 
 /// 法令内で構造ノードを一意に指すパス。例: `main/art:3/para:1/sent:2`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct StableId(pub String);
 
 impl StableId {

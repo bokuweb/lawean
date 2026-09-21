@@ -3,8 +3,11 @@
 //! 条件の中身を `Unknown(Unparsed)` にした骨組み Rule を作る。層 2（LLM）はこの骨組みを埋める。
 
 pub mod calendar;
+pub mod candidate;
+pub mod candidates;
 pub mod clause;
 pub mod effect;
+pub mod eval;
 pub mod penalty;
 pub mod skeleton;
 pub mod suppl;

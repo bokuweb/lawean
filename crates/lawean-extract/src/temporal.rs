@@ -158,6 +158,7 @@ fn dur(n: &str, u: &str) -> Dur {
 
 struct Rules {
     enforcement: Regex,
+    sanction_term: Regex,
     enforcement_clause: Regex,
     window: Regex,
     elapsed: Regex,
@@ -181,26 +182,75 @@ struct Rules {
 fn rules() -> &'static Rules {
     static R: OnceLock<Rules> = OnceLock::new();
     R.get_or_init(|| Rules {
-        enforcement: re(&format!("{ENF}から施行する")),
+        enforcement: re(&format!("{ENF}(?:（[^）]*）)?から施行する")),
+        sanction_term: re(r"{N}(?:年|月)以下の(?:懲役|禁錮|拘禁刑)"),
         enforcement_clause: re(&format!("^(?:この法律は、)?{ENF}(?:から施行する)?。?$")),
         window: re(r"(?P<ev>[^、。（）]{1,30}?)の(?P<n1>{N})(?P<u1>年|月|日)前から(?P<n2>{N})(?P<u2>年|月|日)前までの間"),
-        elapsed: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日|の時|)から(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)を経過(?P<b>した日|した後|する日|する時|した時|することによって|したとき|し)"),
+        elapsed: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日から|の時から|から|の後|後)(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)を経過(?P<b>した日|した後|する日|する時|した時|した場合|する場合|することによって|したとき|すること|し)"),
         within: re(r"(?:(?P<ev>[^、。（）]{1,40}?)(?:の後|後|から|の日から))?(?P<n>{N})(?P<u>年|月|日|週間)(?:以内|を超えない範囲内)"),
         period: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日|)から(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?(?:（[^）]*）)?(?:存続する|とする|の間)"),
-        approx: re(r"(?P<ev>[^、。（）]{1,30}?)(?:の後|後)(?P<n>{N})(?P<u>年|月|日)を目途"),
+        approx: re(r"(?P<ev>[^、。（）]{1,30}?)(?:の後|後)(?P<n>{N})(?P<u>年|月|日)(?:以内)?を目途"),
         calendar: re(r"(?:(?P<pre>毎年|、|及び|又は|翌年の|の年の)(?P<m>{N})月(?:(?P<d>{N})日|末日)?)|(?:(?P<m2>{N})月(?:(?P<d2>{N})日|末日|の第{N}(?:日曜日|月曜日|火曜日|水曜日|木曜日|金曜日|土曜日)))|(?:月の(?P<d3>{N})日)"),
         era_date: re(r"(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?:(?P<m>{N})月(?:(?P<d>{N})日)?)?"),
         quoted: re(r"「{N}(?:年|月|日|週間)(?:間)?」"),
         every: re(r"(?P<n>{N})(?P<u>年|月|日|週間)ごとに"),
-        nth_day: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の後|後|の日から|から)(?P<n>{N})(?P<u>日|月|年)に当たる日"),
-        within_before: re(r"(?P<ev>[^、。（）]{1,40}?)の前(?P<n>{N})(?P<u>日|月|年)以内"),
+        nth_day: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の後|後|の日から|から)(?P<n>{N})(?P<u>日|月|年|週間)に当たる日"),
+        within_before: re(r"(?P<ev>[^、。（）]{1,40}?)の前(?P<n>{N})(?P<u>日|月|年|週間)以内"),
         duration_value: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?(?P<tail>とする|分|）|間)"),
-        before: re(r"(?:(?P<ev>[^、。（）]{1,30}?)(?:の|)(?P<n>{N})(?P<u>年|月|日)前までに)|(?:(?:少なくとも)?(?P<n2>{N})(?P<u2>年|月|日)前に)"),
+        before: re(r"(?:(?P<ev>[^、。（）]{1,30}?)(?:の|)(?P<n>{N})(?P<u>年|月|日|週間)前までに)|(?:(?:少なくとも)?(?P<n2>{N})(?P<u2>年|月|日|週間)前に)"),
         compare: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?P<op>以上|以下|未満|を超えない|を超える|を超え|より長い|より短い|に満たない)"),
         duration: re(r"(?P<n>{N})(?P<u>年|月|日|週間)(?:間)?"),
         rate: re(r"年{N}割|年{N}分|年{N}パーセント"),
         law_num: re(r"(?:明治|大正|昭和|平成|令和){N}年(?:法律|政令|勅令|省令|規則)第{N}号"),
     })
+}
+
+/// 事象の句の掃除: 先頭の「又は」「若しくは」「及び」「並びに」「が」「は」「を」「に」を落とし、
+/// 「A又はB…の日」は最後の選択肢だけを事象にする。戻り値は (事象, 落とした先頭のバイト数)。
+/// 「そ」だけになったら「その日」に戻す（「その日から三十日以内」）
+fn clean_event(ev: &str) -> (String, usize) {
+    let mut s = ev;
+    let mut dropped = 0;
+    loop {
+        let mut again = false;
+        for pre in [
+            "又は",
+            "若しくは",
+            "及び",
+            "並びに",
+            "が",
+            "は",
+            "を",
+            "に",
+            "も",
+        ] {
+            if let Some(rest) = s.strip_prefix(pre) {
+                if !rest.is_empty() {
+                    dropped += pre.len();
+                    s = rest;
+                    again = true;
+                }
+            }
+        }
+        if !again {
+            break;
+        }
+    }
+    let mut cut = 0;
+    for sep in ["又は", "若しくは", "にあっては", "においては", "については"] {
+        if let Some(i) = s.rfind(sep) {
+            cut = cut.max(i + sep.len());
+        }
+    }
+    if cut > 0 && cut < s.len() {
+        dropped += cut;
+        s = &s[cut..];
+    }
+    let out = match s {
+        "そ" | "こ" | "あ" => format!("{s}の日"),
+        _ => s.to_string(),
+    };
+    (out, dropped)
 }
 
 fn enforcement_of(c: &regex::Captures) -> Enforcement {
@@ -240,12 +290,13 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
     let r = rules();
     let mut out: Vec<TimeExpr> = Vec::new();
     let mut taken: Vec<(usize, usize)> = Vec::new();
-    // 除外: 利率・法令番号の中の「年」、読替え規定の「「三日」とあるのは」の中の字句
+    // 除外: 利率・法令番号の中の「年」、読替え規定の「「三日」とあるのは」の中の字句、刑の「一年以下の懲役」
     for m in r
         .rate
         .find_iter(text)
         .chain(r.law_num.find_iter(text))
         .chain(r.quoted.find_iter(text))
+        .chain(r.sanction_term.find_iter(text))
     {
         taken.push((m.start(), m.end()));
     }
@@ -256,7 +307,7 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
                 s: usize,
                 e: usize,
                 kind: TimeKind| {
-        if !overlaps(taken, s, e) {
+        if s < e && !overlaps(taken, s, e) {
             taken.push((s, e));
             out.push(TimeExpr {
                 text: text[s..e].to_string(),
@@ -265,6 +316,12 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
                 kind,
             });
         }
+    };
+    // 事象の句: 掃除して、落とした分だけ範囲の先頭を進める
+    let ev = |c: &regex::Captures| -> (String, usize) {
+        c.name("ev")
+            .map(|x| clean_event(x.as_str()))
+            .unwrap_or_default()
     };
     for c in r.enforcement.captures_iter(text) {
         let m = c.get(0).unwrap();
@@ -276,15 +333,29 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             TimeKind::Enforcement(enforcement_of(&c)),
         );
     }
+    // 附則の号の日付欄（「公布の日から起算して一年を超えない範囲内において政令で定める日」）は文全体が施行期日
+    if let Some(c) = r.enforcement_clause.captures(text.trim_end_matches('。')) {
+        if c.name("n").is_some() || c.name("era").is_some() || text.starts_with("公布の日") {
+            let m = c.get(0).unwrap();
+            push(
+                &mut out,
+                &mut taken,
+                m.start(),
+                m.end(),
+                TimeKind::Enforcement(enforcement_of(&c)),
+            );
+        }
+    }
     for c in r.window.captures_iter(text) {
         let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::Window {
-                event: c["ev"].into(),
+                event,
                 from_before: dur(&c["n1"], &c["u1"]),
                 to_before: dur(&c["n2"], &c["u2"]),
             },
@@ -297,43 +368,58 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
         } else {
             Boundary::After
         };
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::Elapsed {
-                event: c["ev"].into(),
+                event,
                 dur: dur(&c["n"], &c["u"]),
                 boundary,
             },
         );
     }
-    for c in r.within.captures_iter(text) {
+    // 「公布後一年以内を目途」は within より先に
+    for c in r.approx.captures_iter(text) {
         let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
+            m.end(),
+            TimeKind::Approx {
+                event,
+                dur: dur(&c["n"], &c["u"]),
+            },
+        );
+    }
+    for c in r.within.captures_iter(text) {
+        let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
+        push(
+            &mut out,
+            &mut taken,
+            m.start() + drop,
             m.end(),
             TimeKind::Within {
-                event: c
-                    .name("ev")
-                    .map(|x| x.as_str().to_string())
-                    .unwrap_or_default(),
+                event,
                 dur: dur(&c["n"], &c["u"]),
             },
         );
     }
     for c in r.period.captures_iter(text) {
         let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::Period {
-                event: c["ev"].into(),
+                event,
                 dur: dur(&c["n"], &c["u"]),
                 counted_from_first: c.name("ct").is_some(),
             },
@@ -341,17 +427,17 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
     }
     for c in r.before.captures_iter(text) {
         let m = c.get(0).unwrap();
-        let (n, u, ev) = match c.name("n") {
-            Some(n) => (n.as_str(), &c["u"], c["ev"].to_string()),
-            None => (&c["n2"], &c["u2"], String::new()),
+        let (n, u, (event, drop)) = match c.name("n") {
+            Some(n) => (n.as_str(), &c["u"], ev(&c)),
+            None => (&c["n2"], &c["u2"], (String::new(), 0)),
         };
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::Before {
-                event: ev,
+                event,
                 dur: dur(n, u),
             },
         );
@@ -377,26 +463,28 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
     }
     for c in r.nth_day.captures_iter(text) {
         let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::NthDay {
-                event: c["ev"].into(),
+                event,
                 dur: dur(&c["n"], &c["u"]),
             },
         );
     }
     for c in r.within_before.captures_iter(text) {
         let m = c.get(0).unwrap();
+        let (event, drop) = ev(&c);
         push(
             &mut out,
             &mut taken,
-            m.start(),
+            m.start() + drop,
             m.end(),
             TimeKind::WithinBefore {
-                event: c["ev"].into(),
+                event,
                 dur: dur(&c["n"], &c["u"]),
             },
         );
@@ -434,19 +522,6 @@ pub fn time_exprs(text: &str) -> Vec<TimeExpr> {
             s0,
             m.end(),
             TimeKind::Calendar { month, day },
-        );
-    }
-    for c in r.approx.captures_iter(text) {
-        let m = c.get(0).unwrap();
-        push(
-            &mut out,
-            &mut taken,
-            m.start(),
-            m.end(),
-            TimeKind::Approx {
-                event: c["ev"].into(),
-                dur: dur(&c["n"], &c["u"]),
-            },
         );
     }
     for c in r.compare.captures_iter(text) {
@@ -501,4 +576,162 @@ pub fn coverage(text: &str) -> (usize, usize) {
         .filter(|e| matches!(e.kind, TimeKind::Duration(_)))
         .count();
     (es.len(), bare)
+}
+
+// ---------------------------------------------------------------- 候補（共通の契約）
+
+use crate::candidate::{Candidate, Confidence, Field, ValueKind};
+use crate::suppl::era_year;
+use lawean_source::StableId;
+
+fn dur_value(c: Candidate, d: &Dur) -> Candidate {
+    match (d.months(), d.days()) {
+        (Some(m), _) => c.value(ValueKind::Months, m.to_string(), Some("months")),
+        (_, Some(n)) => c.value(ValueKind::Days, n.to_string(), Some("days")),
+        _ => c,
+    }
+}
+
+impl TimeExpr {
+    /// 共通の候補の形に。`text` は根拠の文の本文（`time_exprs` に渡したもの）
+    pub fn to_candidate(&self, sentence: &StableId, text: &str) -> Candidate {
+        use TimeKind::*;
+        let mk = |f: Field, reason: &'static str| {
+            Candidate::new(f, sentence, text, self.start, self.end, reason)
+        };
+        match &self.kind {
+            DurationValue(d) => dur_value(mk(Field::DurationValue, "temporal:duration_value"), d),
+            Duration(d) => dur_value(mk(Field::Duration, "temporal:bare_duration"), d)
+                .confidence(Confidence::Low),
+            Approx { event, dur } => dur_value(mk(Field::Approx, "temporal:approx"), dur)
+                .label(event.clone())
+                .confidence(Confidence::Medium),
+            Calendar { month, day } => {
+                let c = mk(Field::CalendarDay, "temporal:calendar");
+                match (month, day) {
+                    (Some(m), Some(d)) => {
+                        c.value(ValueKind::Text, format!("--{m:02}-{d:02}"), None)
+                    }
+                    (Some(m), None) => c.value(ValueKind::Text, format!("--{m:02}"), None),
+                    _ => c,
+                }
+            }
+            EraDate { era, y, month, day } => {
+                let c = mk(Field::EraDate, "temporal:era_date");
+                match (era_year(era, *y), month, day) {
+                    (Some(yy), Some(m), Some(d)) => {
+                        c.value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)
+                    }
+                    (Some(yy), Some(m), None) => {
+                        c.value(ValueKind::Text, format!("{yy:04}-{m:02}"), None)
+                    }
+                    (Some(yy), None, None) => c.value(ValueKind::Text, format!("{yy:04}"), None),
+                    _ => c.confidence(Confidence::Low),
+                }
+            }
+            Every(d) => dur_value(mk(Field::Every, "temporal:every"), d),
+            NthDay { event, dur } => {
+                dur_value(mk(Field::NthDay, "temporal:nth_day"), dur).label(event.clone())
+            }
+            WithinBefore { event, dur } => {
+                dur_value(mk(Field::WithinBefore, "temporal:within_before"), dur)
+                    .label(event.clone())
+            }
+            Period {
+                event,
+                dur,
+                counted_from_first,
+            } => dur_value(
+                mk(
+                    Field::Period,
+                    if *counted_from_first {
+                        "temporal:period_from_first"
+                    } else {
+                        "temporal:period"
+                    },
+                ),
+                dur,
+            )
+            .label(event.clone()),
+            Elapsed {
+                event,
+                dur,
+                boundary,
+            } => dur_value(
+                mk(
+                    Field::Elapsed,
+                    match boundary {
+                        Boundary::On => "temporal:elapsed_on",
+                        Boundary::After => "temporal:elapsed_after",
+                    },
+                ),
+                dur,
+            )
+            .label(event.clone())
+            .role(match boundary {
+                Boundary::On => "満了日",
+                Boundary::After => "満了日の翌日以後",
+            }),
+            Within { event, dur } => {
+                let c = dur_value(mk(Field::Within, "temporal:within"), dur);
+                if event.is_empty() {
+                    c.confidence(Confidence::Medium)
+                } else {
+                    c.label(event.clone())
+                }
+            }
+            Window {
+                event,
+                from_before,
+                to_before,
+            } => mk(Field::Window, "temporal:window")
+                .value(
+                    ValueKind::Text,
+                    format!(
+                        "{}〜{}",
+                        from_before.months().unwrap_or(0),
+                        to_before.months().unwrap_or(0)
+                    ),
+                    Some("months_before"),
+                )
+                .label(event.clone()),
+            Before { event, dur } => {
+                let c = dur_value(mk(Field::Before, "temporal:before"), dur);
+                if event.is_empty() {
+                    c.confidence(Confidence::Medium)
+                } else {
+                    c.label(event.clone())
+                }
+            }
+            Compare { dur, op } => {
+                dur_value(mk(Field::Compare, "temporal:compare"), dur).role(format!("{op:?}"))
+            }
+            Enforcement(e) => {
+                let c = mk(Field::Enforcement, "temporal:enforcement");
+                match e {
+                    self::Enforcement::Promulgation => c.value(ValueKind::Text, "公布の日", None),
+                    self::Enforcement::Date { era, y, m, d } => match era_year(era, *y) {
+                        Some(yy) => {
+                            c.value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)
+                        }
+                        None => c.confidence(Confidence::Low),
+                    },
+                    self::Enforcement::ElapsedFromPromulgation(d) => {
+                        dur_value(c, d).role("公布の日から起算して経過した日")
+                    }
+                    self::Enforcement::ByCabinetOrderWithin(d) => {
+                        dur_value(c, d).role("公布の日から起算して超えない範囲内で政令で定める日")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 1 文の時間表現を候補で
+pub fn time_candidates(sentence: &StableId, text: &str) -> Vec<Candidate> {
+    time_exprs(text)
+        .iter()
+        .map(|e| e.to_candidate(sentence, text))
+        .collect()
 }
