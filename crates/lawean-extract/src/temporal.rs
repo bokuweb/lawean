@@ -15,7 +15,10 @@ use std::sync::OnceLock;
 
 const N: &str = "[一二三四五六七八九十百千]+";
 /// 施行期日の句: 「公布の日」「令和三年九月一日」「公布の日から起算して一年を超えない範囲内において政令で定める日」
-const ENF: &str = r"(?P<base>公布の日|(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?P<m>{N})月(?P<d>{N})日)(?:から起算して(?P<n>{N})(?P<u>年|月|日)(?P<how>を経過した日|(?:を超えない|をこえない)範囲内(?:において|で)(?:、各規定につき、)?政令で定める日))?";
+const ENF: &str = r"(?P<base>公布の日|(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?P<m>{N})月(?P<d>{N})日)(?P<until>までの間において政令で定める日)?(?:から起算して(?:(?P<yy>{N})年(?P<mm>{N})月|(?P<n>{N})(?P<u>年|月|日))(?P<how>を経過した日|を経過する日|(?:を超えない|をこえない)範囲内(?:において|で)(?:、各規定につき、)?政令で定める日))?";
+/// 他法令の施行日に依る施行期日: 「民法改正法の施行の日から施行する」「刑法等一部改正法施行日から施行する」
+const ENF_OTHER: &str =
+    r"(?P<law>[^、。「」（）]{2,40}?)(?:（[^）]*）)?(?:の施行の日|施行日|の施行日)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
@@ -125,12 +128,16 @@ pub enum Boundary {
 pub enum Enforcement {
     /// 「公布の日から施行する」
     Promulgation,
+    /// 「民法改正法の施行の日から施行する」— 他法令（略称のことが多い）の施行日。`LawSpace` で解く
+    OtherLaw(String),
     /// 「令和三年九月一日から施行する」（年は元号のまま。西暦は呼ぶ側で）
     Date { era: String, y: u32, m: u32, d: u32 },
     /// 「公布の日から起算して一年を経過した日から施行する」
     ElapsedFromPromulgation(Dur),
     /// 「公布の日から起算して一年を超えない範囲内において政令で定める日から施行する」— 上限だけ決まる
     ByCabinetOrderWithin(Dur),
+    /// 「令和五年二月一日までの間において政令で定める日から施行する」— 上限が暦日
+    ByCabinetOrderUntil { era: String, y: u32, m: u32, d: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +167,8 @@ fn dur(n: &str, u: &str) -> Dur {
 
 struct Rules {
     enforcement: Regex,
+    enforcement_other: Regex,
+    enforcement_list: Regex,
     within_event: Regex,
     sanction_term: Regex,
     enforcement_clause: Regex,
@@ -187,7 +196,10 @@ fn rules() -> &'static Rules {
     R.get_or_init(|| Rules {
         enforcement: re(&format!("{ENF}(?:（[^）]*）)?から施行する")),
         sanction_term: re(r"{N}(?:年|月)以下の(?:懲役|禁錮|拘禁刑)"),
-        enforcement_clause: re(&format!("^(?:この法律は、)?{ENF}(?:から施行する)?。?$")),
+        enforcement_clause: re(&format!("^(?:この法律は、)?{ENF}(?:（[^）]*）)?(?:から施行する)?。?$")),
+        enforcement_other: re(&format!("^(?:この法律は、)?{ENF_OTHER}から施行する。?$")),
+        // ただし書きの中の「…は、公布の日から、…は、公布の日から起算して二年を経過する日から施行する」
+        enforcement_list: re(&format!("(?P<scope>[^。]*?)(?:は、|は){ENF}(?:（[^）]*）)?から(?:施行する|、)")),
         window: re(r"(?P<ev>[^、。（）]{1,30}?)の(?P<n1>{N})(?P<u1>年|月|日)前から(?P<n2>{N})(?P<u2>年|月|日)前までの間"),
         elapsed: re(r"(?P<ev>[^、。（）]{1,40}?)(?:の日から|の時から|から|の後、|後、|の後|後)(?P<ct>起算して)?(?P<n>{N})(?P<u>年|月|日|週間)を経過(?P<b>した日|した後|する日|する時|した時|した場合|する場合|することによって|したとき|すること|し)"),
         within: re(r"(?P<n>{N})(?P<u>年|月|日|週間|時間)(?:以内|を超えない範囲内)"),
@@ -284,12 +296,31 @@ fn clean_event(ev: &str) -> (String, usize) {
 }
 
 fn enforcement_of(c: &regex::Captures) -> Enforcement {
-    match (c.name("n"), c.name("how")) {
-        (Some(n), Some(how)) if how.as_str().starts_with("を経過") => {
-            Enforcement::ElapsedFromPromulgation(dur(n.as_str(), &c["u"]))
+    // 「一年六月」は月数に畳む
+    let d = match (c.name("yy"), c.name("n")) {
+        (Some(yy), _) => Some(Dur {
+            n: kanji_to_u32(yy.as_str()).unwrap_or(0) * 12 + kanji_to_u32(&c["mm"]).unwrap_or(0),
+            unit: Unit::Month,
+        }),
+        (None, Some(n)) => Some(dur(n.as_str(), &c["u"])),
+        _ => None,
+    };
+    match (d, c.name("how")) {
+        (Some(d), Some(how)) if how.as_str().starts_with("を経過") => {
+            Enforcement::ElapsedFromPromulgation(d)
         }
-        (Some(n), Some(_)) => Enforcement::ByCabinetOrderWithin(dur(n.as_str(), &c["u"])),
+        (Some(d), Some(_)) => Enforcement::ByCabinetOrderWithin(d),
         _ => match c.name("era") {
+            Some(era) if c.name("until").is_some() => Enforcement::ByCabinetOrderUntil {
+                era: era.as_str().into(),
+                y: if &c["y"] == "元" {
+                    1
+                } else {
+                    kanji_to_u32(&c["y"]).unwrap_or(0)
+                },
+                m: kanji_to_u32(&c["m"]).unwrap_or(0),
+                d: kanji_to_u32(&c["d"]).unwrap_or(0),
+            },
             Some(era) => Enforcement::Date {
                 era: era.as_str().into(),
                 y: if &c["y"] == "元" {
@@ -309,10 +340,28 @@ fn enforcement_of(c: &regex::Captures) -> Enforcement {
 /// 各号の日付欄「公布の日から起算して九月を超えない範囲内において政令で定める日」の両方
 pub fn parse_enforcement(text: &str) -> Option<Enforcement> {
     let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    rules()
-        .enforcement_clause
+    let r = rules();
+    if let Some(c) = r.enforcement_clause.captures(&text) {
+        return Some(enforcement_of(&c));
+    }
+    r.enforcement_other
         .captures(&text)
-        .map(|c| enforcement_of(&c))
+        .map(|c| Enforcement::OtherLaw(c["law"].trim_start_matches("この法律は、").to_string()))
+}
+
+/// 1 文の中の「X は、<施行期日>から」の列挙（ただし書き）。(範囲の句, 施行期日)
+pub fn enforcement_list(text: &str) -> Vec<(String, Enforcement)> {
+    let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    rules()
+        .enforcement_list
+        .captures_iter(&text)
+        .map(|c| {
+            (
+                c["scope"].trim_start_matches("ただし、").to_string(),
+                enforcement_of(&c),
+            )
+        })
+        .collect()
 }
 
 /// 1 文の中の時間表現をすべて取る（重ならないように、長い規則から順に）
@@ -829,6 +878,17 @@ impl TimeExpr {
                 let c = mk(Field::Enforcement, "temporal:enforcement");
                 match e {
                     self::Enforcement::Promulgation => c.value(ValueKind::Text, "公布の日", None),
+                    self::Enforcement::ByCabinetOrderUntil { era, y, m, d } => {
+                        match era_year(era, *y) {
+                            Some(yy) => c
+                                .value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)
+                                .role("その日までの間において政令で定める日"),
+                            None => c.confidence(Confidence::Low),
+                        }
+                    }
+                    self::Enforcement::OtherLaw(law) => c
+                        .value(ValueKind::Text, format!("{law}の施行の日"), None)
+                        .confidence(Confidence::Medium),
                     self::Enforcement::Date { era, y, m, d } => match era_year(era, *y) {
                         Some(yy) => {
                             c.value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)

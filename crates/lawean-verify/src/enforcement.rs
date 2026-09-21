@@ -40,6 +40,11 @@ pub fn admissible(p: Date, e: &Enforcement, t: &DateExpr) -> Option<String> {
     let p = lit(p);
     Some(match e {
         Enforcement::Promulgation => t.eq(&p),
+        Enforcement::OtherLaw(_) => return None,
+        Enforcement::ByCabinetOrderUntil { era, y, m, d } => {
+            let hi = DateExpr::lit(era_year(era, *y)?, *m, *d);
+            format!("(and {} {})", p.le(t), t.le(&hi))
+        }
         Enforcement::Date { era, y, m, d } => t.eq(&DateExpr::lit(era_year(era, *y)?, *m, *d)),
         Enforcement::ElapsedFromPromulgation(dur) => {
             // 起算日は公布日（「起算して」）。満了日の翌日

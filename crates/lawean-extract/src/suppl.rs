@@ -12,7 +12,7 @@
 //! 出力の `Enforcement` は `temporal` のもの。許容区間（`admissible`）は暦（`calendar`）で出す。
 
 use crate::calendar::{self, Date};
-use crate::temporal::{parse_enforcement, Enforcement, Unit};
+use crate::temporal::{enforcement_list, parse_enforcement, Enforcement, Unit};
 use lawean_source::ir::{ItemBody, LegalDocument, Provision, SupplChild, SupplProvision};
 use regex::Regex;
 use std::sync::OnceLock;
@@ -226,16 +226,31 @@ fn spec_of(sp: &SupplProvision, own_promulgated: Option<Date>) -> EnforcementSpe
     }) else {
         return spec;
     };
-    let text = p
-        .sentences
+    let texts: Vec<String> = p.sentences.iter().map(|s| s.plain_text()).collect();
+    let text = texts
         .iter()
-        .map(|s| s.plain_text())
         .find(|t| t.contains("施行する"))
+        .cloned()
         .unwrap_or_default();
     spec.main = Some(EnforcementClause {
         enforcement: parse_enforcement(&text),
-        text,
+        text: text.clone(),
     });
+    // ただし書き「ただし、A の改正規定は公布の日から、B の改正規定は…から施行する」: 範囲ごとに号と同じ扱い
+    for t in texts
+        .iter()
+        .filter(|t| **t != text && t.contains("施行する"))
+    {
+        for (scope, e) in enforcement_list(t) {
+            spec.items.push(EnforcementItem {
+                scope,
+                clause: EnforcementClause {
+                    enforcement: Some(e),
+                    text: t.clone(),
+                },
+            });
+        }
+    }
     for ch in &p.children {
         if let lawean_source::ir::ParagraphChild::Item(it) = ch {
             if let ItemBody::Columns(cols) = &it.body {
@@ -304,6 +319,8 @@ pub fn spec_for_law_id(doc: &LegalDocument, amend_law_id: &str) -> Option<Enforc
 pub fn admissible(p: Date, e: &Enforcement) -> Option<(Date, Date)> {
     Some(match e {
         Enforcement::Promulgation => (p, p),
+        Enforcement::OtherLaw(_) => return None,
+        Enforcement::ByCabinetOrderUntil { era, y, m, d } => (p, (era_year(era, *y)?, *m, *d)),
         Enforcement::Date { era, y, m, d } => {
             let t = (era_year(era, *y)?, *m, *d);
             (t, t)
@@ -409,7 +426,90 @@ mod tests {
         );
         assert_eq!(
             parse_enforcement("新非訟事件手続法の施行の日から施行する。"),
-            None
+            Some(Enforcement::OtherLaw("新非訟事件手続法".into()))
         );
+        assert_eq!(
+            parse_enforcement("この法律は、刑法等一部改正法施行日から施行する。"),
+            Some(Enforcement::OtherLaw("刑法等一部改正法".into()))
+        );
+        assert_eq!(
+            parse_enforcement(
+                "公布の日から起算して一年六月を超えない範囲内において政令で定める日から施行する。"
+            ),
+            Some(Enforcement::ByCabinetOrderWithin(Dur {
+                n: 18,
+                unit: Unit::Month
+            }))
+        );
+        assert_eq!(
+            parse_enforcement(
+                "この法律は、令和五年二月一日までの間において政令で定める日から施行する。"
+            ),
+            Some(Enforcement::ByCabinetOrderUntil {
+                era: "令和".into(),
+                y: 5,
+                m: 2,
+                d: 1
+            })
+        );
+        let list = crate::temporal::enforcement_list("ただし、第一条中宅地建物取引業法第六十四条の三第三項を同条第四項とし、同条第二項の次に一項を加える改正規定及び同法第六十四条の十二第七項の改正規定並びに附則第六項の規定は公布の日から、同法第三十四条の次に二条を加える改正規定は公布の日から起算して二年を経過する日から施行する。");
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].1, Enforcement::Promulgation);
+        assert_eq!(
+            list[1].1,
+            Enforcement::ElapsedFromPromulgation(Dur {
+                n: 2,
+                unit: Unit::Year
+            })
+        );
+        assert!(list[1].0.contains("第三十四条の次に二条を加える改正規定"));
     }
+}
+
+/// e-Gov のリビジョン（改正法 ID + 施行日）が附則で説明できるか
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Explanation {
+    /// 本文か号のどれかの区間に入る
+    Explained,
+    /// 本文が他法令の施行日に依り、号にも無い
+    DependsOnOtherLaw(String),
+    /// この本文に改正法の附則が載っていない（本文が古い、または附則を残さない改正）
+    NoSupplProvision,
+    /// 附則はあるが施行期日が読めない
+    Unreadable(Vec<String>),
+    /// どの区間にも入らない
+    Outside(Vec<(Date, Date)>),
+}
+
+/// 改正法 `amend_law_id` による施行日 `day` を、この本文に載る附則で説明する。
+/// 改正法のどの条がこの法令を改めたかは分からないので「本文か号のどれかの区間」を見る
+pub fn explain(doc: &LegalDocument, amend_law_id: &str, day: Date) -> Explanation {
+    let Some(spec) = spec_for_law_id(doc, amend_law_id) else {
+        return Explanation::NoSupplProvision;
+    };
+    let clauses: Vec<&EnforcementClause> = spec
+        .main
+        .iter()
+        .chain(spec.items.iter().map(|i| &i.clause))
+        .collect();
+    let Some(p) = spec.promulgated else {
+        return Explanation::Unreadable(clauses.iter().map(|c| c.text.clone()).collect());
+    };
+    let ranges: Vec<(Date, Date)> = clauses
+        .iter()
+        .filter_map(|c| c.enforcement.as_ref())
+        .filter_map(|e| admissible(p, e))
+        .collect();
+    if ranges.iter().any(|(lo, hi)| *lo <= day && day <= *hi) {
+        return Explanation::Explained;
+    }
+    if let Some(Enforcement::OtherLaw(law)) =
+        spec.main.as_ref().and_then(|m| m.enforcement.as_ref())
+    {
+        return Explanation::DependsOnOtherLaw(law.clone());
+    }
+    if clauses.iter().all(|c| c.enforcement.is_none()) {
+        return Explanation::Unreadable(clauses.iter().map(|c| c.text.clone()).collect());
+    }
+    Explanation::Outside(ranges)
 }

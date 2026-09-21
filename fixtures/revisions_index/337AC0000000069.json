@@ -1,0 +1,68 @@
+{
+ "law_id": "337AC0000000069",
+ "revisions": [
+  {
+   "law_revision_id": "337AC0000000069_20260401_507AC0000000047",
+   "amendment_law_id": "507AC0000000047",
+   "amendment_enforcement_date": "2026-04-01",
+   "amendment_promulgate_date": "2025-05-30",
+   "current_revision_status": "CurrentEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20250530_507AC0000000047",
+   "amendment_law_id": "507AC0000000047",
+   "amendment_enforcement_date": "2025-05-30",
+   "amendment_promulgate_date": "2025-05-30",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20230401_503AC0000000024",
+   "amendment_law_id": "503AC0000000024",
+   "amendment_enforcement_date": "2023-04-01",
+   "amendment_promulgate_date": "2021-04-28",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20220401_502AC0000000008",
+   "amendment_law_id": "502AC0000000008",
+   "amendment_enforcement_date": "2022-04-01",
+   "amendment_promulgate_date": "2020-03-31",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20210901_503AC0000000037",
+   "amendment_law_id": "503AC0000000037",
+   "amendment_enforcement_date": "2021-09-01",
+   "amendment_promulgate_date": "2021-05-19",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20210519_503AC0000000037",
+   "amendment_law_id": "503AC0000000037",
+   "amendment_enforcement_date": "2021-05-19",
+   "amendment_promulgate_date": "2021-05-19",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20210428_503AC0000000024",
+   "amendment_law_id": "503AC0000000024",
+   "amendment_enforcement_date": "2021-04-28",
+   "amendment_promulgate_date": "2021-04-28",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20200401_502AC0000000008",
+   "amendment_law_id": "502AC0000000008",
+   "amendment_enforcement_date": "2020-04-01",
+   "amendment_promulgate_date": "2020-03-31",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "337AC0000000069_20130101_423AC0000000053",
+   "amendment_law_id": "423AC0000000053",
+   "amendment_enforcement_date": "2013-01-01",
+   "amendment_promulgate_date": "2011-05-25",
+   "current_revision_status": "PreviousEnforced"
+  }
+ ]
+}

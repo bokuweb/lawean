@@ -70,3 +70,7 @@
 | `325AC0000000158.xml` | 質屋営業法 | gold（dev） |
 | `323AC0000000201.xml` | 医師法 | gold（dev） |
 | `324AC0000000108.xml` | 古物営業法 | gold（eval） |
+
+## リビジョン一覧（`fixtures/revisions_index/`、e-Gov `law_revisions` API、取得日 2026-09-22）
+
+上の 10 法令の全リビジョン（改正法 ID・施行日・公布日）。附則の施行期日の読みを全件で確かめる（`tests/enforcement_audit.rs`）。
