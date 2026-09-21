@@ -8,7 +8,7 @@ use lawean_source::parse_response;
 
 fn cmp_durations(e: &Expr, out: &mut Vec<(CmpOp, Duration)>) {
     match e {
-        Expr::Cmp(_, op, Value::Duration(d)) => out.push((*op, d.clone())),
+        Expr::Cmp(_, op, Value::Duration(d)) => out.push((*op, *d)),
         Expr::And(xs) | Expr::Or(xs) => xs.iter().for_each(|x| cmp_durations(x, out)),
         Expr::Not(x) => cmp_durations(x, out),
         _ => {}
