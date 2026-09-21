@@ -45,7 +45,7 @@ def «R4-1'» : Rule :=
   { id := "R4-1'",
     cond := (.and [(.pred "p:更新する"), (.pred "p:最初の更新")]),
     effect := (.set "a:更新後の期間" (.int 240)),
-    overrides := ["R4-1"],
+    overrides := ["R4-1", "R4-2"],
     exceptions := ["R4-2'"],
     source := "403AC0000000090/main/chap:2/sec:1/art:4/para:1/sent:1",
     conf := 100 }
@@ -55,7 +55,7 @@ def «R4-2» : Rule :=
     cond := (.and [(.pred "p:更新する"), (.cmp (.var "a:当事者が定めた期間") .gt (.ruleValue "R4-1"))]),
     effect := (.set "a:更新後の期間" (.var "a:当事者が定めた期間")),
     overrides := ["R4-1"],
-    exceptions := [],
+    exceptions := ["R4-1'"],
     source := "403AC0000000090/main/chap:2/sec:1/art:4/para:1/sent:2",
     conf := 100 }
 

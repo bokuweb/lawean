@@ -1,7 +1,9 @@
 //! Verification IR — Semantic IR を SMT-LIB に落とし、z3 で性質を証明・反証する（docs/07-verification.md）。
 
 pub mod check;
+pub mod consistency;
 pub mod smt;
 
-pub use check::{check, model_value, script, z3_available, CheckError, Property, Verdict};
+pub use check::{check, model_value, run_z3, script, z3_available, CheckError, Property, Verdict};
+pub use consistency::{conflicts, Conflict, ConflictKind};
 pub use smt::{months, pred_name, Compiler, Smt};

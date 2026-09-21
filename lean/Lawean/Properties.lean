@@ -100,11 +100,14 @@ theorem art4_ge_10_on (w : World) (h : consistentOn M S4 w = true) (hr : w.bools
   have h1' := rule_of w h «R4-1'» (by simp [S4]) (by mem)
   have h2 := rule_of w h «R4-2» (by simp [S4]) (by mem)
   have h2' := rule_of w h «R4-2'» (by simp [S4]) (by mem)
-  simp only [«R4-1», «R4-1'», «R4-2», «R4-2'», List.all_cons, List.all_nil, Bool.and_true] at h1 h1' h2 h2'
-  rw [applies_of w «R4-1'» (by mem) "R4-1'" rfl, applies_of w «R4-2» (by mem) "R4-2" rfl] at h1
-  simp only [«R4-1'», «R4-2», List.all_cons, List.all_nil, Bool.and_true] at h1
-  rw [applies_of w «R4-2'» (by mem) "R4-2'" rfl] at h1 h1'
-  simp only [«R4-2'», List.all_cons, List.all_nil, Bool.and_true] at h1 h1'
+  -- applies を条件と例外に開く（R4-2 の例外は R4-1'、R4-1' の例外は R4-2'、R4-2' に例外は無い）
+  have a2' := applies_of w «R4-2'» (by mem) "R4-2'" rfl
+  have a1' := applies_of w «R4-1'» (by mem) "R4-1'" rfl
+  have a2 := applies_of w «R4-2» (by mem) "R4-2" rfl
+  simp only [«R4-2'», List.all_cons, List.all_nil, Bool.and_true] at a2'
+  simp only [«R4-1'», List.all_cons, List.all_nil, Bool.and_true, a2'] at a1'
+  simp only [«R4-2», List.all_cons, List.all_nil, Bool.and_true, a1'] at a2
+  simp only [«R4-1», «R4-1'», «R4-2», «R4-2'», List.all_cons, List.all_nil, Bool.and_true, a2, a1', a2'] at h1 h1' h2 h2'
   unfold_sem at h1 h1' h2 h2'
   simp only [rv_R4_1, rv_R4_1', «R4-1», «R4-1'», evalV.evalV1, hr] at h1 h1' h2 h2'
   cases hf : w.bools "p:最初の更新" <;> simp only [hf] at h1 h1' h2 h2' <;> unfold_sem at h1 h1' h2 h2' <;> omega

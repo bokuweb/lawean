@@ -176,3 +176,70 @@ fn script_is_generated_without_solver() {
     assert!(s.contains("(assert (=> |applies:R3-1| (= |a:存続期間| 360)))"));
     assert!(s.ends_with("(check-sat)\n(get-model)\n"));
 }
+
+// ---------------------------------------------------------------- 無矛盾（効力の齟齬）
+
+/// 手書き IR には、同じ対象に相反する効果を同時に与える Rule の組が無い。
+/// 第3条・第4条の `Set` の組は overrides で片方しか適用されないので unsat（Proved）
+#[test]
+fn hand_written_model_has_no_conflicting_effects() {
+    need_z3!();
+    let m = shakuchi_shakuya::model();
+    let rm = ResolvedModel::new(&m);
+    let cs = conflicts(&rm).unwrap();
+    assert!(
+        !cs.is_empty(),
+        "候補の組は挙がる（第3条の本文とただし書き等）"
+    );
+    for c in &cs {
+        assert_eq!(
+            c.verdict,
+            Verdict::Proved,
+            "{} vs {} {:?}",
+            c.a.0,
+            c.b.0,
+            c.kind
+        );
+    }
+}
+
+/// 効力の齟齬: 第9条（借地権者に不利な特約は無効）に対し、「書面による特約は効力を妨げない」を
+/// overrides 無しで足すと、両方が同時に適用される世界がある = 矛盾。overrides を張れば消える
+#[test]
+fn a_preserve_rule_without_override_conflicts_with_art9() {
+    need_z3!();
+    let mut m = shakuchi_shakuya::model();
+    m.rules.push(
+        rule("R-draft")
+            .condition(pred("書面による特約").expr())
+            .effect(Effect::Preserve(Target::Contract("特約".into())))
+            .provenance(
+                "403AC0000000090/main/chap:2/sec:1/art:9/para:2/sent:1",
+                Confidence::High,
+                "test",
+            ),
+    );
+    let rm = ResolvedModel::new(&m);
+    let cs = conflicts(&rm).unwrap();
+    let c = cs
+        .iter()
+        .find(|c| c.b.0 == "R-draft")
+        .expect("第9条との組が挙がる");
+    assert_eq!(c.a.0, "R9");
+    assert!(matches!(c.kind, ConflictKind::VoidVsPreserve { ref target } if target == "特約"));
+    let Verdict::Counterexample(model) = &c.verdict else {
+        panic!("{:?}", c.verdict)
+    };
+    // 反例: 書面による特約で、この節の規定に反し、借地権者に不利
+    assert_eq!(
+        model_value(model, "p:書面による特約").as_deref(),
+        Some("true")
+    );
+
+    // 「第九条の規定にかかわらず」= overrides を張ると矛盾は消える
+    m.rules.last_mut().unwrap().overrides = vec![Override::Rule(RuleId("R9".into()))];
+    let rm = ResolvedModel::new(&m);
+    let cs = conflicts(&rm).unwrap();
+    let c = cs.iter().find(|c| c.b.0 == "R-draft").unwrap();
+    assert_eq!(c.verdict, Verdict::Proved);
+}

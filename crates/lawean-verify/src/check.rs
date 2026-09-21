@@ -73,7 +73,11 @@ pub fn z3_available() -> bool {
 }
 
 pub fn check(rm: &ResolvedModel<'_>, prop: &Property) -> Result<Verdict, CheckError> {
-    let src = script(rm, prop);
+    run_z3(&script(rm, prop))
+}
+
+/// SMT-LIB を z3 に渡し、unsat → `Proved`、sat → `Counterexample(モデル)`
+pub fn run_z3(src: &str) -> Result<Verdict, CheckError> {
     let mut child = Command::new("z3")
         .args(["-in", "-smt2"])
         .stdin(Stdio::piped())
