@@ -93,3 +93,29 @@ fn every_suppl_provision_yields_a_spec() {
         assert!(u.contains("の施行の日から施行する"), "{u}");
     }
 }
+
+/// 単独法の改正法（宅建業法 平成28年法律第56号）の附則: ただし書きが被改正法の条（「第三十四条の二第一項の改正規定」）で
+/// 範囲を書く。本文は一年以内（e-Gov 2017-04-01）、ただし書きの条は二年以内（e-Gov 2018-04-01）
+#[test]
+fn target_side_scopes_in_a_single_law_amendment() {
+    let p = format!(
+        "{}/../../fixtures/laws/327AC1000000176.xml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let doc = parse_response(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let spec = spec_for_law_id(&doc, "428AC0000000056").unwrap();
+    let p = spec.promulgated.unwrap();
+    assert_eq!(p, (2016, 6, 3));
+    // 第三十四条の二を触る単位 → ただし書き（二年以内）
+    let (clause, scope) = spec.for_target_articles(&["34_2".to_string()]).unwrap();
+    assert!(scope.unwrap().contains("第三十四条の二第一項の改正規定"));
+    let (lo, hi) = admissible(p, clause.enforcement.as_ref().unwrap()).unwrap();
+    assert_eq!((lo, hi), ((2016, 6, 3), (2018, 6, 2)));
+    assert!(lo <= (2018, 4, 1) && (2018, 4, 1) <= hi);
+    // 第三条を触る単位 → 本文（一年以内）
+    let (clause, scope) = spec.for_target_articles(&["3".to_string()]).unwrap();
+    assert!(scope.is_none());
+    let (lo, hi) = admissible(p, clause.enforcement.as_ref().unwrap()).unwrap();
+    assert_eq!((lo, hi), ((2016, 6, 3), (2017, 6, 2)));
+    assert!(lo <= (2017, 4, 1) && (2017, 4, 1) <= hi);
+}

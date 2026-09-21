@@ -163,7 +163,61 @@ pub fn scope_articles(scope: &str) -> Vec<ArtRange> {
     out
 }
 
+/// 範囲欄が被改正法の条で書かれているか（「第三十四条の二第一項の改正規定」）。
+/// 単独法の改正法（「宅地建物取引業法の一部を改正する法律」）の附則はこの形、整備法の号は改正法の条で書く
+pub fn scope_is_target_side(scope: &str) -> bool {
+    scope.contains("改正規定")
+}
+
+/// 被改正法の条で書かれた範囲欄から、条番号（枝番は「N_M」）を取る
+pub fn scope_target_articles(scope: &str) -> Vec<String> {
+    static R: OnceLock<Regex> = OnceLock::new();
+    let r = R.get_or_init(|| {
+        Regex::new(r"第([一二三四五六七八九十百千]+)条((?:の[一二三四五六七八九十百千]+)*)")
+            .unwrap()
+    });
+    let s = strip_parens(scope);
+    let mut out = Vec::new();
+    for c in r.captures_iter(&s) {
+        // 「同法第百二十九条の改正規定」「宅地建物取引業法第六十四条の三第三項」— 法令名の直後も被改正法の条。
+        // 「附則第三条の規定」は改正法の附則の条なので除く
+        if s[..c.get(0).unwrap().start()].ends_with("附則") {
+            continue;
+        }
+        let Some(base) = kanji_num(&c[1]) else {
+            continue;
+        };
+        let mut id = base.to_string();
+        for b in c[2].split('の').filter(|x| !x.is_empty()) {
+            if let Some(n) = kanji_num(b) {
+                id.push('_');
+                id.push_str(&n.to_string());
+            }
+        }
+        out.push(id);
+    }
+    out
+}
+
 impl EnforcementSpec {
+    /// 改め文が触る被改正法の条（`ArticleNum::to_num_string` の形「34_2」）から施行期日を引く。
+    /// 範囲欄が「〜の改正規定」で被改正法の条を挙げている号（ただし書き）に当たれば、それ。無ければ本文
+    pub fn for_target_articles(
+        &self,
+        arts: &[String],
+    ) -> Option<(&EnforcementClause, Option<&str>)> {
+        for it in &self.items {
+            if !scope_is_target_side(&it.scope) {
+                continue;
+            }
+            let listed = scope_target_articles(&it.scope);
+            if arts.iter().any(|a| listed.contains(a)) {
+                return Some((&it.clause, Some(it.scope.as_str())));
+            }
+        }
+        self.main.as_ref().map(|m| (m, None))
+    }
+
     /// 改正法の第 `art` 条がいつ施行されるか。`suppl` が None なら本則を先に、次に附則を探す。号に無ければ本文
     pub fn for_article(
         &self,

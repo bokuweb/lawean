@@ -82,6 +82,23 @@ pub enum Op {
 }
 
 impl Op {
+    /// この操作が触る被改正法の条（目次・章末への追加は None）
+    pub fn article(&self) -> Option<&ArticleNum> {
+        match self {
+            Op::ReplaceToc { .. } | Op::AppendArticle { .. } => None,
+            Op::Replace { at, .. }
+            | Op::InsertAfterPhrase { at, .. }
+            | Op::AppendSentence { at, .. }
+            | Op::Delete { at } => Some(&at.article),
+            Op::AppendParagraph { article, .. }
+            | Op::InsertParagraphAfter { article, .. }
+            | Op::ReplaceArticle { article, .. }
+            | Op::RenumberParagraph { article, .. }
+            | Op::ShiftParagraphs { article, .. } => Some(article),
+            Op::InsertArticleAfter { after, .. } => Some(after),
+        }
+    }
+
     /// 続く条文（インデント 1 の行）を受け取る操作か
     pub fn takes_content(&self) -> bool {
         matches!(

@@ -838,23 +838,33 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
     };
     let (mut details, mut fails, mut warns) = (Vec::new(), 0, 0);
     let n = units.len();
-    for (i, (label, _)) in units.iter().enumerate() {
-        let art = label
+    for (i, (label, unit)) in units.iter().enumerate() {
+        // 附則の号・ただし書きは、整備法なら改正法の条（「第三十五条」）、単独法の改正なら被改正法の条
+        // （「第三十四条の二第一項の改正規定」）で範囲を書く。両方で引き、被改正法の条の側を優先
+        let target_arts: Vec<String> = unit
+            .instructions
+            .iter()
+            .flat_map(|i| i.ops.iter())
+            .filter_map(|o| o.article().map(|a| a.to_num_string()))
+            .collect();
+        let by_target = spec
+            .for_target_articles(&target_arts)
+            .filter(|(_, sc)| sc.is_some());
+        let by_amending = label
             .trim_start_matches('第')
             .split('条')
             .next()
-            .and_then(kanji_num);
-        let Some(art) = art else {
-            warns += 1;
-            details.push(format!("{label}: 改正法の条番号が読めない"));
-            continue;
-        };
-        let Some((clause, scope)) = spec.for_article(art, None) else {
+            .and_then(kanji_num)
+            .and_then(|art| spec.for_article(art, None));
+        let Some((clause, scope)) = by_target.or(by_amending) else {
             warns += 1;
             details.push(format!("{label}: 附則に施行期日が無い"));
             continue;
         };
         let where_ = match scope {
+            Some(sc) if lawean_extract::suppl::scope_is_target_side(sc) => {
+                "附則第一条のただし書き・号（被改正法の条で）"
+            }
             Some(_) => "附則第一条の号",
             None => "附則第一条本文",
         };
