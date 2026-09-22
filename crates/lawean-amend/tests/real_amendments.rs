@@ -739,3 +739,19 @@ fn reiwa6_act53_art8_takken_reproduces_egov_revision() {
     .unwrap();
     assert_same_main(&got, &revision("327AC1000000176_20250401_506AC0000000053"));
 }
+
+/// 令和5年法律第52号（旅館業法等の一部改正、令5-6-14 公布、施行 2023-12-13）第1条（旅館業法）。
+/// 条の繰り下げ「第三条の四を第三条の五とし、第三条の三を第三条の四とする」の後に第3条の2の字句改めと項の追加、
+/// 号の中のイロ、「同条第一号中…に改め、同条に次の一号を加える」
+#[test]
+fn reiwa5_act52_art1_ryokan_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000052_art1.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("323AC0000000138_20230713_505AC0000000067"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("323AC0000000138_20231213_505AC0000000052"));
+}

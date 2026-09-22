@@ -794,13 +794,7 @@ pub(crate) fn replace_in_article_part(
                     .collect(),
             };
             for k in targets {
-                for inl in &mut ss[k].text {
-                    if let Inline::Text(t) = inl {
-                        let (nt, c) = replace_protected(t, from, to, protect);
-                        n += c;
-                        *t = nt;
-                    }
-                }
+                n += replace_in_sentence(ss[k], from, to, protect);
             }
         }
         return n;
@@ -812,13 +806,29 @@ pub(crate) fn replace_in_article_part(
             continue;
         }
         for s in sentences_mut(paragraph_mut(art, i), item) {
-            for inl in &mut s.text {
-                if let Inline::Text(t) = inl {
-                    let (nt, c) = replace_protected(t, from, to, protect);
-                    n += c;
-                    *t = nt;
-                }
-            }
+            n += replace_in_sentence(s, from, to, protect);
+        }
+    }
+    n
+}
+
+/// 1 文の中の字句の置換。まず素の字句（`Inline::Text`）の中で探し、無ければルビ（`<Ruby>と<Rt>ヽ</Rt></Ruby>`。傍点・ふりがな）を
+/// またいで平文で探す（旅館業法 第5条第2号「とばく、」→「賭博」。改め文はルビを書かないので、ルビを落とした本文に当てる）
+fn replace_in_sentence(s: &mut Sentence, from: &str, to: &str, protect: &[String]) -> usize {
+    let mut n = 0;
+    for inl in &mut s.text {
+        if let Inline::Text(t) = inl {
+            let (nt, c) = replace_protected(t, from, to, protect);
+            n += c;
+            *t = nt;
+        }
+    }
+    if n == 0 && s.text.iter().any(|i| matches!(i, Inline::Raw(_))) {
+        let flat = s.plain_text();
+        let (nt, c) = replace_protected(&flat, from, to, protect);
+        if c > 0 {
+            s.text = vec![Inline::Text(nt)];
+            n += c;
         }
     }
     n
