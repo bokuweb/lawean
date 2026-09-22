@@ -15,5 +15,5 @@ pub use apply::{
 };
 pub use hane::{article_mapping, hane_candidates, HaneCandidate};
 pub use op::*;
-pub use parse::{parse_instruction, parse_units, ParseError};
+pub use parse::{parse_instruction, parse_scope_locs, parse_units, ParseError};
 pub use scenario::{explore, run_sequence, Enforcement, ScenarioReport, Stage};

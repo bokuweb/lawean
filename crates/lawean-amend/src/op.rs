@@ -253,6 +253,30 @@ impl Op {
         }
     }
 
+    /// この操作が触る項（位置に項があるもの）
+    pub fn paragraph(&self) -> Option<u32> {
+        match self {
+            Op::Replace { at, .. }
+            | Op::InsertAfterPhrase { at, .. }
+            | Op::AppendSentence { at, .. }
+            | Op::Delete { at }
+            | Op::ReplaceSentencePart { at, .. }
+            | Op::DeleteSentencePart { at, .. }
+            | Op::ReplaceParagraph { at, .. }
+            | Op::ReplaceItem { at, .. }
+            | Op::RenumberItem { at, .. }
+            | Op::ShiftItems { at, .. }
+            | Op::InsertItemAfter { at, .. }
+            | Op::InsertItemBefore { at, .. }
+            | Op::AppendItem { at, .. }
+            | Op::ReplaceItems { at, .. } => match at.paragraph {
+                Some(ParaRef::Num(n)) => Some(n),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// 続く条文（インデント 1 の行）を受け取る操作か
     pub fn takes_content(&self) -> bool {
         matches!(
@@ -320,4 +344,31 @@ pub struct AmendUnit {
     /// 被改正法令の題名（「借地借家法」）
     pub target_title: String,
     pub instructions: Vec<Instruction>,
+}
+
+impl AmendUnit {
+    /// 単位を、`locs` の位置（附則の号「〜の改正規定」）に当たる改正規定（文）とそれ以外に分ける。
+    /// 附則の号が 1 つの条の一部だけを別の日に施行するとき（令3-49 第6条「医師法第十六条の十一第一項の改正規定を除く」）、
+    /// 分けた 2 つの単位を施行日の順に当てる。文の中のどれかの操作が位置に当たれば（条が同じで、項が言われていれば項も同じ）その文
+    pub fn split_by_locs(&self, locs: &[Loc]) -> (AmendUnit, AmendUnit) {
+        let hits = |ins: &Instruction| {
+            ins.ops.iter().any(|op| {
+                locs.iter().any(|l| {
+                    op.article() == Some(&l.article)
+                        && match (&l.paragraph, op.paragraph()) {
+                            (None, _) | (Some(_), None) => true,
+                            (Some(ParaRef::Num(p)), Some(q)) => *p == q,
+                        }
+                })
+            })
+        };
+        let (a, b): (Vec<Instruction>, Vec<Instruction>) =
+            self.instructions.iter().cloned().partition(hits);
+        let mk = |instructions| AmendUnit {
+            article_of_amending_law: self.article_of_amending_law.clone(),
+            target_title: self.target_title.clone(),
+            instructions,
+        };
+        (mk(a), mk(b))
+    }
 }

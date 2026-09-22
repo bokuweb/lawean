@@ -252,6 +252,52 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
     Ok(out)
 }
 
+impl Ante {
+    fn empty() -> Ante {
+        Ante {
+            article: None,
+            paragraph: None,
+            item: None,
+            toc: false,
+            container: Vec::new(),
+            part: None,
+            locs: Vec::new(),
+            suppl: false,
+            appdx: None,
+        }
+    }
+}
+
+/// 附則の範囲欄の、被改正法の側で書かれた改正規定の列挙「医師法第十六条の十一第一項の改正規定及び同法第十七条の改正規定」を
+/// 位置の列に読む（法令名は落とす。「同法」「同条」は直前の位置）。単位を施行日ごとに分ける（`AmendUnit::split_by_locs`）ときに使う
+pub fn parse_scope_locs(scope: &str) -> Result<Vec<Loc>, ParseError> {
+    let mut ante = Ante::empty();
+    let mut out = Vec::new();
+    for tok in scope
+        .split("並びに")
+        .flat_map(|x| x.split("及び"))
+        .flat_map(|x| x.split('、'))
+    {
+        let tok = tok.trim();
+        let Some(tok) = tok.strip_suffix("の改正規定") else {
+            continue;
+        };
+        // 法令名（「医師法」「同法」）を落とす: 最初の「第」「同条」から
+        let start = tok
+            .find("第")
+            .into_iter()
+            .chain(tok.find("同条"))
+            .min()
+            .unwrap_or(tok.len());
+        let tok = &tok[start..];
+        if tok.is_empty() {
+            continue;
+        }
+        out.extend(expand_locs(tok, &mut ante)?);
+    }
+    Ok(out)
+}
+
 #[derive(Clone)]
 struct Ante {
     article: Option<ArticleNum>,
@@ -772,7 +818,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
-            ("renumber_art", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_art", r"^(?:本則中|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
@@ -785,7 +831,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
-            ("insert_arts_after", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
+            ("insert_arts_after", r"^(?:本則中|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
             ("append_sentence", r"^(?P<loc>.+?)に(?:後段として次のように|次のただし書を)加え(?:る)?$"),
         ]
         .iter()

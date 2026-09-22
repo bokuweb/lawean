@@ -755,3 +755,41 @@ fn reiwa5_act52_art1_ryokan_reproduces_egov_revision() {
     .unwrap();
     assert_same_main(&got, &revision("323AC0000000138_20231213_505AC0000000052"));
 }
+
+/// 令和3年法律第49号（医療法等の一部改正、令3-5-28 公布）第5条・第6条（医師法）。医師法の 3 段の施行:
+/// 第5条 → 2023-04-01（附則第一条第六号）、第6条のうち「医師法第十六条の十一第一項の改正規定」→ 本文 2024-04-01、
+/// 第6条の残り → 2025-04-01（第七号「第六条の規定（医師法第十六条の十一第一項の改正規定を除く。）」）。
+/// 1 つの条を号の範囲（被改正法の条で書く「〜の改正規定」）で 2 つの単位に分けて順に当てる
+#[test]
+fn reiwa3_act49_ishi_stages_split_by_the_enforcement_scope() {
+    let u5 = parse_units(&fixture("amendments/503AC0000000049_art5.txt"))
+        .unwrap()
+        .remove(0);
+    let s1 = apply_unit(
+        &revision("323AC0000000201_20230101_504AC0000000047"),
+        &u5,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("323AC0000000201_20230401_503AC0000000049"));
+
+    let u6 = parse_units(&fixture("amendments/503AC0000000049_art6.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs("医師法第十六条の十一第一項の改正規定").unwrap();
+    let (part, rest) = u6.split_by_locs(&locs);
+    assert_eq!(part.instructions.len(), 1);
+    assert!(part.instructions[0]
+        .text
+        .starts_with("第十六条の十一第一項中"));
+    assert_eq!(rest.instructions.len(), u6.instructions.len() - 1);
+    let s2 = apply_unit(
+        &revision("323AC0000000201_20230401_503AC0000000049"),
+        &part,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s2, &revision("323AC0000000201_20240401_503AC0000000049"));
+    let s3 = apply_unit(&s2, &rest, "test").unwrap();
+    assert_same_main(&s3, &revision("323AC0000000201_20250401_503AC0000000049"));
+}
