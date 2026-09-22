@@ -19,6 +19,8 @@ pub struct Loc {
     pub part: Option<SentencePart>,
     /// 「附則第七条第六項」: 原始附則の条（本則ではない。id の世界には載せず、文書の側だけ改める）
     pub suppl: bool,
+    /// 号の下のイロハ（「同号ロ」= `ロ`）。あれば字句の置換をその細目に限る
+    pub sub: Option<String>,
 }
 
 impl Loc {
@@ -29,6 +31,7 @@ impl Loc {
             item: None,
             part: None,
             suppl: false,
+            sub: None,
         }
     }
 }
@@ -164,6 +167,21 @@ pub enum Op {
     AppendItem { at: Loc, text: Vec<String> },
     /// 「同項各号を次のように改める」+ 号の行（全部の号の差し替え）
     ReplaceItems { at: Loc, text: Vec<String> },
+    /// 「同号ロを同号ハとし」「同号中ヘをトとし」: 号の下のイロハの番号の付け替え（`at` は号）
+    RenumberSubitem { at: Loc, from: String, to: String },
+    /// 「ハからホまでをニからヘまでとし」: イロハの範囲を `by` だけずらす
+    ShiftSubitems {
+        at: Loc,
+        from: String,
+        to: String,
+        by: i32,
+    },
+    /// 「同号イの次に次のように加える」+「ロ　本文」: イロハの挿入
+    InsertSubitemAfter {
+        at: Loc,
+        after: String,
+        text: Vec<String>,
+    },
     /// 「第N条第M項第A号及び第B号を次のように改める」「第A号から第C号までを次のように改める」+ 号の行: 挙げた号だけの差し替え。
     /// `items` は号の番号（「3_2」）、`range` は「から…まで」の形（描画用）
     ReplaceItemSet {
@@ -268,7 +286,10 @@ impl Op {
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
             | Op::ReplaceItems { at, .. }
-            | Op::ReplaceItemSet { at, .. } => Some(&at.article),
+            | Op::ReplaceItemSet { at, .. }
+            | Op::RenumberSubitem { at, .. }
+            | Op::ShiftSubitems { at, .. }
+            | Op::InsertSubitemAfter { at, .. } => Some(&at.article),
         }
     }
 
@@ -289,7 +310,10 @@ impl Op {
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
             | Op::ReplaceItems { at, .. }
-            | Op::ReplaceItemSet { at, .. } => match at.paragraph {
+            | Op::ReplaceItemSet { at, .. }
+            | Op::RenumberSubitem { at, .. }
+            | Op::ShiftSubitems { at, .. }
+            | Op::InsertSubitemAfter { at, .. } => match at.paragraph {
                 Some(ParaRef::Num(n)) => Some(n),
                 _ => None,
             },
@@ -316,6 +340,7 @@ impl Op {
                 | Op::AppendItem { .. }
                 | Op::ReplaceItems { .. }
                 | Op::ReplaceItemSet { .. }
+                | Op::InsertSubitemAfter { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -342,6 +367,7 @@ impl Op {
             | Op::AppendItem { text, .. }
             | Op::ReplaceItems { text, .. }
             | Op::ReplaceItemSet { text, .. }
+            | Op::InsertSubitemAfter { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }

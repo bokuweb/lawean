@@ -563,6 +563,7 @@ impl Binder<'_> {
                 art,
                 Some(i),
                 at.item.as_deref(),
+                at.sub.as_deref(),
                 at.part,
                 from,
                 to,
@@ -611,6 +612,7 @@ impl Binder<'_> {
                         art,
                         idx,
                         at.item.as_deref(),
+                        at.sub.as_deref(),
                         at.part,
                         from,
                         to,
@@ -631,6 +633,7 @@ impl Binder<'_> {
                         art,
                         idx,
                         at.item.as_deref(),
+                        at.sub.as_deref(),
                         at.part,
                         anchor,
                         &format!("{anchor}{text}"),
@@ -1201,7 +1204,10 @@ impl Binder<'_> {
                 | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
                 | Op::ReplaceItems { at, .. }
-                | Op::ReplaceItemSet { at, .. } => {
+                | Op::ReplaceItemSet { at, .. }
+                | Op::RenumberSubitem { at, .. }
+                | Op::ShiftSubitems { at, .. }
+                | Op::InsertSubitemAfter { at, .. } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                     let p = paragraph_mut(art, idx);
@@ -1232,6 +1238,27 @@ impl Binder<'_> {
                         }
                         Op::ReplaceItemSet { items, text, .. } => {
                             crate::apply::replace_item_set(p, items, text)?
+                        }
+                        Op::RenumberSubitem { from, to, .. } => crate::apply::renumber_subitem(
+                            p,
+                            at.item.as_deref().unwrap_or(""),
+                            from,
+                            to,
+                        )?,
+                        Op::ShiftSubitems { from, to, by, .. } => crate::apply::shift_subitems(
+                            p,
+                            at.item.as_deref().unwrap_or(""),
+                            from,
+                            to,
+                            *by,
+                        )?,
+                        Op::InsertSubitemAfter { after, text, .. } => {
+                            crate::apply::insert_subitems_after(
+                                p,
+                                at.item.as_deref().unwrap_or(""),
+                                after,
+                                text,
+                            )?
                         }
                         _ => unreachable!(),
                     }

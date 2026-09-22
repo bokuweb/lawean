@@ -85,6 +85,11 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 同条の前に見出しとして「（X）」を付し | `AttachCaption { article, text }`。「第N条を次のように改める」の内容に見出しの行が無ければ今の見出しのまま |
 | 第百条の二第三号及び第四号を次のように改める / 第九十六条第六号から第八号までを次のように改める + 号の行 | `ReplaceItemSet { at, items, range, text }`: 挙げた号だけの差し替え（令5-79 に 6 回） |
 | 同条第四項及び第六項中「A」を削る | 位置の列挙に字句の削除（`Replace` の列挙） |
+| 同号ロ中「A」を「B」に改め | 位置に号の下の細目（`Loc.sub`）。字句の置換をその細目に限る |
+| 同号ロを同号ハとし / 同号中ヘをトとし | `RenumberSubitem { at, from, to }`（令3-44・令3-49） |
+| ハからホまでをニからヘまでとし | `ShiftSubitems { at, from, to, by }` |
+| 同号イの次に次のように加える + 「ロ　本文」 | `InsertSubitemAfter { at, after, text }`。番号は記号の順に付け直す |
+| 第七十六条の二（見出しを含む。）及び第七十七条中「A」を「B」に改める | 見出し（`ReplaceCaption`）と本文の両方 |
 | 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |

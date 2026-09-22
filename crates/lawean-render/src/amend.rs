@@ -95,6 +95,9 @@ fn loc_label(l: &Loc) -> String {
             }
         }
     }
+    if let Some(k) = &l.sub {
+        s.push_str(k);
+    }
     if let Some(p) = l.part {
         s.push_str(part_label(p));
     }
@@ -285,6 +288,24 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::RenumberSubitem { at, from, to } => {
+            format!("{}{from}を{to}と{}", loc_label(at), end("し", "する"))
+        }
+        Op::ShiftSubitems { at, from, to, by } => {
+            let (a, b) = (lawean_amend::kana_index(from), lawean_amend::kana_index(to));
+            format!(
+                "{}{from}から{to}までを{}から{}までと{}",
+                loc_label(at),
+                lawean_amend::kana_of((a as i32 + by) as u32),
+                lawean_amend::kana_of((b as i32 + by) as u32),
+                end("し", "する")
+            )
+        }
+        Op::InsertSubitemAfter { at, after, .. } => format!(
+            "{}{after}の次に次のように{}",
+            loc_label(at),
+            end("加え", "加える")
+        ),
         Op::ReplaceItemSet {
             at, items, range, ..
         } => {
@@ -463,6 +484,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::AppendItem { text, .. }
         | Op::ReplaceItems { text, .. }
         | Op::ReplaceItemSet { text, .. }
+        | Op::InsertSubitemAfter { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }

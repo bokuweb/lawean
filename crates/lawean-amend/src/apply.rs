@@ -61,6 +61,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                         art,
                         idx,
                         at.item.as_deref(),
+                        at.sub.as_deref(),
                         at.part,
                         from,
                         to,
@@ -82,6 +83,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                     art,
                     idx,
                     at.item.as_deref(),
+                    at.sub.as_deref(),
                     at.part,
                     anchor,
                     &format!("{anchor}{text}"),
@@ -312,6 +314,37 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                 replace_item_set(paragraph_mut(art, idx), items, text)?;
+            }
+            Op::RenumberSubitem { at, from, to } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                renumber_subitem(
+                    paragraph_mut(art, idx),
+                    at.item.as_deref().unwrap_or(""),
+                    from,
+                    to,
+                )?;
+            }
+            Op::ShiftSubitems { at, from, to, by } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                shift_subitems(
+                    paragraph_mut(art, idx),
+                    at.item.as_deref().unwrap_or(""),
+                    from,
+                    to,
+                    *by,
+                )?;
+            }
+            Op::InsertSubitemAfter { at, after, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                insert_subitems_after(
+                    paragraph_mut(art, idx),
+                    at.item.as_deref().unwrap_or(""),
+                    after,
+                    text,
+                )?;
             }
             Op::ReplaceParagraph { at, text } => {
                 let art = article_mut(doc, &at.article)?;
@@ -674,7 +707,12 @@ pub(crate) fn para_index(
 // ---------------------------------------------------------------- テキスト操作
 
 /// 項の中の文。`only_item` があればその号（とその下の号）の文だけ
-fn sentences_mut<'a>(p: &'a mut Paragraph, only_item: Option<&str>) -> Vec<&'a mut Sentence> {
+/// 項の文。`only_item` があればその号（とその下の細目）だけ、さらに `only_sub`（「ロ」）があればその細目だけ
+fn sentences_mut<'a>(
+    p: &'a mut Paragraph,
+    only_item: Option<&str>,
+    only_sub: Option<&str>,
+) -> Vec<&'a mut Sentence> {
     fn item<'a>(i: &'a mut Item, out: &mut Vec<&'a mut Sentence>) {
         match &mut i.body {
             ItemBody::Sentences(ss) => out.extend(ss.iter_mut()),
@@ -698,6 +736,15 @@ fn sentences_mut<'a>(p: &'a mut Paragraph, only_item: Option<&str>) -> Vec<&'a m
         if let ParagraphChild::Item(i) = c {
             match only_item {
                 Some(n) if i.num.as_deref() != Some(n) => {}
+                Some(_) if only_sub.is_some() => {
+                    for c in &mut i.children {
+                        if let ItemChild::Subitem(s) = c {
+                            if s.title.as_ref().map(|t| inline_text(t)).as_deref() == only_sub {
+                                item(s, &mut out);
+                            }
+                        }
+                    }
+                }
                 _ => item(i, &mut out),
             }
         }
@@ -763,10 +810,12 @@ fn replace_protected(t: &str, from: &str, to: &str, protect: &[String]) -> (Stri
 
 /// `part` があれば、その文（ただし書・本文・前段・後段・各号列記以外の部分）だけで置き換える。
 /// `protect` は同じ文で先に加えた字句（その中は置き換えない）
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn replace_in_article_part(
     art: &mut Article,
     idx: Option<usize>,
     item: Option<&str>,
+    sub: Option<&str>,
     part: Option<SentencePart>,
     from: &str,
     to: &str,
@@ -782,7 +831,7 @@ pub(crate) fn replace_in_article_part(
             let p = paragraph_mut(art, i);
             // 号があればその号の文、無ければ項の文（各号列記以外の部分）の中で、部分を選ぶ
             let mut ss: Vec<&mut Sentence> = match (item, part) {
-                (Some(_), _) => sentences_mut(p, item),
+                (Some(_), _) => sentences_mut(p, item, sub),
                 (None, _) => p.sentences.iter_mut().collect(),
             };
             let mains: Vec<usize> = ss
@@ -819,7 +868,7 @@ pub(crate) fn replace_in_article_part(
         if idx.is_some_and(|j| j != i) {
             continue;
         }
-        for s in sentences_mut(paragraph_mut(art, i), item) {
+        for s in sentences_mut(paragraph_mut(art, i), item, sub) {
             n += replace_in_sentence(s, from, to, protect);
         }
     }
@@ -1276,6 +1325,100 @@ pub(crate) fn append_subitems(
             other => other,
         };
         slot.children.push(c);
+    }
+    Ok(())
+}
+
+fn subitems_mut<'a>(p: &'a mut Paragraph, num: &str) -> Result<&'a mut Item, ApplyError> {
+    items_mut(p)
+        .into_iter()
+        .find(|i| i.num.as_deref() == Some(num))
+        .ok_or_else(|| ApplyError::BadContent(format!("第{num}号が無い")))
+}
+
+fn sub_title(i: &Item) -> String {
+    i.title.as_ref().map(|t| inline_text(t)).unwrap_or_default()
+}
+
+/// 「同号ロを同号ハとし」: 細目の記号（題）と番号を変える
+pub(crate) fn renumber_subitem(
+    p: &mut Paragraph,
+    num: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
+    let slot = subitems_mut(p, num)?;
+    let s = slot
+        .children
+        .iter_mut()
+        .find_map(|c| match c {
+            ItemChild::Subitem(s) if sub_title(s) == from => Some(s),
+            _ => None,
+        })
+        .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{from}が無い")))?;
+    s.title = Some(vec![Inline::Text(to.to_string())]);
+    s.num = Some(crate::parse::kana_index(to).to_string());
+    Ok(())
+}
+
+/// 「ハからホまでをニからヘまでとし」: 記号の範囲を `by` だけずらす（重ならない順に）
+pub(crate) fn shift_subitems(
+    p: &mut Paragraph,
+    num: &str,
+    from: &str,
+    to: &str,
+    by: i32,
+) -> Result<(), ApplyError> {
+    let (a, b) = (crate::parse::kana_index(from), crate::parse::kana_index(to));
+    let mut order: Vec<u32> = (a..=b).collect();
+    if by > 0 {
+        order.reverse();
+    }
+    for k in order {
+        let kf = crate::parse::kana_of(k);
+        let kt = crate::parse::kana_of((k as i32 + by) as u32);
+        renumber_subitem(p, num, &kf, &kt)?;
+    }
+    Ok(())
+}
+
+/// 「同号イの次に次のように加える」+「ロ　本文」: 細目の挿入（番号は記号の順に付け直す）
+pub(crate) fn insert_subitems_after(
+    p: &mut Paragraph,
+    num: &str,
+    after: &str,
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    let mut tmp = vec!["仮".to_string(), "一\u{3000}仮".to_string()];
+    tmp.extend(lines.iter().cloned());
+    let parsed = parse_paragraphs(&tmp)?;
+    let subs: Vec<ItemChild> = parsed
+        .into_iter()
+        .next()
+        .and_then(|q| {
+            q.children.into_iter().find_map(|c| match c {
+                ParagraphChild::Item(i) => Some(i.children),
+                _ => None,
+            })
+        })
+        .unwrap_or_default();
+    if subs.is_empty() {
+        return Err(ApplyError::BadContent("イロハの内容が読めない".into()));
+    }
+    let slot = subitems_mut(p, num)?;
+    let pos = slot
+        .children
+        .iter()
+        .position(|c| matches!(c, ItemChild::Subitem(s) if sub_title(s) == after))
+        .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{after}が無い")))?;
+    for (k, c) in subs.into_iter().enumerate() {
+        slot.children.insert(pos + 1 + k, c);
+    }
+    for c in &mut slot.children {
+        if let ItemChild::Subitem(s) = c {
+            let t = sub_title(s);
+            s.num = Some(crate::parse::kana_index(&t).to_string());
+        }
     }
     Ok(())
 }
@@ -1946,6 +2089,7 @@ pub(crate) fn expand_range(doc: &LegalDocument, at: &Loc) -> Vec<Loc> {
                 item: at.item.clone(),
                 part: None,
                 suppl: false,
+                sub: None,
             })
             .collect(),
         _ => vec![at.clone()],

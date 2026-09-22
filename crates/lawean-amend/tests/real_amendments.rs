@@ -292,6 +292,7 @@ fn generated_hane_fixes_match_the_real_amendment() {
                 item: None,
                 part: None,
                 suppl: false,
+                sub: None,
             },
             from: "前項".into(),
             to: "第三項".into(),
@@ -861,4 +862,19 @@ fn reiwa3_act44_art5_engan_gyogyo_reproduces_egov_revision() {
     assert_eq!(caption(&got, "7"), caption(&exp, "7"));
     assert_eq!(caption(&got, "8"), caption(&exp, "8"));
     assert_eq!(caption(&got, "7").as_deref(), Some("（貸付資格の認定）"));
+}
+
+/// 令和3年法律第44号 第4条（中小漁業融資保証法、2022-04-01）。号の下のイロハ:
+/// 「同号ロ中「イに」を「イ及びロに」に改め、同号ロを同号ハとし、同号イの次に次のように加える」+「ロ　沿岸漁業改善資金」、
+/// 「第七十六条の二（見出しを含む。）及び第七十七条中「A」を「B」に改める」
+#[test]
+fn reiwa3_act44_art4_chusho_gyogyo_yushi_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art4.txt")).unwrap();
+    let got = apply_unit(
+        &revision("327AC0000000346_20210901_503AC0000000037"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC0000000346_20220401_503AC0000000044"));
 }
