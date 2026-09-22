@@ -576,3 +576,100 @@ fn reiwa7_act47_other_six_laws_reproduce_egov_revisions() {
         );
     }
 }
+
+/// 同 第10条: 地方税法の原始附則の条（「附則第十五条の九の三第一項中」、枝番つき）の字句改め。
+/// 地方税法の XML は 12MB あるので fixture に入れない（`.gitignore`）。手元に無ければ飛ばす
+#[test]
+fn reiwa7_act47_art10_chihozei_suppl_article_is_amended() {
+    let root = format!("{}/../../fixtures/revisions", env!("CARGO_MANIFEST_DIR"));
+    let before = format!("{root}/325AC0000000226_20251121_507AC0000000007.xml");
+    let after = format!("{root}/325AC0000000226_20251128_507AC0000000047.xml");
+    if !std::path::Path::new(&before).exists() || !std::path::Path::new(&after).exists() {
+        eprintln!("skip: 地方税法の XML が無い（e-Gov から取ってくる）");
+        return;
+    }
+    let read = |p: &str| parse_response(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let units = parse_units(&fixture("amendments/507AC0000000047_art10.txt")).unwrap();
+    let got = apply_unit(&read(&before), &units[0], "test").unwrap();
+    let want = read(&after);
+    // 本則は変わらない
+    assert_same_main(&got, &want);
+    // 原始附則第15条の9の3第1項が e-Gov と一致する
+    let suppl_text = |d: &LegalDocument| -> String {
+        let sp = d
+            .suppl_provisions
+            .iter()
+            .find(|s| s.amend_law_num.is_none())
+            .unwrap();
+        for c in &sp.children {
+            if let SupplChild::Provision(Provision::Article(a)) = c {
+                if a.num.to_num_string() == "15_9_3" {
+                    return lawean_amend::para_text(match &a.children[0] {
+                        ArticleChild::Paragraph(p) => p,
+                        _ => panic!(),
+                    });
+                }
+            }
+        }
+        panic!("附則第十五条の九の三が無い")
+    };
+    let (g, w) = (suppl_text(&got), suppl_text(&want));
+    assert!(g.contains("第五条の二十第一項"), "{g}");
+    assert_eq!(g, w);
+}
+
+/// 同 第9条: 地方自治法 別表第二の「マンションの建替え等の円滑化に関する法律の項」の字句改め（別表の行）。
+/// 地方自治法の XML は 2.4MB あるので fixture に入れない。手元に無ければ飛ばす。
+/// 突き合わせは別表の行の本文（本則は e-Gov の 2 つの版の間で他の法律も変えているので見ない）
+#[test]
+fn reiwa7_act47_art9_chihojichi_appendix_row_is_amended() {
+    let root = format!("{}/../../fixtures/revisions", env!("CARGO_MANIFEST_DIR"));
+    let before = format!("{root}/322AC0000000067_20251001_507AC0000000022.xml");
+    let after = format!("{root}/322AC0000000067_20260401_507AC0000000047.xml");
+    if !std::path::Path::new(&before).exists() || !std::path::Path::new(&after).exists() {
+        eprintln!("skip: 地方自治法の XML が無い");
+        return;
+    }
+    let read = |p: &str| parse_response(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let units = parse_units(&fixture("amendments/507AC0000000047_art9.txt")).unwrap();
+    let got = apply_unit(&read(&before), &units[0], "test").unwrap();
+    let want = read(&after);
+    let row = |d: &LegalDocument, key: &str| -> String {
+        for ap in &d.appendices {
+            let x = ap.to_xml();
+            if let Some(i) = x.find(key) {
+                let j = x[..i].rfind("<TableRow").unwrap();
+                let k = x[i..].find("</TableRow>").unwrap() + i;
+                let t = regex_strip(&x[j..k]);
+                return t;
+            }
+        }
+        panic!("{key} の項が無い")
+    };
+    fn regex_strip(x: &str) -> String {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for c in x.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                c if !in_tag && !c.is_whitespace() => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    }
+    let g = row(
+        &got,
+        "マンションの再生等の円滑化に関する法律（平成十四年法律第七十八号）",
+    );
+    let w = row(
+        &want,
+        "マンションの再生等の円滑化に関する法律（平成十四年法律第七十八号）",
+    );
+    assert_eq!(g, w);
+    assert!(
+        g.contains("第九条第六項") && g.contains("第九十七条第一項及び第三項"),
+        "{g}"
+    );
+}

@@ -48,6 +48,8 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
     let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
     // この文で加えた字句（後の置換はその中を指さない）
     let mut inserted: Vec<String> = Vec::new();
+    // 別表の行は文の始まりの上欄で引く（同じ文の最初の置換で上欄が変わっても、後の置換は同じ行）
+    let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
     for op in &ins.ops {
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
@@ -190,6 +192,12 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let new = parse_containers(text)?;
                 replace_containers(doc, paths, new)?;
             }
+            Op::ReplaceAppdxRow {
+                table,
+                row,
+                from,
+                to,
+            } => replace_appdx_row(doc, table, row, from, to, &mut appdx_rows)?,
             Op::ReplaceCaption { article, from, to } => {
                 let art = article_mut(doc, article)?;
                 let cur = art
@@ -1505,6 +1513,93 @@ pub(crate) fn replace_containers(
         }
     }
     Ok(())
+}
+
+/// 別表の行の字句を改める。表は `AppdxTableTitle` が `table`（「別表第二」）で始まるもの、
+/// 行は最初の欄の本文（空白を除く）が `row` で始まる `TableRow`。行の中の全部の文で置き換える
+pub(crate) fn replace_appdx_row(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    from: &str,
+    to: &str,
+    rows: &mut BTreeMap<(String, String), usize>,
+) -> Result<(), ApplyError> {
+    fn text_of(e: &Element) -> String {
+        strip_ws(&e.text())
+    }
+    /// 表の中の TableRow を文書順に集める
+    fn all_rows<'a>(e: &'a mut Element, out: &mut Vec<&'a mut Element>) {
+        if e.name == "TableRow" {
+            out.push(e);
+            return;
+        }
+        for c in &mut e.children {
+            if let Node::Element(x) = c {
+                all_rows(x, out);
+            }
+        }
+    }
+    fn replace_in(e: &mut Element, from: &str, to: &str) -> usize {
+        let mut n = 0;
+        for c in &mut e.children {
+            match c {
+                Node::Text(t) => {
+                    let (nt, k) = replace_protected(t, from, to, &[]);
+                    n += k;
+                    *t = nt;
+                }
+                Node::Element(x) => n += replace_in(x, from, to),
+            }
+        }
+        n
+    }
+    let key = strip_ws(row);
+    for ap in doc.appendices.iter_mut() {
+        let title = ap
+            .children
+            .iter()
+            .find_map(|c| match c {
+                Node::Element(x) if x.name.ends_with("Title") => Some(text_of(x)),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if !title.starts_with(table) {
+            continue;
+        }
+        let mut all: Vec<&mut Element> = Vec::new();
+        all_rows(ap, &mut all);
+        let idx = match rows.get(&(table.to_string(), key.clone())) {
+            Some(i) => *i,
+            None => {
+                let i = all
+                    .iter()
+                    .position(|r| {
+                        r.children
+                            .iter()
+                            .find_map(|c| match c {
+                                Node::Element(x) if x.name == "TableColumn" => Some(text_of(x)),
+                                _ => None,
+                            })
+                            .is_some_and(|t| t.starts_with(&key))
+                    })
+                    .ok_or_else(|| {
+                        ApplyError::BadContent(format!("{table}に「{row}」の項が無い"))
+                    })?;
+                rows.insert((table.to_string(), key.clone()), i);
+                i
+            }
+        };
+        let r = &mut *all[idx];
+        if replace_in(r, from, to) == 0 {
+            return Err(ApplyError::PhraseNotFound {
+                at: format!("{table}{row}の項"),
+                phrase: from.to_string(),
+            });
+        }
+        return Ok(());
+    }
+    Err(ApplyError::BadContent(format!("{table}が無い")))
 }
 
 /// 「第三章の章名を削る」: 題名を消す。番号は残す（続く「第三章第二節から第五節までを削る」が指す）。

@@ -119,6 +119,14 @@ pub enum Op {
         articles: Vec<ArticleNum>,
         text: Vec<String>,
     },
+    /// 「別表第二X法（…）の項中「A」を「B」に改める」: 別表の行（上欄が `row` で始まる行）の字句。
+    /// 「の下に「B」を加える」は `to = A + B`
+    ReplaceAppdxRow {
+        table: String,
+        row: String,
+        from: String,
+        to: String,
+    },
     /// 「第四章及び第五章を次のように改める」+ 章の内容
     ReplaceContainers {
         paths: Vec<Vec<(lawean_source::ContainerKind, String)>>,
@@ -216,7 +224,8 @@ impl Op {
             | Op::SetContainerTitle { .. }
             | Op::DeleteContainerTitle { .. }
             | Op::DeleteContainers { .. }
-            | Op::ReplaceContainers { .. } => None,
+            | Op::ReplaceContainers { .. }
+            | Op::ReplaceAppdxRow { .. } => None,
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }

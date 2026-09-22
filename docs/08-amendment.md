@@ -87,6 +87,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 目次中「A」を削り / 第二章の章名中「A」を削る | `ReplaceToc` / `ReplaceContainerTitle` の `to` が空 |
 | 第二章の二（枝番の章・節）/ 同号の前に次の一号を加える / 第一号から第四号までの規定中 | 容器の番号は「2_2」（`String`）/ `InsertItemBefore` / 号の範囲の展開 |
 
+| 別表第二X法（…）の項中「A」を「B」に、「C」の下に「D」を加える | `ReplaceAppdxRow { table, row, from, to }`（別表の行。上欄が `row` で始まる行を文の始まりで引き、行の中の字句を改める。本則ではないので文書の側だけ） |
 | 附則第七条第六項中「A」を「B」に改める | `Loc.suppl`（原始附則の条。id の世界には無いので文書の側だけ） |
 | 目次及び第三章第四節の節名中「A」の下に「B」を加える | 位置の列挙に目次・節名・見出しが混じる形（字句の追加も） |
 

@@ -211,6 +211,19 @@ fn segment(op: &Op, last: bool) -> String {
             kind_label(*kind),
             end("削り", "削る")
         ),
+        Op::ReplaceAppdxRow {
+            table,
+            row,
+            from,
+            to,
+        } => format!(
+            "{table}{row}の項中「{from}」を{}",
+            if to.is_empty() {
+                end("削り", "削る").to_string()
+            } else {
+                format!("「{to}」に{}", end("改め", "改める"))
+            }
+        ),
         Op::ReplaceContainers { paths, .. } => format!(
             "{}を次のように{}",
             paths
@@ -429,6 +442,7 @@ pub fn render_instruction(ins: &Instruction) -> String {
     let phrase_loc = |op: &Op| match op {
         Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(loc_label(at)),
         Op::ReplaceToc { .. } => Some("目次".to_string()),
+        Op::ReplaceAppdxRow { table, row, .. } => Some(format!("{table}{row}の項")),
         _ => None,
     };
     for (i, op) in ins.ops.iter().enumerate() {
