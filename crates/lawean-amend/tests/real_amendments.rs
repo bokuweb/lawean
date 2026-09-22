@@ -290,6 +290,7 @@ fn generated_hane_fixes_match_the_real_amendment() {
                 },
                 paragraph: Some(ParaRef::Num(3)),
                 item: None,
+                part: None,
             },
             from: "前項".into(),
             to: "第三項".into(),

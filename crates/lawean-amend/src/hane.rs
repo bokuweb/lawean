@@ -143,6 +143,17 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                 Op::Replace { at, from, to } => {
                     replaced.push((at.clone(), from.clone(), to.clone()))
                 }
+                // 項・条・文の全部の差し替えは、その中の参照を全部手当てしたのと同じ（from を空にして印にする）
+                Op::ReplaceParagraph { at, .. }
+                | Op::ReplaceSentencePart { at, .. }
+                | Op::DeleteSentencePart { at, .. } => {
+                    replaced.push((at.clone(), String::new(), String::new()))
+                }
+                Op::ReplaceArticle { article, .. } => replaced.push((
+                    Loc::new(article.clone(), None),
+                    String::new(),
+                    String::new(),
+                )),
                 _ => {}
             }
         }
@@ -175,9 +186,16 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                 };
                 // 「同項」「同条」は直前の参照（先行詞）に追随する。先行詞の側で判定するので、ここでは扱わない
                 // 「前各項」は挿入があっても「前の全部」のままなので手当て不要
+                // 号の参照（「前号」「第四号」）は項の番号が動いても変わらない
                 if matches!(
                     r.span.parsed.kind,
-                    RefKind::SameParagraph | RefKind::SameArticle | RefKind::AllPrevParagraphs
+                    RefKind::SameParagraph
+                        | RefKind::SameArticle
+                        | RefKind::AllPrevParagraphs
+                        | RefKind::Item(_)
+                        | RefKind::PrevItem(_)
+                        | RefKind::NextItem
+                        | RefKind::AllPrevItems
                 ) {
                     continue;
                 }
@@ -239,10 +257,13 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                         let rewritten = replaced.iter().any(|(loc, from_text, _)| {
                             at_here(loc)
                                 && from_text != &r.span.text
-                                && from_text.contains(&r.span.text)
+                                && (from_text.is_empty() || from_text.contains(&r.span.text))
                         });
-                        let handled =
-                            rewritten || found.iter().any(|to| fixes_to(to, new_tp, new_sp));
+                        // 置換先が別の条を指す（「次項」→「次条第一項」）のは番号違いではなく指す先の付け替え
+                        let handled = rewritten
+                            || found
+                                .iter()
+                                .any(|to| fixes_to(to, new_tp, new_sp) || to.contains('条'));
                         let fix = new_tp.map(|nt| {
                             render_fix(&r.span.text, &r.span.parsed.kind, tp, nt, new_sp)
                         });
@@ -257,6 +278,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                                         .nth(1)
                                         .and_then(|x| x.split('/').next())
                                         .map(String::from),
+                                    part: None,
                                 },
                                 from: r.span.text.clone(),
                                 to: f.clone(),
@@ -402,7 +424,9 @@ fn article_hane_candidates(
                     .map(|(_, _, to)| to)
                     .collect();
                 let rewritten = replaced.iter().any(|(loc, from_text, _)| {
-                    at_here(loc) && from_text != &r.span.text && from_text.contains(&r.span.text)
+                    at_here(loc)
+                        && from_text != &r.span.text
+                        && (from_text.is_empty() || from_text.contains(&r.span.text))
                 });
                 let handled = rewritten
                     || found.iter().any(|to| to.contains(&new_label))
@@ -421,6 +445,7 @@ fn article_hane_candidates(
                                 .nth(1)
                                 .and_then(|x| x.split('/').next())
                                 .map(String::from),
+                            part: None,
                         },
                         from: r.span.text.clone(),
                         to: f.clone(),
@@ -518,7 +543,9 @@ fn refine_candidates(
                     .map(|(_, _, to)| to)
                     .collect();
                 let rewritten = replaced.iter().any(|(loc, from_text, _)| {
-                    at_here(loc) && from_text != &r.span.text && from_text.contains(&r.span.text)
+                    at_here(loc)
+                        && from_text != &r.span.text
+                        && (from_text.is_empty() || from_text.contains(&r.span.text))
                 });
                 let fix = format!("{}第一項", r.span.text);
                 let handled = rewritten || found.iter().any(|to| to.contains("第一項"));
@@ -534,6 +561,7 @@ fn refine_candidates(
                             article: src_art.clone(),
                             paragraph: Some(ParaRef::Num(p)),
                             item: None,
+                            part: None,
                         },
                         from: r.span.text.clone(),
                         to: fix.clone(),

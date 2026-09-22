@@ -15,6 +15,8 @@ pub struct Loc {
     pub paragraph: Option<ParaRef>,
     /// 号（「第三号の二」= `3_2`）。あれば字句の置換をその号（とその下の号）に限る
     pub item: Option<String>,
+    /// 「ただし書」「本文」「前段」「後段」「各号列記以外の部分」。あれば字句の置換をその文に限る
+    pub part: Option<SentencePart>,
 }
 
 impl Loc {
@@ -23,6 +25,7 @@ impl Loc {
             article,
             paragraph,
             item: None,
+            part: None,
         }
     }
 }
@@ -50,12 +53,30 @@ pub enum Op {
         after: ParaRef,
         text: Vec<String>,
     },
-    /// 「第N章に次の一条を加える」
-    AppendArticle { chapter: u32, text: Vec<String> },
-    /// 「第N章の次に次の一章を加える」+ 章の内容（「第M章　題名」「第一節　…」「（見出し）」「第K条　本文」…）
-    InsertChapterAfter { after: u32, text: Vec<String> },
-    /// 「第N章を第M章とする」
-    RenumberChapter { from: u32, to: u32 },
+    /// 「第N章に次の一条を加える」「第一章第八節に次の七条を加える」。`path` は外側から (章/節/款/目, 番号)
+    AppendArticle {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        text: Vec<String>,
+    },
+    /// 「同項後段を削る」「同項ただし書を削る」
+    DeleteSentencePart { at: Loc, part: SentencePart },
+    /// 「第一章第八節の節名中「A」を「B」に改める」「第N章の章名中…」。`path` は外側から (章/節/款/目, 番号)
+    ReplaceContainerTitle {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        from: String,
+        to: String,
+    },
+    /// 「第N章の次に次の一章を加える」「第一章中第五節の次に次の二節を加える」+ 内容
+    /// （「第M章　題名」「第一節　…」「（見出し）」「第K条　本文」…）。`path` は外側から (章/節/款/目, 番号)
+    InsertContainersAfter {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        text: Vec<String>,
+    },
+    /// 「第N章を第M章とする」「第一章中第八節を第十節とする」
+    RenumberContainer {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        to: u32,
+    },
     /// 「第N条の次に次の一条を加える」
     InsertArticleAfter {
         after: ArticleNum,
@@ -68,6 +89,8 @@ pub enum Op {
         article: ArticleNum,
         text: Vec<String>,
     },
+    /// 「第N条第M項を次のように改める」+ 本文（号を含んでよい）。項の本文の全部の差し替え
+    ReplaceParagraph { at: Loc, text: Vec<String> },
     /// 「第N条中第P項を第Q項とし」「同項を同条第D項とし」
     RenumberParagraph {
         article: ArticleNum,
@@ -108,6 +131,12 @@ pub enum Op {
 pub enum SentencePart {
     Front,
     Back,
+    /// ただし書
+    Proviso,
+    /// 本文（ただし書を除く文）
+    Main,
+    /// 各号列記以外の部分（項の文。号を除く）
+    Chapeau,
 }
 
 impl Op {
@@ -116,8 +145,9 @@ impl Op {
         match self {
             Op::ReplaceToc { .. }
             | Op::AppendArticle { .. }
-            | Op::InsertChapterAfter { .. }
-            | Op::RenumberChapter { .. } => None,
+            | Op::InsertContainersAfter { .. }
+            | Op::RenumberContainer { .. }
+            | Op::ReplaceContainerTitle { .. } => None,
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
             | Op::AppendSentence { at, .. }
@@ -131,7 +161,9 @@ impl Op {
             Op::RenumberArticle { from, .. } => Some(from),
             Op::ShiftArticles { .. } => None,
             Op::ReplaceCaption { article, .. } | Op::SetCaption { article, .. } => Some(article),
-            Op::ReplaceSentencePart { at, .. } => Some(&at.article),
+            Op::ReplaceSentencePart { at, .. }
+            | Op::DeleteSentencePart { at, .. }
+            | Op::ReplaceParagraph { at, .. } => Some(&at.article),
         }
     }
 
@@ -142,10 +174,11 @@ impl Op {
             Op::AppendParagraph { .. }
                 | Op::InsertParagraphAfter { .. }
                 | Op::AppendArticle { .. }
-                | Op::InsertChapterAfter { .. }
+                | Op::InsertContainersAfter { .. }
                 | Op::InsertArticleAfter { .. }
                 | Op::AppendSentence { .. }
                 | Op::ReplaceArticle { .. }
+                | Op::ReplaceParagraph { .. }
                 | Op::ReplaceSentencePart { .. }
         )
     }
@@ -155,10 +188,11 @@ impl Op {
             Op::AppendParagraph { text, .. }
             | Op::InsertParagraphAfter { text, .. }
             | Op::AppendArticle { text, .. }
-            | Op::InsertChapterAfter { text, .. }
+            | Op::InsertContainersAfter { text, .. }
             | Op::InsertArticleAfter { text, .. }
             | Op::AppendSentence { text, .. }
             | Op::ReplaceArticle { text, .. }
+            | Op::ReplaceParagraph { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             _ => {}
         }

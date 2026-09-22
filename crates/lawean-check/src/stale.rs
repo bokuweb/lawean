@@ -491,8 +491,9 @@ fn content_of(op: &Op) -> Vec<String> {
         | Op::InsertParagraphAfter { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertArticleAfter { text, .. }
-        | Op::InsertChapterAfter { text, .. }
+        | Op::InsertContainersAfter { text, .. }
         | Op::ReplaceArticle { text, .. }
+        | Op::ReplaceParagraph { text, .. }
         | Op::AppendSentence { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text.clone(),
         _ => vec![],

@@ -21,6 +21,33 @@ pub fn article_label(n: &ArticleNum) -> String {
     }
 }
 
+fn part_label(p: SentencePart) -> &'static str {
+    match p {
+        SentencePart::Front => "前段",
+        SentencePart::Back => "後段",
+        SentencePart::Proviso => "ただし書",
+        SentencePart::Main => "本文",
+        SentencePart::Chapeau => "各号列記以外の部分",
+    }
+}
+
+fn path_label(path: &[(lawean_source::ContainerKind, u32)]) -> String {
+    path.iter()
+        .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
+        .collect()
+}
+
+fn kind_label(k: lawean_source::ContainerKind) -> &'static str {
+    use lawean_source::ContainerKind::*;
+    match k {
+        Part => "編",
+        Chapter => "章",
+        Section => "節",
+        Subsection => "款",
+        Division => "目",
+    }
+}
+
 fn loc_label(l: &Loc) -> String {
     let mut s = match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("{}第{}項", article_label(&l.article), to_kanji(*n)),
@@ -35,6 +62,9 @@ fn loc_label(l: &Loc) -> String {
                 s.push_str(&format!("の{}", to_kanji(b)));
             }
         }
+    }
+    if let Some(p) = l.part {
+        s.push_str(part_label(p));
     }
     s
 }
@@ -82,22 +112,47 @@ fn segment(op: &Op, last: bool) -> String {
                 end("加え", "加える")
             )
         }
-        Op::InsertChapterAfter { after, .. } => format!(
-            "第{}章の次に次の一章を{}",
-            to_kanji(*after),
-            end("加え", "加える")
-        ),
-        Op::RenumberChapter { from, to } => format!(
-            "第{}章を第{}章と{}",
-            to_kanji(*from),
+        Op::InsertContainersAfter { path, text } => {
+            let kind = path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章");
+            let n = text
+                .iter()
+                .filter(|l| {
+                    l.trim_start_matches('\u{3000}').starts_with('第')
+                        && l.split_once('\u{3000}')
+                            .is_some_and(|(t, _)| t.ends_with(kind))
+                })
+                .count()
+                .max(1);
+            format!(
+                "{}の次に次の{}{kind}を{}",
+                path_label(path),
+                to_kanji(n as u32),
+                end("加え", "加える")
+            )
+        }
+        Op::RenumberContainer { path, to } => format!(
+            "{}を第{}{}と{}",
+            path_label(path),
             to_kanji(*to),
+            path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章"),
             end("し", "する")
         ),
-        Op::AppendArticle { chapter, .. } => format!(
-            "第{}章に次の一条を{}",
-            to_kanji(*chapter),
+        Op::AppendArticle { path, text } => format!(
+            "{}に次の{}条を{}",
+            path.iter()
+                .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
+                .collect::<String>(),
+            to_kanji(
+                text.iter()
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
+                    .count()
+                    .max(1) as u32
+            ),
             end("加え", "加える")
         ),
+        Op::ReplaceParagraph { at, .. } => {
+            format!("{}を次のように{}", loc_label(at), end("改め", "改める"))
+        }
         Op::ReplaceArticle { article, .. } => format!(
             "{}を次のように{}",
             article_label(article),
@@ -167,6 +222,14 @@ fn segment(op: &Op, last: bool) -> String {
                 end("上げ", "上げる")
             }
         ),
+        Op::ReplaceContainerTitle { path, from, to } => format!(
+            "{}の{}名中「{from}」を「{to}」に{}",
+            path.iter()
+                .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
+                .collect::<String>(),
+            path.last().map(|(k, _)| kind_label(*k)).unwrap_or(""),
+            end("改め", "改める")
+        ),
         Op::ReplaceCaption { article, from, to } => format!(
             "{}の見出し中「{from}」を「{to}」に{}",
             article_label(article),
@@ -180,11 +243,14 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceSentencePart { at, part, .. } => format!(
             "{}{}を次のように{}",
             loc_label(at),
-            match part {
-                SentencePart::Front => "前段",
-                SentencePart::Back => "後段",
-            },
+            part_label(*part),
             end("改め", "改める")
+        ),
+        Op::DeleteSentencePart { at, part } => format!(
+            "{}{}を{}",
+            loc_label(at),
+            part_label(*part),
+            end("削り", "削る")
         ),
     }
 }
@@ -194,10 +260,11 @@ fn content_of(op: &Op) -> &[String] {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
         | Op::AppendArticle { text, .. }
-        | Op::InsertChapterAfter { text, .. }
+        | Op::InsertContainersAfter { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::AppendSentence { text, .. }
         | Op::ReplaceArticle { text, .. }
+        | Op::ReplaceParagraph { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text,
         _ => &[],
     }
