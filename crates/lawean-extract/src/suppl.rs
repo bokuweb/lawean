@@ -341,8 +341,28 @@ pub fn spec_from_text(text: &str, promulgated: Option<Date>) -> EnforcementSpec 
         main: None,
         items: vec![],
     };
+    // 号の行「一　<範囲>　<施行期日>」（制定法律の体裁）。範囲欄と日付欄は最後の全角空白で分ける
+    static ITEM: OnceLock<Regex> = OnceLock::new();
+    let item = ITEM
+        .get_or_init(|| Regex::new(r"^[　 ]*[一二三四五六七八九十]+　(.+)　([^　]+)$").unwrap());
+    let mut items_seen = false;
+    for line in text.lines() {
+        if let Some(c) = item.captures(line.trim_end()) {
+            items_seen = true;
+            let date = c[2].to_string();
+            spec.items.push(EnforcementItem {
+                scope: c[1].to_string(),
+                clause: EnforcementClause {
+                    enforcement: parse_enforcement(&format!("{date}から施行する。")),
+                    text: date,
+                },
+            });
+        }
+    }
     let sentences: Vec<String> = text
-        .split(['。', '\n'])
+        .lines()
+        .filter(|l| !item.is_match(l.trim_end()))
+        .flat_map(|l| l.split('。'))
         .map(|s| {
             s.trim()
                 .trim_start_matches(|c: char| c == '第' || c.is_whitespace())
@@ -366,6 +386,10 @@ pub fn spec_from_text(text: &str, promulgated: Option<Date>) -> EnforcementSpec 
                 enforcement: parse_enforcement(s),
                 text: s.clone(),
             });
+            continue;
+        }
+        // 「ただし、次の各号に掲げる規定は、当該各号に定める日から施行する」は号の見出し
+        if items_seen && s.contains("各号") {
             continue;
         }
         for (scope, e) in enforcement_list(s) {
@@ -492,6 +516,77 @@ mod tests {
         assert_eq!(main, vec![1, 4, 5, 6, 9]);
         let suppl: Vec<u32> = a.iter().filter(|r| r.suppl).map(|r| r.from).collect();
         assert_eq!(suppl, vec![45, 48, 71, 73]);
+    }
+
+    /// 令5-63 附則第一条第一号「第一条及び第二条の規定並びに附則第七条、第十九条及び第二十条の規定　公布の日」:
+    /// 本則第7条は号に無いので本文。None で引くと附則第7条に落ちる（呼ぶ側は本則か附則かを必ず言う）
+    #[test]
+    fn main_article_does_not_fall_back_to_the_suppl_article_of_the_same_number() {
+        let spec = EnforcementSpec {
+            amend_law_num: None,
+            promulgated: Some((2023, 6, 16)),
+            main: Some(EnforcementClause {
+                enforcement: Some(Enforcement::ByCabinetOrderWithin(crate::temporal::Dur {
+                    n: 1,
+                    unit: Unit::Year,
+                })),
+                text: "本文".into(),
+            }),
+            items: vec![EnforcementItem {
+                scope: "第一条及び第二条の規定並びに附則第七条、第十九条及び第二十条の規定".into(),
+                clause: EnforcementClause {
+                    enforcement: Some(Enforcement::Promulgation),
+                    text: "公布の日".into(),
+                },
+            }],
+        };
+        assert_eq!(spec.for_article(7, Some(false)).unwrap().0.text, "本文");
+        assert_eq!(spec.for_article(7, Some(true)).unwrap().0.text, "公布の日");
+        assert_eq!(spec.for_article(2, Some(false)).unwrap().0.text, "公布の日");
+    }
+
+    /// 起草中の附則を平文で書くときの号の形（衆議院の制定法律の体裁）: 「一　<範囲>　<施行期日>」。
+    /// 令5-63 附則第一条。号の範囲欄は列に分かれていないので、最後の全角空白で範囲と日付に分ける
+    #[test]
+    fn spec_from_text_reads_items() {
+        let t = "第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。ただし、次の各号に掲げる規定は、当該各号に定める日から施行する。
+　一　第一条及び第二条の規定並びに附則第七条、第十九条及び第二十条の規定　公布の日
+　二　第四条、第十三条及び第二十条の規定、第二十一条中内航海運業法第六条第一項第二号の改正規定並びに次条並びに附則第十条、第十二条及び第十三条の規定　公布の日から起算して三年を超えない範囲内において政令で定める日";
+        let spec = spec_from_text(t, Some((2023, 6, 16)));
+        assert_eq!(
+            spec.main.as_ref().unwrap().enforcement,
+            Some(Enforcement::ByCabinetOrderWithin(crate::temporal::Dur {
+                n: 1,
+                unit: Unit::Year
+            }))
+        );
+        assert_eq!(spec.items.len(), 2);
+        assert_eq!(
+            spec.items[0].clause.enforcement,
+            Some(Enforcement::Promulgation)
+        );
+        assert_eq!(
+            spec.items[1].clause.enforcement,
+            Some(Enforcement::ByCabinetOrderWithin(crate::temporal::Dur {
+                n: 3,
+                unit: Unit::Year
+            }))
+        );
+        // 本則第1条は第一号（公布の日）、第4条は第二号、第7条は号に無いので本文、附則第7条は第一号
+        assert_eq!(spec.for_article(1, Some(false)).unwrap().0.text, "公布の日");
+        assert_eq!(
+            spec.for_article(4, Some(false))
+                .unwrap()
+                .1
+                .unwrap()
+                .chars()
+                .next(),
+            Some('第')
+        );
+        assert!(spec.for_article(7, Some(false)).unwrap().1.is_none());
+        assert_eq!(spec.for_article(7, Some(true)).unwrap().0.text, "公布の日");
+        // 「次の各号に掲げる規定」のただし書きは号の見出しなので範囲としては拾わない
+        assert!(spec.items.iter().all(|i| !i.scope.contains("各号")));
     }
 
     #[test]

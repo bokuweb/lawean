@@ -77,9 +77,11 @@ const REVISIONS = [
   ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者居住法 2022-05-18（令3-37 第44条 施行後）'],
   ['revisions/425AC0000000061_20210519_503AC0000000037.xml', '特別措置法 2021-05-19（令3-37 第58条の発射台）'],
   ['revisions/425AC0000000061_20220518_503AC0000000037.xml', '特別措置法 2022-05-18（令3-37 第58条 施行後）'],
-  ['revisions/324AC0000000108_20240401_505AC0000000063.xml', '古物営業法 2024-04-01（令4-68 の発射台）'],
+  ['revisions/324AC0000000108_20230616_505AC0000000063.xml', '古物営業法 2023-06-16（令5-63 第7条の発射台）'],
+  ['revisions/324AC0000000108_20240401_505AC0000000063.xml', '古物営業法 2024-04-01（令5-63 施行後、令4-68 の発射台）'],
   ['revisions/324AC0000000108_20250601_504AC0000000068.xml', '古物営業法 2025-06-01（令4-68 施行後）'],
-  ['revisions/325AC0000000158_20240401_505AC0000000063.xml', '質屋営業法 2024-04-01（令4-68 の発射台）'],
+  ['revisions/325AC0000000158_20230616_505AC0000000063.xml', '質屋営業法 2023-06-16（令5-63 第10条の発射台）'],
+  ['revisions/325AC0000000158_20240401_505AC0000000063.xml', '質屋営業法 2024-04-01（令5-63 施行後、令4-68 の発射台）'],
   ['revisions/325AC0000000158_20250601_504AC0000000068.xml', '質屋営業法 2025-06-01（令4-68 施行後）'],
   ['revisions/323AC0000000138_20231213_505AC0000000052.xml', '旅館業法 2023-12-13（令4-68 の発射台）'],
   ['revisions/323AC0000000138_20250601_504AC0000000068.xml', '旅館業法 2025-06-01（令4-68 施行後）'],
@@ -168,7 +170,9 @@ async function run() {
     const base_draft = $('base_draft').value ? await load($('base_draft').value) : null;
     const other_laws_draft = current && current.other_laws_draft ? await Promise.all(current.other_laws_draft.map(load)) : [];
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
-    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null, base_draft, other_laws_draft };
+    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null, base_draft, other_laws_draft,
+      // ケースに起草中の附則（平文、号の形も可）があればそれで施行期日を見る（無ければ改正後リビジョンに載る附則）
+      suppl: current.suppl || null, promulgated: current.promulgated || null };
     const t0 = performance.now();
     lastBaseXml = base;
     const report = JSON.parse(check(JSON.stringify(input)));

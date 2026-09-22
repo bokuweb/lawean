@@ -23,6 +23,11 @@ struct Case {
     base_draft: Option<String>,
     #[serde(default)]
     other_laws_draft: Vec<String>,
+    /// 起草中の附則（平文）。あれば施行期日はこちらで見る（無ければ改正後リビジョンに載る改正法の附則）
+    #[serde(default)]
+    suppl: Option<String>,
+    #[serde(default)]
+    promulgated: Option<String>,
     expect: Expect,
 }
 
@@ -41,9 +46,10 @@ fn run_case(c: &Case) -> Report {
         taisho: c.taisho.as_deref().map(fixture).as_deref(),
         other_laws: &others,
         enforced: c.enforced.as_deref(),
+        suppl: c.suppl.as_deref(),
+        promulgated: c.promulgated.as_deref(),
         base_draft_xml: c.base_draft.as_deref().map(fixture).as_deref(),
         other_laws_draft: &others_draft,
-        ..Default::default()
     })
 }
 
@@ -346,5 +352,55 @@ fn generated_taisho_passes_the_taisho_check() {
                 .any(|g| g.split_whitespace().collect::<String>() == norm),
             "hand line missing: {line}"
         );
+    }
+}
+
+/// 令5-63 附則第一条第一号「第一条及び第二条の規定並びに附則第七条、第十九条及び第二十条の規定　公布の日」。
+/// 本則第7条（古物営業法）は号に無いので本文（公布から一年以内の政令日）。「附則第七条」を本則第7条と取り違えて
+/// 「公布の日」の範囲外にしていた。起草中の附則（号の形の平文）と、改正後リビジョンに載る附則の両方で同じ答え
+#[test]
+fn r5_63_art7_is_not_confused_with_suppl_art7() {
+    let cases: Vec<Case> = serde_json::from_str(&fixture("cases/cases.json")).unwrap();
+    let c = cases.iter().find(|c| c.id == "r5-63-kobutsu").unwrap();
+    assert!(c.suppl.is_some());
+    for with_text in [true, false] {
+        let mut c2 = Case {
+            id: c.id.clone(),
+            base: c.base.clone(),
+            amendment: c.amendment.clone(),
+            expected: c.expected.clone(),
+            taisho: None,
+            other_laws: vec![],
+            enforced: c.enforced.clone(),
+            base_draft: None,
+            other_laws_draft: vec![],
+            suppl: c.suppl.clone(),
+            promulgated: c.promulgated.clone(),
+            expect: Expect {
+                ok: true,
+                fail: vec![],
+            },
+        };
+        if !with_text {
+            c2.suppl = None;
+            c2.promulgated = None;
+        }
+        let r = run_case(&c2);
+        let e = r
+            .checks
+            .iter()
+            .find(|k| k.kind == Kind::Enforcement)
+            .unwrap();
+        // 起草中の附則は改め文（第7条だけの抜粋）に無い条（第1条・第2条・第4条…）を挙げるので Warn。それ以外は Pass
+        assert_ne!(e.status, Status::Fail, "with_text={with_text}: {e:?}");
+        assert!(
+            e.details
+                .iter()
+                .any(|d| d.starts_with("第七条: 附則第一条本文") && d.ends_with("は範囲内")),
+            "with_text={with_text}: {e:?}"
+        );
+        if !with_text {
+            assert_eq!(e.status, Status::Pass, "{e:?}");
+        }
     }
 }
