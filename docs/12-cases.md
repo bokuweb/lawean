@@ -90,7 +90,7 @@ Lean 側: `hane-missing` は `Cases.lean` の `hane_missing_consolidates`（溶�
 
 ## 4. playground
 
-`docs/playground/draft.html`（**発射台を選び、改正法を書いて検査する**）: fixtures の法令（借地借家法・区分所有法・宅建業法・高齢者法・旅館業法・質屋営業法・医師法・古物営業法・公職選挙法…、手元の e-Gov XML も可）を発射台に、本則の条を見ながら改め文を書き（条をクリックで雛形）、附則（施行期日）と公布予定日・施行日を与えて検査する。改正後の本文（変わった条）と層 1 の候補も出る。起草中の附則は改正後リビジョンの附則より優先して `Enforcement` が読む（`run_texts` の `suppl` / `promulgated`）。発射台ごとに実際の改正法（令3-37 第35条、令4-48 第73条、平30-75、令3-51）が初期値として入る。
+`docs/playground/draft.html`（**発射台を選び、改正法を書いて検査する**）: fixtures の法令（借地借家法・区分所有法・宅建業法・高齢者法・旅館業法・質屋営業法・医師法・古物営業法・公職選挙法…、手元の e-Gov XML も可）を発射台に、本則の条を見ながら改め文を書き（条をクリックで雛形）、附則（施行期日）と公布予定日・施行日を与えて検査する。改正後の本文（変わった条）と層 1 の候補も出る。起草中の附則は改正後リビジョンの附則より優先して `Enforcement` が読む（`run_texts` の `suppl` / `promulgated`）。附則が「X法の施行の日」と書くときは、`法令名=YYYY-MM-DD` を与えると暦日に解く（`other_law_dates`）。発射台ごとに実際の改正法（令3-37 第35条、令4-48 第73条、平30-75、令3-51）が初期値として入る。
 **Z3 もブラウザで動く**（「検査する」で Rust/Lean の検査に続けて必ず走る。Z3 で矛盾が出れば全体の判定も FAIL）: `lawean-wasm::smt_scripts` が SMT-LIB を作り、z3-solver の WASM（jsDelivr、初回 33MB、worker で解く）に渡す。問いは施行期日（Z3 の暦）、改正後の本文の層 1 の Rule のうち型のある条件を持つものの空振り（「三十年以上二十年未満」→ unsat）、効力の齟齬の組。SharedArrayBuffer が要るので GitHub Pages では `coi-serviceworker.min.js`、手元では `docs/playground/serve.py`（COOP/COEP を付ける）。
 
 公開: https://bokuweb.github.io/lawean/ （`.github/workflows/pages.yml`、main への push で deploy）。
