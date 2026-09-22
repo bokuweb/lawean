@@ -64,6 +64,10 @@ pub enum Op {
         path: Vec<(lawean_source::ContainerKind, String)>,
         text: Vec<String>,
     },
+    /// 「附則に次の二条を加える」「附則に次の見出し及び二条を加える」+ 条の行: 原始附則の末尾に条を足す（文書の側だけ）
+    AppendSupplArticles { text: Vec<String> },
+    /// 「本則に次の一章を加える」+ 章の行: 本則の末尾に章を足す
+    AppendContainers { text: Vec<String> },
     /// 「同項後段を削る」「同項ただし書を削る」
     DeleteSentencePart { at: Loc, part: SentencePart },
     /// 「第一章第八節の節名中「A」を「B」に改める」「第N章の章名中…」。`path` は外側から (章/節/款/目, 番号)
@@ -255,6 +259,8 @@ impl Op {
         match self {
             Op::ReplaceToc { .. }
             | Op::SetToc { .. }
+            | Op::AppendSupplArticles { .. }
+            | Op::AppendContainers { .. }
             | Op::AppendArticle { .. }
             | Op::InsertContainersAfter { .. }
             | Op::InsertContainersBefore { .. }
@@ -348,6 +354,8 @@ impl Op {
                 | Op::ReplaceItems { .. }
                 | Op::ReplaceItemSet { .. }
                 | Op::InsertSubitemAfter { .. }
+                | Op::AppendSupplArticles { .. }
+                | Op::AppendContainers { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -375,6 +383,8 @@ impl Op {
             | Op::ReplaceItems { text, .. }
             | Op::ReplaceItemSet { text, .. }
             | Op::InsertSubitemAfter { text, .. }
+            | Op::AppendSupplArticles { text, .. }
+            | Op::AppendContainers { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }

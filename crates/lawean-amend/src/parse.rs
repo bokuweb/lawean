@@ -887,6 +887,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}条を加え(?:る)?$"),
+            ("append_suppl_arts", r"^附則に次の(?:見出し及び)?{N}条を加え(?:る)?$"),
+            ("append_containers", r"^本則に次の{N}(?:編|章|節)を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
             ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
@@ -1303,6 +1305,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     path: container_path(&g("path")),
                     text: Vec::new(),
                 },
+                "append_suppl_arts" => Op::AppendSupplArticles { text: Vec::new() },
+                "append_containers" => Op::AppendContainers { text: Vec::new() },
                 "container_title" => Op::ReplaceContainerTitle {
                     path: container_path(&g("path")),
                     from: g("a"),
@@ -1461,7 +1465,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         .collect();
                     let structural = tokens
                         .iter()
-                        .any(|t| t.ends_with('名') || crange.is_match(t) || t.contains("まで"));
+                        .any(|t| t.ends_with('名') || crange.is_match(t) || t.contains("まで"))
+                        || tokens.len() > 1;
                     if structural {
                         let mut last_container: Vec<(lawean_source::ContainerKind, String)> =
                             Vec::new();

@@ -94,3 +94,89 @@ fn replace_a_set_of_items() {
     let b = ident::bind(&base, &units[0], "t").unwrap();
     assert_eq!(items_of(&b.doc, "5", 0), after);
 }
+
+/// 「附則に次の見出し及び二条を加える」（令3-49 第1条・第2条・第14条）: 原始附則の末尾に条を足す（文書の側だけ）。
+/// 「本則に次の一章を加える」（令3-49）: 本則の末尾に章を足す。「同条第二項及び第三項を削り」（令5-79）: 位置の列挙の削除
+#[test]
+fn append_to_suppl_and_main_and_listed_delete() {
+    let base = revision("323AC0000000138_20231213_505AC0000000052");
+    let t = "第一条　旅館業法（昭和二十三年法律第百三十八号）の一部を次のように改正する。
+　　第三条第五項及び第六項を削る。
+　　本則に次の一章を加える。
+　　　　第六章　雑則
+　第十四条　甲は、乙とする。
+　　附則に次の見出し及び二条を加える。
+　　（罰則）
+　第二十条　丙は、丁とする。
+　第二十一条　戊は、己とする。";
+    let units = parse_units(t).unwrap();
+    let u = &units[0];
+    assert_eq!(
+        u.instructions[0].ops.len(),
+        2,
+        "{:?}",
+        u.instructions[0].ops
+    );
+    assert!(matches!(&u.instructions[1].ops[0], Op::AppendContainers { text } if text.len() == 2));
+    assert!(
+        matches!(&u.instructions[2].ops[0], Op::AppendSupplArticles { text } if text.len() == 3)
+    );
+    let got = apply_unit(&base, u, "test").unwrap();
+    // 本則: 第3条は第4項までになり、第六章 第14条が末尾に
+    let snap = snapshot_main(&got);
+    assert_eq!(snap["3"].len(), 4, "{:?}", snap["3"]);
+    assert!(
+        snap["14"][0].1.contains("甲は、乙とする"),
+        "{:?}",
+        snap.get("14")
+    );
+    assert!(
+        matches!(got.main_provision.last(), Some(Provision::Container(c)) if c.children.len() == 1)
+    );
+    // 附則: 最後の 2 条が第20条・第21条、第20条に見出し
+    let sp = got
+        .suppl_provisions
+        .iter()
+        .find(|s| s.amend_law_num.is_none())
+        .unwrap();
+    let arts: Vec<&Article> = sp
+        .children
+        .iter()
+        .filter_map(|c| match c {
+            SupplChild::Provision(Provision::Article(a)) => Some(a),
+            _ => None,
+        })
+        .collect();
+    let n = arts.len();
+    assert_eq!(arts[n - 2].num.to_num_string(), "20");
+    assert_eq!(
+        arts[n - 2]
+            .caption
+            .as_ref()
+            .map(|c| inline_text(c))
+            .as_deref(),
+        Some("（罰則）")
+    );
+    assert_eq!(arts[n - 1].num.to_num_string(), "21");
+    // id の世界でも本則は同じ、往復も
+    let b = ident::bind(&base, u, "t").unwrap();
+    assert_eq!(snapshot_main(&b.doc), snap);
+    let text = lawean_render::amend::render_unit(u);
+    assert!(
+        text.contains("附則に次の見出し及び二条を加える。")
+            && text.contains("本則に次の一章を加える。"),
+        "{text}"
+    );
+    let again = parse_units(&text).unwrap();
+    assert_eq!(
+        again[0]
+            .instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        u.instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>()
+    );
+}

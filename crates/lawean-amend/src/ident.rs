@@ -831,6 +831,50 @@ impl Binder<'_> {
                 Op::RenumberContainer { path, to } => {
                     crate::apply::renumber_container(&mut self.doc, path, to)?;
                 }
+                Op::AppendSupplArticles { text } => {
+                    crate::apply::append_suppl_articles(&mut self.doc, text)?;
+                }
+                // 本則の末尾に章: 本則の最後の項の後ろに新しい章の全部の項を並べる
+                Op::AppendContainers { text } => {
+                    let mut new = crate::apply::parse_containers(text)?;
+                    let mut anchor = last_para_id_in(&self.doc.main_provision)
+                        .ok_or_else(|| ApplyError::BadContent("本則に項が無い".into()))?;
+                    fn walk(b: &mut Binder<'_>, ps: &mut [Provision], anchor: &mut String) {
+                        for p in ps {
+                            match p {
+                                Provision::Container(c) => walk(b, &mut c.children, anchor),
+                                Provision::Article(a) => {
+                                    let mut children = Vec::new();
+                                    for c in std::mem::take(&mut a.children) {
+                                        let ArticleChild::Paragraph(p) = c else {
+                                            children.push(c);
+                                            continue;
+                                        };
+                                        let (id, p) = b.new_para(&a.num, p);
+                                        b.ops.push(IdentOp::InsertAfter {
+                                            anchor: anchor.clone(),
+                                            new_id: id.clone(),
+                                            art: a.num.to_num_string(),
+                                            text: para_text(&p),
+                                        });
+                                        *anchor = id;
+                                        children.push(ArticleChild::Paragraph(p));
+                                    }
+                                    a.children = children;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    for c in &mut new {
+                        let mut inner = std::mem::take(&mut c.children);
+                        walk(self, &mut inner, &mut anchor);
+                        c.children = inner;
+                    }
+                    self.doc
+                        .main_provision
+                        .extend(new.into_iter().map(Provision::Container));
+                }
                 // 附則の条は id の世界（本則）に無い。文書の側だけ
                 Op::InsertArticleAfter { after, text, suppl } if *suppl => {
                     crate::apply::insert_suppl_articles_after(&mut self.doc, after, text)?;

@@ -155,6 +155,12 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let new = parse_containers(text)?;
                 insert_containers_after(doc, path, new)?;
             }
+            Op::AppendContainers { text } => {
+                let new = parse_containers(text)?;
+                doc.main_provision
+                    .extend(new.into_iter().map(Provision::Container));
+            }
+            Op::AppendSupplArticles { text } => append_suppl_articles(doc, text)?,
             Op::InsertContainersBefore { path, text } => {
                 let new = parse_containers(text)?;
                 insert_containers_at(doc, path, new, false)?;
@@ -509,6 +515,24 @@ pub(crate) fn article_mut<'a>(
 }
 
 /// 原始附則（AmendLawNum の無い附則）の条
+/// 「附則に次の二条を加える」: 原始附則の末尾に条を足す（見出しの行「（罰則）」は最初の条の見出しに）
+pub(crate) fn append_suppl_articles(
+    doc: &mut LegalDocument,
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let arts = parse_articles(text)?;
+    let sp = doc
+        .suppl_provisions
+        .iter_mut()
+        .find(|s| s.amend_law_num.is_none())
+        .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()))?;
+    sp.children.extend(
+        arts.into_iter()
+            .map(|a| SupplChild::Provision(Provision::Article(a))),
+    );
+    Ok(())
+}
+
 /// 「附則第一条の次に次の一条を加える」: 原始附則の条の後ろに条を挿す
 pub(crate) fn insert_suppl_articles_after(
     doc: &mut LegalDocument,

@@ -180,6 +180,33 @@ fn segment(op: &Op, last: bool) -> String {
             path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章"),
             end("し", "する")
         ),
+        Op::AppendSupplArticles { text } => format!(
+            "附則に次の{}{}条を{}",
+            if text.first().is_some_and(|l| l.starts_with('（')) {
+                "見出し及び"
+            } else {
+                ""
+            },
+            to_kanji(
+                text.iter()
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
+                    .count() as u32
+            ),
+            end("加え", "加える")
+        ),
+        Op::AppendContainers { text } => format!(
+            "本則に次の{}章を{}",
+            to_kanji(
+                text.iter()
+                    .filter(|l| {
+                        l.trim_start_matches('\u{3000}').starts_with('第')
+                            && l.split_once('\u{3000}')
+                                .is_some_and(|(t, _)| t.ends_with('章'))
+                    })
+                    .count() as u32
+            ),
+            end("加え", "加える")
+        ),
         Op::AppendArticle { path, text } => format!(
             "{}に次の{}条を{}",
             path.iter()
@@ -488,6 +515,8 @@ fn content_of(op: &Op) -> &[String] {
         | Op::ReplaceItems { text, .. }
         | Op::ReplaceItemSet { text, .. }
         | Op::InsertSubitemAfter { text, .. }
+        | Op::AppendSupplArticles { text, .. }
+        | Op::AppendContainers { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }
