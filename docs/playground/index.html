@@ -180,7 +180,7 @@ async function run() {
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
     const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null, base_draft, other_laws_draft,
       // ケースに起草中の附則（平文、号の形も可）があればそれで施行期日を見る（無ければ改正後リビジョンに載る附則）
-      suppl: current.suppl || null, promulgated: current.promulgated || null };
+      suppl: (current && current.suppl) || null, promulgated: (current && current.promulgated) || null };
     const t0 = performance.now();
     lastBaseXml = base;
     const report = JSON.parse(check(JSON.stringify(input)));
