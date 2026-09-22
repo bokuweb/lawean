@@ -279,6 +279,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                                         .and_then(|x| x.split('/').next())
                                         .map(String::from),
                                     part: None,
+                                    suppl: false,
                                 },
                                 from: r.span.text.clone(),
                                 to: f.clone(),
@@ -446,6 +447,7 @@ fn article_hane_candidates(
                                 .and_then(|x| x.split('/').next())
                                 .map(String::from),
                             part: None,
+                            suppl: false,
                         },
                         from: r.span.text.clone(),
                         to: f.clone(),
@@ -562,6 +564,7 @@ fn refine_candidates(
                             paragraph: Some(ParaRef::Num(p)),
                             item: None,
                             part: None,
+                            suppl: false,
                         },
                         from: r.span.text.clone(),
                         to: fix.clone(),

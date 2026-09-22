@@ -17,6 +17,8 @@ pub struct Loc {
     pub item: Option<String>,
     /// 「ただし書」「本文」「前段」「後段」「各号列記以外の部分」。あれば字句の置換をその文に限る
     pub part: Option<SentencePart>,
+    /// 「附則第七条第六項」: 原始附則の条（本則ではない。id の世界には載せず、文書の側だけ改める）
+    pub suppl: bool,
 }
 
 impl Loc {
@@ -26,6 +28,7 @@ impl Loc {
             paragraph,
             item: None,
             part: None,
+            suppl: false,
         }
     }
 }

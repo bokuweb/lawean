@@ -602,6 +602,47 @@ impl Binder<'_> {
                         new: toc_text(&self.doc).unwrap_or_default(),
                     });
                 }
+                // 附則の条は id の世界（本則）に無い。文書の側だけ改める
+                Op::Replace { at, from, to } if at.suppl => {
+                    let art = crate::apply::suppl_article_mut(&mut self.doc, &at.article)?;
+                    let idx = para_index(art, &at.paragraph, &mut snapshots)?;
+                    if crate::apply::replace_in_article_part(
+                        art,
+                        idx,
+                        at.item.as_deref(),
+                        at.part,
+                        from,
+                        to,
+                        &inserted,
+                    ) == 0
+                    {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: loc_name(at),
+                            phrase: from.clone(),
+                        });
+                    }
+                    inserted.push(to.clone());
+                }
+                Op::InsertAfterPhrase { at, anchor, text } if at.suppl => {
+                    let art = crate::apply::suppl_article_mut(&mut self.doc, &at.article)?;
+                    let idx = para_index(art, &at.paragraph, &mut snapshots)?;
+                    if crate::apply::replace_in_article_part(
+                        art,
+                        idx,
+                        at.item.as_deref(),
+                        at.part,
+                        anchor,
+                        &format!("{anchor}{text}"),
+                        &inserted,
+                    ) == 0
+                    {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: loc_name(at),
+                            phrase: anchor.clone(),
+                        });
+                    }
+                    inserted.push(text.clone());
+                }
                 Op::Replace { at, from, to } => {
                     for at in crate::apply::expand_range(&self.doc, at) {
                         self.replace(&at, from, to, &mut snapshots, &inserted)?

@@ -291,6 +291,7 @@ fn generated_hane_fixes_match_the_real_amendment() {
                 paragraph: Some(ParaRef::Num(3)),
                 item: None,
                 part: None,
+                suppl: false,
             },
             from: "前項".into(),
             to: "第三項".into(),
@@ -508,4 +509,70 @@ fn reiwa7_act47_art4_then_art5_kanri_tekiseika_reproduce_egov_revisions() {
     let got = apply_unit(&mid, &u5[0], "main").unwrap();
     assert_same_main(&got, &revision("412AC1000000149_20260401_507AC0000000047"));
     assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第6条（第3号施行日、2027-04-01 未施行）: 2026-04-01 版に当てると e-Gov の 2027-04-01 版（未施行リビジョン）になる
+#[test]
+fn reiwa7_act47_art6_kanri_tekiseika_reproduces_the_unenforced_revision() {
+    let u6 = parse_units(&fixture("amendments/507AC0000000047_art6.txt")).unwrap();
+    let got = apply_unit(
+        &revision("412AC1000000149_20260401_507AC0000000047"),
+        &u6[0],
+        "stage3",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("412AC1000000149_20270401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第7・12・13・14・15・17条: 令7-47 が改める残りの法律（住宅金融支援機構法・耐震改修促進法・密集市街地整備法・
+/// 都市再生機構法・長期優良住宅法・所有者不明土地法）。各法令の直前の版に当てて e-Gov の改正後と一致する
+#[test]
+fn reiwa7_act47_other_six_laws_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "417AC0000000082_20251001_506AC0000000043",
+            "417AC0000000082_20260401_507AC0000000047",
+        ),
+        (
+            "12",
+            "407AC0000000123_20250530_507AC0000000047",
+            "407AC0000000123_20260401_507AC0000000047",
+        ),
+        (
+            "13",
+            "409AC0000000049_20250601_504AC0000000068",
+            "409AC0000000049_20260401_507AC0000000047",
+        ),
+        (
+            "14",
+            "415AC0000000100_20241108_506AC0000000040",
+            "415AC0000000100_20260401_507AC0000000047",
+        ),
+        (
+            "15",
+            "420AC0000000087_20250530_507AC0000000047",
+            "420AC0000000087_20251128_507AC0000000047",
+        ),
+        (
+            "17",
+            "430AC0000000049_20250601_504AC0000000068",
+            "430AC0000000049_20260401_507AC0000000047",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/507AC0000000047_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+    }
 }

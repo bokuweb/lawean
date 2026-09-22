@@ -82,6 +82,9 @@ fn loc_label(l: &Loc) -> String {
         Some(ParaRef::Num(n)) => format!("{}第{}項", article_label(&l.article), to_kanji(*n)),
         None => article_label(&l.article),
     };
+    if l.suppl {
+        s.insert_str(0, "附則");
+    }
     if let Some(item) = &l.item {
         // 「3_2」→「第三号の二」
         let mut parts = item.split('_').filter_map(|x| x.parse::<u32>().ok());

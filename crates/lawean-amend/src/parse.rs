@@ -229,6 +229,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                             paragraph: Some(ParaRef::Num(n)),
                             item: None,
                             part: None,
+                            suppl: false,
                         });
                     }
                 }
@@ -240,6 +241,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                     paragraph: None,
                     item: None,
                     part: None,
+                    suppl: false,
                 }),
                 _ => return Err(ParseError::Unrecognized(tok.to_string())),
             }
@@ -262,6 +264,8 @@ struct Ante {
     part: Option<SentencePart>,
     /// 直前の位置の列挙（「第九十四条第一項及び第三項中」）。位置を省いた続きはこの全部に当てる
     locs: Vec<Loc>,
+    /// 直前の位置が附則の条
+    suppl: bool,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
@@ -296,16 +300,18 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     // 号（「第三号」「第二号の二」「同号」）とただし書・各号列記以外の部分は位置として読むが、操作は項全体に当てる
     // （字句の置換は項の中の全出現に及ぶ。号を限定した置換は未対応で、号の外にも同じ字句があれば置き換わる）
     let r = LOC.get_or_init(|| {
-        re(r"^(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|(同項))?(?:第({N}号(?:の{N})*)|(同号))?[イロハニホヘトチリヌルヲワカヨタレソツネナラム]?(?:各号)?(ただし書|各号列記以外の部分|本文|前段|後段)?$")
+        re(r"^(附則)?(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|(同項))?(?:第({N}号(?:の{N})*)|(同号))?[イロハニホヘトチリヌルヲワカヨタレソツネナラム]?(?:各号)?(ただし書|各号列記以外の部分|本文|前段|後段)?$")
     });
     let Some(c) = r.captures(s) else {
         return Err(ParseError::Unrecognized(s.to_string()));
     };
-    let article = match c.get(1) {
+    let suppl = c.get(1).is_some() || (c.get(2).is_none() && ante.suppl);
+    let article = match c.get(2) {
         Some(a) => {
             let n = art_num(a.as_str());
             ante.article = Some(n.clone());
             ante.toc = false;
+            ante.suppl = suppl;
             n
         }
         None => ante
@@ -313,22 +319,22 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             .clone()
             .ok_or_else(|| ParseError::NoAntecedent(s.to_string()))?,
     };
-    let paragraph = if let Some(p) = c.get(2) {
+    let paragraph = if let Some(p) = c.get(3) {
         let n = kanji_to_u32(p.as_str()).unwrap();
         ante.paragraph = Some(n);
         Some(ParaRef::Num(n))
-    } else if c.get(3).is_some() {
+    } else if c.get(4).is_some() {
         Some(ParaRef::Num(
             ante.paragraph
                 .ok_or_else(|| ParseError::NoAntecedent(s.to_string()))?,
         ))
     } else {
-        if c.get(1).is_some() {
+        if c.get(2).is_some() {
             ante.paragraph = None;
         }
         None
     };
-    let item = match c.get(4) {
+    let item = match c.get(5) {
         Some(i) => {
             let parts: Vec<String> = i
                 .as_str()
@@ -342,9 +348,9 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             ante.item = Some(it.clone());
             Some(it)
         }
-        None if c.get(5).is_some() => ante.item.clone(),
+        None if c.get(6).is_some() => ante.item.clone(),
         None => {
-            if c.get(1).is_some() || c.get(2).is_some() {
+            if c.get(2).is_some() || c.get(3).is_some() {
                 ante.item = None;
             }
             None
@@ -352,10 +358,10 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     };
     // 「同号」「第三号」で項を言わなければ直前の項の中
     let paragraph = match (paragraph, &item) {
-        (None, Some(_)) if c.get(1).is_none() => ante.paragraph.map(ParaRef::Num),
+        (None, Some(_)) if c.get(2).is_none() => ante.paragraph.map(ParaRef::Num),
         (p, _) => p,
     };
-    let part = c.get(6).map(|m| match m.as_str() {
+    let part = c.get(7).map(|m| match m.as_str() {
         "ただし書" => SentencePart::Proviso,
         "本文" => SentencePart::Main,
         "前段" => SentencePart::Front,
@@ -370,6 +376,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
         paragraph,
         item,
         part,
+        suppl,
     })
 }
 
@@ -682,6 +689,7 @@ fn ante_loc(ante: &Ante, seg: &str) -> Result<Loc, ParseError> {
         paragraph: ante.paragraph.map(ParaRef::Num),
         item: ante.item.clone(),
         part: ante.part,
+        suppl: ante.suppl,
     })
 }
 
@@ -741,6 +749,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         container: Vec::new(),
         part: None,
         locs: Vec::new(),
+        suppl: false,
     };
     let mut ops = Vec::new();
     let segs: Vec<String> = split_segments(line);
@@ -776,6 +785,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         container: ante.container.clone(),
                         part: ante.part,
                         locs: ante.locs.clone(),
+                        suppl: ante.suppl,
                     };
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
@@ -825,31 +835,38 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             {
                 // 「第五十四条の見出し並びに同条第一項及び第二項中」: 見出しは見出しの置換に
                 let mut rest_tokens: Vec<String> = Vec::new();
+                // 「A」の下に「B」を加える は、字句の側では「A」を「AB」に改めるのと同じ
+                let (from, to) = if *name == "replace" {
+                    (g("a"), g("b"))
+                } else {
+                    (g("a"), format!("{}{}", g("a"), g("b")))
+                };
                 for tok in g("loc")
                     .split("並びに")
                     .flat_map(|x| x.split("及び"))
                     .flat_map(|x| x.split('、'))
                 {
-                    if let Some(base) = tok.strip_suffix("の見出し") {
-                        if *name == "replace" {
-                            let l = loc(base, &mut ante)?;
-                            ops.push(Op::ReplaceCaption {
-                                article: l.article,
-                                from: g("a"),
-                                to: g("b"),
-                            });
-                        }
+                    if tok == "目次" {
+                        ops.push(Op::ReplaceToc {
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    } else if let Some(base) = tok.strip_suffix("の見出し") {
+                        let l = loc(base, &mut ante)?;
+                        ops.push(Op::ReplaceCaption {
+                            article: l.article,
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
                     } else if let Some(base) = ["の章名", "の節名", "の款名", "の編名", "の目名"]
                         .iter()
                         .find_map(|s| tok.strip_suffix(s))
                     {
-                        if *name == "replace" {
-                            ops.push(Op::ReplaceContainerTitle {
-                                path: container_path(base),
-                                from: g("a"),
-                                to: g("b"),
-                            });
-                        }
+                        ops.push(Op::ReplaceContainerTitle {
+                            path: container_path(base),
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
                     } else {
                         rest_tokens.push(tok.to_string());
                     }
@@ -1305,6 +1322,7 @@ mod tests {
                     paragraph: Some(ParaRef::Num(1)),
                     item: None,
                     part: None,
+                    suppl: false,
                 },
                 anchor: "第四十条".into(),
                 text: "、第四十二条の二".into()
@@ -1367,6 +1385,7 @@ mod tests {
                         paragraph: Some(ParaRef::Num(3)),
                         item: None,
                         part: None,
+                        suppl: false,
                     },
                     from: "前項".into(),
                     to: "第三項".into()
@@ -1382,6 +1401,7 @@ mod tests {
                         paragraph: Some(ParaRef::Num(2)),
                         item: None,
                         part: None,
+                        suppl: false,
                     },
                     from: "前項".into(),
                     to: "第一項".into()

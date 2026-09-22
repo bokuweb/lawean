@@ -53,7 +53,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
             Op::Replace { at, from, to } => {
                 for at in expand_range(doc, at) {
-                    let art = article_mut(doc, &at.article)?;
+                    let art = loc_article_mut(doc, &at)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?;
                     let n = replace_in_article_part(
                         art,
@@ -74,7 +74,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 inserted.push(to.clone());
             }
             Op::InsertAfterPhrase { at, anchor, text } => {
-                let art = article_mut(doc, &at.article)?;
+                let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?;
                 let n = replace_in_article_part(
                     art,
@@ -359,6 +359,9 @@ pub(crate) fn loc_name(l: &Loc) -> String {
         Some(ParaRef::Num(n)) => format!("第{}条第{n}項", l.article.to_num_string()),
         None => format!("第{}条", l.article.to_num_string()),
     };
+    if l.suppl {
+        s.insert_str(0, "附則");
+    }
     if let Some(i) = &l.item {
         s.push_str(&format!("第{i}号"));
     }
@@ -440,6 +443,52 @@ pub(crate) fn article_mut<'a>(
 ) -> Result<&'a mut Article, ApplyError> {
     find_article(&mut doc.main_provision, num)
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
+}
+
+/// 原始附則（AmendLawNum の無い附則）の条
+pub(crate) fn suppl_article_mut<'a>(
+    doc: &'a mut LegalDocument,
+    num: &ArticleNum,
+) -> Result<&'a mut Article, ApplyError> {
+    for sp in doc
+        .suppl_provisions
+        .iter_mut()
+        .filter(|s| s.amend_law_num.is_none())
+    {
+        for c in sp.children.iter_mut() {
+            let SupplChild::Provision(p) = c else {
+                continue;
+            };
+            let hit = match p {
+                Provision::Article(a) => &a.num == num,
+                Provision::Container(c) => find_article(&mut c.children, num).is_some(),
+                _ => false,
+            };
+            if hit {
+                return match p {
+                    Provision::Article(a) => Ok(a),
+                    Provision::Container(c) => Ok(find_article(&mut c.children, num).unwrap()),
+                    _ => unreachable!(),
+                };
+            }
+        }
+    }
+    Err(ApplyError::ArticleNotFound(format!(
+        "附則{}",
+        num.to_num_string()
+    )))
+}
+
+/// 位置に応じて本則か原始附則の条
+pub(crate) fn loc_article_mut<'a>(
+    doc: &'a mut LegalDocument,
+    at: &Loc,
+) -> Result<&'a mut Article, ApplyError> {
+    if at.suppl {
+        suppl_article_mut(doc, &at.article)
+    } else {
+        article_mut(doc, &at.article)
+    }
 }
 
 /// 「第一章第八節」のように外側から辿った容器
@@ -1733,6 +1782,7 @@ pub(crate) fn expand_range(doc: &LegalDocument, at: &Loc) -> Vec<Loc> {
                 paragraph: at.paragraph.clone(),
                 item: at.item.clone(),
                 part: None,
+                suppl: false,
             })
             .collect(),
         _ => vec![at.clone()],
