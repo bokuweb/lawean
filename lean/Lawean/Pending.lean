@@ -8,6 +8,10 @@ import Lawean.Data.Bodies_502AC0000000062_art2
 import Lawean.Data.Rev_324AC0000000108_20250601
 import Lawean.Data.Unit_504AC0000000068_art98
 import Lawean.Data.Unit_derived_324AC0000000108_20240401
+import Lawean.Data.Rev_327AC1000000176_20210519
+import Lawean.Data.Rev_327AC1000000176_20240525
+import Lawean.Data.Unit_503AC0000000044_art7
+import Lawean.Data.Unit_derived_327AC1000000176_20240401
 
 /-!
 # 先行改正との可換性 — 公布順と施行順が逆になった実例（docs/13）
@@ -50,6 +54,35 @@ theorem art98_then_intervening_reaches_20250601 :
       some rev_324AC0000000108_20250601.render := by
   rw [art98_intervening_commute]
   exact intervening_then_art98_reaches_20250601
+
+-- 起草から 3 年後に施行された改め文（docs/13 §2.4）: 令3-44 第7条（宅建業法） ------------------------------------
+
+/-- 令和3年法律第44号 第7条（公布 2021-05-26、施行 2024-05-25）と、その間に施行された 5 つの先行改正（令3-37・令2-8・令4-61・
+令4-68・令5-79 を 2 つの版の差から起こしたもの）は触る id が交わらない -/
+theorem independent_art7_intervening :
+    IndependentUnits unit_503AC0000000044_art7 unit_derived_327AC1000000176_20240401 := by
+  native_decide
+
+/-- したがってどの発射台に対しても順序を入れ替えられる -/
+theorem art7_intervening_commute (r : Revision) :
+    applyUnit r (unit_503AC0000000044_art7 ++ unit_derived_327AC1000000176_20240401) =
+      applyUnit r (unit_derived_327AC1000000176_20240401 ++ unit_503AC0000000044_art7) :=
+  applyUnit_comm r _ _ independent_art7_intervening
+
+/-- 実際の順（5 つの先行改正 → 第7条）で 2021-05-19 版から e-Gov の 2024-05-25 版になる -/
+theorem intervening_then_art7_reaches_20240525 :
+    (applyUnit rev_327AC1000000176_20210519
+      (unit_derived_327AC1000000176_20240401 ++ unit_503AC0000000044_art7)).map Revision.render =
+      some rev_327AC1000000176_20240525.render := by
+  native_decide
+
+/-- 起草した順（第7条 → 先行改正）でも同じ -/
+theorem art7_then_intervening_reaches_20240525 :
+    (applyUnit rev_327AC1000000176_20210519
+      (unit_503AC0000000044_art7 ++ unit_derived_327AC1000000176_20240401)).map Revision.render =
+      some rev_327AC1000000176_20240525.render := by
+  rw [art7_intervening_commute]
+  exact intervening_then_art7_reaches_20240525
 
 -- 加える本文の参照を id で持てば、先行改正の後で正しい番号に描ける（docs/13 §4） ------------------------------
 
