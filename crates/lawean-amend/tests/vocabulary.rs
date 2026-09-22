@@ -366,3 +366,45 @@ fn table_rows_append_table_and_delete_appdx() {
     let got = apply_unit(&takken, &u, "test").unwrap();
     assert!(got.appendices.is_empty());
 }
+
+/// 令5-53 の形（1 項だけの条の前に項を置く）: 「第八条中「手数料」を「前項の手数料以外の手数料」に改め、同条を同条第二項とし、
+/// 同条に第一項として次の一項を加える」— 旅館業法 第8条（1 項）に当てる
+#[test]
+fn make_the_sole_paragraph_the_second_and_prepend_the_first() {
+    let base = revision("323AC0000000138_20231213_505AC0000000052");
+    let before = snapshot_main(&base);
+    assert_eq!(before["8"].len(), 1);
+    let t = "第一条　旅館業法（昭和二十三年法律第百三十八号）の一部を次のように改正する。
+　　第八条中「営業者」を「前項の営業者」に改め、同条を同条第二項とし、同条に第一項として次の一項を加える。
+　　　甲は、乙とする。";
+    let units = parse_units(t).unwrap();
+    let u = &units[0];
+    assert!(matches!(
+        &u.instructions[0].ops[1],
+        Op::RenumberParagraph {
+            from: ParaRef::Num(1),
+            to: 2,
+            ..
+        }
+    ));
+    assert!(matches!(
+        &u.instructions[0].ops[2],
+        Op::InsertParagraphFirst { .. }
+    ));
+    let got = apply_unit(&base, u, "test").unwrap();
+    let snap = snapshot_main(&got);
+    assert_eq!(snap["8"].len(), 2, "{:?}", snap["8"]);
+    assert_eq!(snap["8"][0], (1, "甲は、乙とする。".to_string()));
+    assert_eq!(snap["8"][1].0, 2);
+    assert!(snap["8"][1].1.contains("前項の営業者"));
+    let b = ident::bind(&base, u, "t").unwrap();
+    assert_eq!(snapshot_main(&b.doc), snap);
+    // id の世界: 新しい項は前の条（第7条の2）の最後の項の後ろに insertAfter
+    assert!(b.ops.iter().any(|o| matches!(o, ident::IdentOp::InsertAfter { anchor, .. } if anchor.contains("/art:7_2/"))), "{:?}", b.ops);
+    let text = lawean_render::amend::render_unit(u);
+    let again = parse_units(&text).unwrap();
+    assert_eq!(
+        again[0].instructions[0].ops, u.instructions[0].ops,
+        "{text}"
+    );
+}

@@ -949,6 +949,9 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
             ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
+            // 「同条を同条第二項とし」: 項番号の無い 1 項だけの条の本文を第二項に
+            ("renumber_whole_para", r"^(?P<loc>第{N}条(?:の{N})*|同条)を(?:同条)?第(?P<q>{N})項と(?:し|する)$"),
+            ("insert_para_first", r"^(?P<loc>第{N}条(?:の{N})*|同条)に第一項として次の一項を加え(?:る)?$"),
             // 「同条中第三項を第五項とし、第二項を第四項とし」の続き（条は直前のもの）
             ("renumber_para_cont", r"^第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
@@ -1320,6 +1323,22 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         article: l.article,
                         from: ParaRef::Num(num("p")),
                         to: num("q"),
+                    }
+                }
+                "renumber_whole_para" => {
+                    let l = loc(&g("loc"), &mut ante)?;
+                    ante.paragraph = Some(num("q"));
+                    Op::RenumberParagraph {
+                        article: l.article,
+                        from: ParaRef::Num(1),
+                        to: num("q"),
+                    }
+                }
+                "insert_para_first" => {
+                    let l = loc(&g("loc"), &mut ante)?;
+                    Op::InsertParagraphFirst {
+                        article: l.article,
+                        text: Vec::new(),
                     }
                 }
                 "renumber_para_cont" => {

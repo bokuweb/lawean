@@ -495,6 +495,7 @@ fn content_of(op: &Op) -> Vec<String> {
     match op {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
+        | Op::InsertParagraphFirst { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::InsertContainersAfter { text, .. }

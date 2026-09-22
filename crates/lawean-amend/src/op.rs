@@ -59,6 +59,11 @@ pub enum Op {
         after: ParaRef,
         text: Vec<String>,
     },
+    /// 「同条に第一項として次の一項を加える」: 条の先頭に項を置く（「同条を同条第二項とし」の後）
+    InsertParagraphFirst {
+        article: ArticleNum,
+        text: Vec<String>,
+    },
     /// 「第N章に次の一条を加える」「第一章第八節に次の七条を加える」。`path` は外側から (章/節/款/目, 番号)
     AppendArticle {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -300,6 +305,7 @@ impl Op {
             | Op::Delete { at } => Some(&at.article),
             Op::AppendParagraph { article, .. }
             | Op::InsertParagraphAfter { article, .. }
+            | Op::InsertParagraphFirst { article, .. }
             | Op::ReplaceArticle { article, .. }
             | Op::RenumberParagraph { article, .. }
             | Op::ShiftParagraphs { article, .. } => Some(article),
@@ -366,6 +372,7 @@ impl Op {
             self,
             Op::AppendParagraph { .. }
                 | Op::InsertParagraphAfter { .. }
+                | Op::InsertParagraphFirst { .. }
                 | Op::AppendArticle { .. }
                 | Op::InsertContainersAfter { .. }
                 | Op::InsertContainersBefore { .. }
@@ -397,6 +404,7 @@ impl Op {
         match self {
             Op::AppendParagraph { text, .. }
             | Op::InsertParagraphAfter { text, .. }
+            | Op::InsertParagraphFirst { text, .. }
             | Op::AppendArticle { text, .. }
             | Op::InsertContainersAfter { text, .. }
             | Op::InsertContainersBefore { text, .. }

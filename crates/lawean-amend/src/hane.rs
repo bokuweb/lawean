@@ -127,7 +127,8 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
             match op {
                 Op::ShiftParagraphs { article, .. }
                 | Op::RenumberParagraph { article, .. }
-                | Op::InsertParagraphAfter { article, .. } => {
+                | Op::InsertParagraphAfter { article, .. }
+                | Op::InsertParagraphFirst { article, .. } => {
                     articles.insert(article.clone());
                 }
                 Op::Delete {
@@ -486,8 +487,9 @@ fn refine_candidates(
     let mut grown: Vec<ArticleNum> = Vec::new();
     for ins in &unit.instructions {
         for op in &ins.ops {
-            if let Op::AppendParagraph { article, .. } | Op::InsertParagraphAfter { article, .. } =
-                op
+            if let Op::AppendParagraph { article, .. }
+            | Op::InsertParagraphAfter { article, .. }
+            | Op::InsertParagraphFirst { article, .. } = op
             {
                 let single = paragraph_count(&doc.main_provision, article) == Some(1);
                 if single && !grown.contains(article) {

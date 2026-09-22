@@ -129,6 +129,18 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let idx = para_index(art, &Some(from.clone()), &mut snapshots)?.unwrap();
                 set_label(paragraph_mut(art, idx), *to);
             }
+            Op::InsertParagraphFirst { article, text } => {
+                let art = article_mut(doc, article)?;
+                snapshot(art, &mut snapshots);
+                for (k, p) in parse_paragraphs(text)?.into_iter().enumerate() {
+                    let pos = nth_paragraph_child(art, k);
+                    art.children.insert(pos, ArticleChild::Paragraph(p));
+                    snapshots
+                        .get_mut(&article.to_num_string())
+                        .unwrap()
+                        .insert(k, None);
+                }
+            }
             Op::ShiftParagraphs {
                 article,
                 from,

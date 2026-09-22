@@ -710,6 +710,40 @@ impl Binder<'_> {
                             .insert(idx + 1, None);
                     }
                 }
+                // 条の先頭に項: 直前のノード（前の条の最後の項）の後ろに
+                Op::InsertParagraphFirst { article, text } => {
+                    let first = paragraphs(article_mut(&mut self.doc, article)?)
+                        .first()
+                        .map(|p| id_of(p))
+                        .ok_or_else(|| ApplyError::BadContent("項の無い条".into()))?;
+                    let all = from_document(&self.doc);
+                    let idx = all.nodes.iter().position(|n| n.id == first).unwrap_or(0);
+                    if idx == 0 {
+                        return Err(ApplyError::BadContent("先頭の前には加えられない".into()));
+                    }
+                    let mut anchor = all.nodes[idx - 1].id.clone();
+                    for (k, p) in crate::apply::parse_paragraphs(text)?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let (id, p) = self.new_para(article, p);
+                        self.ops.push(IdentOp::InsertAfter {
+                            anchor: anchor.clone(),
+                            new_id: id.clone(),
+                            art: article.to_num_string(),
+                            text: para_text(&p),
+                        });
+                        anchor = id;
+                        let art = article_mut(&mut self.doc, article)?;
+                        snapshot(art, &mut snapshots);
+                        let pos = nth_paragraph_child(art, k);
+                        art.children.insert(pos, ArticleChild::Paragraph(p));
+                        snapshots
+                            .get_mut(&article.to_num_string())
+                            .unwrap()
+                            .insert(k, None);
+                    }
+                }
                 // 番号だけを動かす操作。id の世界では何もしない（番号は描画時に数える）
                 Op::RenumberParagraph { article, from, to } => {
                     let art = article_mut(&mut self.doc, article)?;

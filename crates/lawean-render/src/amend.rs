@@ -138,6 +138,11 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("加え", "加える")
         ),
+        Op::InsertParagraphFirst { article, .. } => format!(
+            "{}に第一項として次の一項を{}",
+            article_label(article),
+            end("加え", "加える")
+        ),
         Op::InsertParagraphAfter {
             article,
             after: ParaRef::Num(n),
@@ -553,6 +558,7 @@ fn content_of(op: &Op) -> &[String] {
     match op {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
+        | Op::InsertParagraphFirst { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertContainersAfter { text, .. }
         | Op::InsertContainersBefore { text, .. }
