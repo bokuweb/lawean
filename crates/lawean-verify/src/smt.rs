@@ -59,6 +59,12 @@ impl<'a> Compiler<'a> {
 
     /// モデル全体（applies の定義と効果）を出力する
     pub fn compile_model(&mut self) {
+        self.compile_model_with(true);
+    }
+
+    /// `effects = false` なら applies の定義だけ（効果の帰結を主張しない）。
+    /// 無矛盾の検査に使う: 効果を主張すると「両方適用されて値が違う」世界は unsat になって矛盾が見えない
+    pub fn compile_model_with(&mut self, effects: bool) {
         for r in &self.rm.model.rules {
             let a = applies(&r.id);
             self.smt.declare("Bool", &a);
@@ -76,6 +82,9 @@ impl<'a> Compiler<'a> {
             };
             self.smt
                 .assert(format!("{} applies", r.id.0), format!("(= {a} {body})"));
+            if !effects {
+                continue;
+            }
             let eff = self.effect(&r.effect, &r.id);
             if let Some(e) = eff {
                 self.smt

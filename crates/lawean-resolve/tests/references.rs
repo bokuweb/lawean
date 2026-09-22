@@ -76,6 +76,7 @@ fn all_references_in_target_law_resolve() {
     let mut total = 0;
     let mut external = 0;
     let mut inferred = 0;
+    let mut quoted = 0;
     let mut failures = Vec::new();
     let known = doc.stable_ids();
     for para in paragraphs(&doc) {
@@ -97,13 +98,19 @@ fn all_references_in_target_law_resolve() {
                     inferred += 1;
                 }
                 Resolution::External { .. } => external += 1,
+                // 読替え規定の「」の中は読替え先に相対する字句。ここからは解決しない（意図どおり）
+                Resolution::Unresolved(Unresolved::InReadReplace) => quoted += 1,
                 Resolution::Unresolved(u) => failures.push(format!("「{}」 {u:?}", r.span.text)),
             }
         }
     }
     eprintln!(
-        "references: {total} total, {external} external ({inferred} inferred), {} unresolved",
+        "references: {total} total, {external} external ({inferred} inferred), {quoted} in 読替え quotes, {} unresolved",
         failures.len()
+    );
+    assert!(
+        quoted > 0 && quoted < 20,
+        "借地借家法の読替えの「」の中の参照: {quoted}"
     );
     for f in &failures {
         eprintln!("  {f}");

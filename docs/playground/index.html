@@ -4,51 +4,12 @@
 <meta charset="utf-8">
 <title>lawean 改正案の検査 playground</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root { --bg:#fafaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#dcdcd5; --pass:#1a7f37; --fail:#b3261e; --warn:#9a6700; --skip:#8a8a84; --accent:#2b4c7e; }
-  * { box-sizing: border-box; }
-  body { margin:0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--fg); line-height:1.55; }
-  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
-  header h1 { font-size:18px; margin:0; }
-  header .sub { color:var(--muted); font-size:13px; }
-  main { display:grid; grid-template-columns: 1fr 1fr; gap:0; min-height: calc(100vh - 60px); }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  section { padding:16px 20px; }
-  section.left { border-right:1px solid var(--line); }
-  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
-  select, textarea, input { width:100%; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; color:var(--fg); }
-  textarea { min-height: 220px; resize: vertical; }
-  textarea.small { min-height: 110px; }
-  .row { display:flex; gap:10px; }
-  .row > * { flex:1; }
-  button { font: 14px -apple-system, sans-serif; padding:8px 16px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; margin-top:12px; }
-  button.secondary { background:#fff; color:var(--accent); }
-  .case-note { font-size:13px; color:var(--muted); margin:6px 0 0; }
-  .case-note b { color:var(--fg); }
-  .verdict { font-size:22px; font-weight:700; margin:0 0 8px; }
-  .verdict.pass { color:var(--pass); } .verdict.fail { color:var(--fail); }
-  ul.checks { list-style:none; padding:0; margin:0; }
-  ul.checks li { padding:8px 10px; border-top:1px solid var(--line); }
-  ul.checks li .head { display:flex; gap:8px; align-items:baseline; }
-  .mark { width:1.4em; display:inline-block; font-weight:700; }
-  .pass .mark { color:var(--pass); } .fail .mark { color:var(--fail); } .warn .mark { color:var(--warn); } .skip .mark { color:var(--skip); }
-  .skip { color:var(--skip); }
-  .kind { font: 12px ui-monospace, monospace; color:var(--muted); min-width:7em; }
-  ul.details { margin:4px 0 0 2.2em; padding:0; list-style: "– "; font-size:13px; }
-  ul.details li { color:#3a3a36; }
-  details { margin-top:12px; }
-  summary { cursor:pointer; color:var(--accent); font-size:13px; }
-  pre { font: 12px/1.5 ui-monospace, monospace; white-space:pre-wrap; word-break:break-all; background:#fff; border:1px solid var(--line); border-radius:6px; padding:8px; max-height:320px; overflow:auto; }
-  .diff .add { color:var(--pass); } .diff .del { color:var(--fail); } .diff .chg { color:var(--warn); }
-  .lean { font-size:12px; color:var(--muted); margin-top:10px; }
-  .lean code { font-size:11px; }
-  .status { font-size:12px; color:var(--muted); }
-</style>
+<link rel="stylesheet" href="playground.css">
 </head>
 <body>
 <header>
   <h1>改正案の検査 playground</h1>
-  <span class="sub">実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> を WASM にしたもの（Lean の <code>applyUnit</code> の写し）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
+  <span class="sub"><a href="draft.html"><b>発射台を選んで改正法を書く playground はこちら</b></a>。実際の改正（成功例）と、そこから作った失敗例を、改め文を書き換えながら試す。判定は Rust の <code>lawean-check</code> の WASM。溶け込みは <b>Lean の C 出力を WASM にした証明済みの <code>applyUnit</code></b> で計算する（ADR-0017）。<a href="../design-notes.html">設計</a> / <a href="../playground.html">identity patch の playground</a></span>
 </header>
 <main>
   <section class="left">
@@ -63,6 +24,8 @@
       <div>
         <label for="expected">改正後のリビジョン（あれば突き合わせる）</label>
         <select id="expected"></select>
+        <label for="base_draft">起草時の発射台（任意。改め文を書いたときの版。あれば施行前の他の改正との競合を見る）</label>
+        <select id="base_draft"></select>
       </div>
     </div>
     <label for="amend">改め文（編集できる）</label>
@@ -88,9 +51,8 @@
   </section>
 </main>
 <script type="module">
-import init, { check } from './pkg/lawean_wasm.js';
-
-const FIX = '../../fixtures/';
+import { setup, load, fill, $, esc, KIND_JA, renderReport, check } from './common.js';
+let lastBaseXml = '';
 const REVISIONS = [
   ['revisions/403AC0000000090_20170602_429AC0000000045.xml', '2017-06-02（平成29年法律第45号）'],
   ['revisions/403AC0000000090_20200401_429AC0000000045.xml', '2020-04-01（同）'],
@@ -100,7 +62,36 @@ const REVISIONS = [
   ['revisions/403AC0000000090_20230220_504AC0000000048.xml', '2023-02-20（令4-48 第73条 施行後）'],
   ['revisions/403AC0000000090_20230614_505AC0000000053.xml', '2023-06-14（令5-53 1 段目。本則は同じ）'],
   ['403AC0000000090.xml', '2026-05-21 現行（令4-48 第74条 施行後）'],
-  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '2028-06-13（令5-53 条ずれ。未対応）'],
+  ['revisions/403AC0000000090_20260521_504AC0000000048.xml', '2026-05-21（令5-53 第125条の発射台。現行と同じ）'],
+  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '2028-06-13（令5-53 第125条 施行後。条ずれ）'],
+  ['revisions/325AC1000000100_20180620_430AC0000000059.xml', '公職選挙法 2018-06-20（平30-75 の発射台）'],
+  ['revisions/325AC1000000100_20181025_430AC0100000075.xml', '公職選挙法 2018-10-25（平30-75 施行後、罰則の引用が残る）'],
+  ['revisions/325AC1000000100_20201212_502AC1000000045.xml', '公職選挙法 2020-12-12（令3-51 の発射台）'],
+  ['revisions/325AC1000000100_20210602_503AC0000000051.xml', '公職選挙法 2021-06-02（令3-51 施行後）'],
+  ['revisions/337AC0000000069_20210519_503AC0000000037.xml', '区分所有法 2021-05-19（令3-37 第24条の発射台）'],
+  ['revisions/337AC0000000069_20210901_503AC0000000037.xml', '区分所有法 2021-09-01（令3-37 第24条 施行後）'],
+  ['revisions/327AC1000000176_20210519_503AC0000000037.xml', '宅建業法 2021-05-19（令3-37 公布時。古い発射台）'],
+  ['revisions/327AC1000000176_20220401_502AC0000000008.xml', '宅建業法 2022-04-01（令3-37 第17条の発射台）'],
+  ['revisions/327AC1000000176_20220518_503AC0000000037.xml', '宅建業法 2022-05-18（令3-37 第17条 施行後）'],
+  ['laws/413AC0000000026_20210519_503AC0000000037.xml', '高齢者居住法 2021-05-19（令3-37 第44条の発射台）'],
+  ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者居住法 2022-05-18（令3-37 第44条 施行後）'],
+  ['revisions/425AC0000000061_20210519_503AC0000000037.xml', '特別措置法 2021-05-19（令3-37 第58条の発射台）'],
+  ['revisions/425AC0000000061_20220518_503AC0000000037.xml', '特別措置法 2022-05-18（令3-37 第58条 施行後）'],
+  ['revisions/324AC0000000108_20240401_505AC0000000063.xml', '古物営業法 2024-04-01（令4-68 の発射台）'],
+  ['revisions/324AC0000000108_20250601_504AC0000000068.xml', '古物営業法 2025-06-01（令4-68 施行後）'],
+  ['revisions/325AC0000000158_20240401_505AC0000000063.xml', '質屋営業法 2024-04-01（令4-68 の発射台）'],
+  ['revisions/325AC0000000158_20250601_504AC0000000068.xml', '質屋営業法 2025-06-01（令4-68 施行後）'],
+  ['revisions/323AC0000000138_20231213_505AC0000000052.xml', '旅館業法 2023-12-13（令4-68 の発射台）'],
+  ['revisions/323AC0000000138_20250601_504AC0000000068.xml', '旅館業法 2025-06-01（令4-68 施行後）'],
+  ['revisions/327AC1000000176_20250401_506AC0000000053.xml', '宅建業法 2025-04-01（令4-68 の発射台）'],
+  ['revisions/327AC1000000176_20250601_504AC0000000068.xml', '宅建業法 2025-06-01（令4-68 施行後）'],
+  ['revisions/323AC0000000201_20250401_503AC0000000049.xml', '医師法 2025-04-01（令4-68 の発射台）'],
+  ['revisions/323AC0000000201_20250601_504AC0000000068.xml', '医師法 2025-06-01（令4-68 施行後）'],
+  ['revisions/324AC0000000108_20220617_504AC0000000068.xml', '古物営業法 2022-06-17（令4-68 の公布時 = 起草時の発射台）'],
+  ['revisions/327AC1000000176_20220518_503AC0000000037.xml', '宅建業法 2022-05-18（令4-68 の公布時 = 起草時の発射台）'],
+  ['revisions/414AC0000000078_20200624_502AC0000000062.xml', '建替え円滑化法 2020-06-24（令2-62 第2条の起草時）'],
+  ['revisions/414AC0000000078_20220401_502AC0000000008.xml', '建替え円滑化法 2022-04-01（令2-62 第2条の施行時。令3-37 施行後）'],
+  ['revisions/337AC0000000069_20200401_502AC0000000008.xml', '区分所有法 2020-04-01（令2-62 の起草時）'],
 ];
 const LAWS = [
   ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律（2022-05-18）'],
@@ -109,7 +100,6 @@ const LAWS = [
   ['laws/504M60000010029.xml', '借地借家法施行規則'],
   ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
 ];
-const KIND_JA = { parse:'改め文', base:'発射台', order:'施行順序', conflict:'衝突', hane:'ハネ', consolidate:'溶け込み', expected:'改正後との一致', taisho:'新旧対照表', cross_law:'他法令' };
 const LEAN = {
   'r3-37-art35': 'Consolidate.lean: consolidates_503AC0000000037_art35, wf_503AC0000000037_art35',
   'r4-48-art73': 'Consolidate.lean: consolidates_504AC0000000048_art73',
@@ -117,24 +107,41 @@ const LEAN = {
   'r3-37-then-r4-48-art73': 'Consolidate.lean: independent_art35_art73 → art35_art73_commute（applyUnit_comm）, both_orders_reach_20230220',
   'wrong-base': 'Consolidate.lean: art35_on_wrong_base_conflicts（発射台がずれると衝突として残る）',
   'r4-48-reversed': 'Consolidate.lean: art74_before_art73_fails（applyUnit … = none）, schedule_504AC0000000048',
-  'hane-missing': 'Cases.lean: hane_missing_differs（溶け込みはするが e-Gov と一致しない）',
+  'hane-missing': 'Cases.lean: hane_missing_differs（溶け込みはするが e-Gov と一致しない）。RefsExamples.lean: hane_fixes_are_in_the_real_amendment（生成した手当て = 実際の改め文の置換）',
+  'hane-wrong-number': 'RefsExamples.lean: hane_fixes_38（正しい手当ては「第三項」）。Refs.lean: hane_complete（描画が変わるのは参照先の番号が動いたときだけ）',
   'wrong-ref': 'Rust の束縛（bind）で止まる。Lean には id 操作が届かない',
   'taisho-wrong': 'Rust の突き合わせ。Lean の対象外（資料の検査）',
   'conflict-22': 'Cases.lean: conflict_22_has_conflict（Node.conflicts に値として残る）',
-  'delete-28-dangling': 'lawean-space（Rust）。Lean の LawSpace は未',
+  'delete-28-dangling': 'Space.lean / SpaceExamples.lean: delete_28_leaves_b58_dangling',
+  'insert-article-wrong-number': 'Rust の連番の検査（lawean-amend::numbering）。溶け込みは Lean、番号の列は溶け込み後の Revision の art から',
+  'enforced-out-of-range': 'Rust の規則（附則第一条の読み）と暦。暦が Z3 の暦（lawean-verify::temporal）と一致することは lawean-verify のテスト',
+  'h30-75-koshoku-senkyo': 'Penalty は Rust の規則（罰則の行為 vs 対象規定）。Koshoku.lean: generated_fix_is_the_2021_correction（生成した手当て = 令和3年法律第51号の replace）, h30_75_does_not_touch_244',
+  'r5-53-art125': 'Consolidate.lean: consolidates_505AC0000000053_art125, wf_505AC0000000053_art125（Ident.lean の Op.renumber）',
+  'r5-53-art125-129': 'Rust の他法令の波及（lawean-space::impact）と、他法令を改正する単位（第129条）の突き合わせ。溶け込みは Lean',
+  'r5-53-art125-crosslaw-missing': 'Rust の他法令の波及（lawean-space::impact）。生成した手当てが実際の第129条と同じ',
+  'r5-53-art125-missing-hane': 'Rust のハネ（lawean-amend::hane::article_hane_candidates）。溶け込みは Lean で通り、e-Gov と食い違う',
+  'r3-37-art24-kubun': 'Rust の溶け込み（項の挿入と繰り下げの連鎖）とハネ。Lean には id 操作として届く',
+  'r3-37-art17-takken': 'Rust の溶け込み（号を含む項の追加、「」を含む字句）。Lean には id 操作として届く',
+  'r3-37-art17-stale-base': 'Rust の突き合わせ（Expected）。Base は通る = 古い発射台は字句だけでは分からない',
+  'r3-37-art44-korei': 'Rust の溶け込み。Lean には id 操作として届く',
+  'r3-37-art58-tokuso': 'Rust の溶け込み（1 操作）。Lean には id 操作として届く',
+  'r7-47-art1-kubun': 'Rust の溶け込み（140 操作 → id 操作 265 個）。Lean には id 操作として届く（replace/insertAfter/delete）',
+  'r7-47-art3-enkatsuka': 'Rust の溶け込み（616 操作 → id 操作 844 個、本則 766 項）。Lean には id 操作として届く',
+  'r7-47-art2-hisai': 'Rust の溶け込み（複数の条・章の差し替え）。Lean には id 操作として届く',
+  'r7-47-art4-5-tekiseika': 'Rust の溶け込み（2 段の施行順）。Lean には id 操作として届く',
+  'r7-47-art6-tekiseika-2027': 'Rust の溶け込み。未施行リビジョンとの突き合わせ',
+  'r7-47-art7-jutaku-kinyu': 'Rust の溶け込み（附則の条は文書の側だけ）。Lean には本則の id 操作だけ届く',
+  'r4-68-kobutsu': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r4-68-shichiya': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r4-68-ryokan': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r4-68-takken': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r4-68-ishi': 'Rust の溶け込み（位置の列挙・条の範囲の展開）。Lean には id 操作（replace）として届く',
+  'r2-62-vs-r3-37-stale': 'Rust の Stale（両方の発射台に束縛、加える本文の参照は id で持って描き直す = body.rs）。Lean Pending.lean: r2_62_then_r3_37_conflicts_only_at_124（衝突は第124条第3項だけ）, r2_62_bodies_render_like_egov_after_r3_37（描き直した第178条・第180条第4項が e-Gov と一致）',
+  'r4-68-takken-commutes': 'Rust の Stale（触る id が交わらない）。Lean は同じ形の古物営業法で Pending.lean: independent_art98_intervening → art98_intervening_commute（applyUnit_comm）',
+  'r5-53-art125-future-base': 'Rust の Stale（起草時の版には当たらず施行時の版に当たる = 先行改正の施行後を前提）',
+  'r3-51-koshoku-senkyo-fix': 'Koshoku.lean: consolidates_503AC0000000051（本則 1167 項が e-Gov と一致）',
 };
 
-const $ = id => document.getElementById(id);
-const cache = new Map();
-async function load(rel) {
-  if (!cache.has(rel)) cache.set(rel, fetch(FIX + rel).then(r => { if (!r.ok) throw new Error(rel + ': ' + r.status); return r.text(); }));
-  return cache.get(rel);
-}
-function fill(sel, items, allowNone) {
-  sel.innerHTML = '';
-  if (allowNone) sel.append(new Option('（無し）', ''));
-  for (const [v, t] of items) sel.append(new Option(t, v));
-}
 let cases = [];
 let current = null;
 
@@ -142,8 +149,10 @@ async function selectCase(id) {
   current = cases.find(c => c.id === id);
   if (!current) return;
   $('note').innerHTML = `<b>${current.kind === 'success' ? '成功例' : '失敗例'}</b> — ${current.note || ''}<br><span>出典: ${current.source || ''}</span>`;
-  $('base').value = current.base;
-  $('expected').value = current.expected || '';
+  for (const [sel, v] of [['base', current.base], ['expected', current.expected || ''], ['base_draft', current.base_draft || '']]) {
+    if (v && ![...$(sel).options].some(o => o.value === v)) $(sel).append(new Option(v, v));
+    $(sel).value = v;
+  }
   $('amend').value = await load(current.amendment);
   $('taisho').value = current.taisho ? await load(current.taisho) : '';
   for (const o of $('laws').options) o.selected = (current.other_laws || []).includes(o.value);
@@ -156,9 +165,12 @@ async function run() {
   try {
     const base = await load($('base').value);
     const expected = $('expected').value ? await load($('expected').value) : null;
+    const base_draft = $('base_draft').value ? await load($('base_draft').value) : null;
+    const other_laws_draft = current && current.other_laws_draft ? await Promise.all(current.other_laws_draft.map(load)) : [];
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
-    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null };
+    const input = { base, amendment: $('amend').value, expected, taisho: $('taisho').value.trim() || null, other_laws, enforced: $('enforced').value || null, base_draft, other_laws_draft };
     const t0 = performance.now();
+    lastBaseXml = base;
     const report = JSON.parse(check(JSON.stringify(input)));
     render(report, performance.now() - t0);
   } catch (e) {
@@ -167,42 +179,25 @@ async function run() {
   $('status').textContent = '';
 }
 
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
 function render(r, ms) {
-  if (r.error) { $('report').innerHTML = `<pre>${esc(r.error)}</pre>`; return; }
   const expect = current ? (r.ok === current.expect.ok && JSON.stringify(r.checks.filter(c => c.status === 'fail').map(c => c.kind)) === JSON.stringify(current.expect.fail)) : null;
-  let h = `<p class="verdict ${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'} <span class="status">${ms.toFixed(0)} ms${expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）'}</span></p>`;
-  h += '<ul class="checks">';
-  for (const c of r.checks) {
-    const mark = { pass:'✓', fail:'✗', warn:'!', skip:'–' }[c.status];
-    h += `<li class="${c.status}"><div class="head"><span class="mark">${mark}</span><span class="kind">${KIND_JA[c.kind] || c.kind}</span><span>${esc(c.message)}</span></div>`;
-    if (c.details.length) h += '<ul class="details">' + c.details.map(d => `<li>${esc(d)}</li>`).join('') + '</ul>';
-    h += '</li>';
-  }
-  h += '</ul>';
-  if (current && LEAN[current.id]) h += `<p class="lean">Lean 側の対応: <code>${esc(LEAN[current.id])}</code></p>`;
-  if (r.diff.length) {
-    h += `<details open><summary>発射台からの差分（${r.diff.length} 項）</summary><pre class="diff">` +
-      r.diff.map(d => `<span class="${d.startsWith('追加') ? 'add' : d.startsWith('削除') ? 'del' : 'chg'}">${esc(d)}</span>`).join('\n') + '</pre></details>';
-  }
-  for (const u of r.units) {
-    h += `<details><summary>${esc(u.label)}: ${u.instructions} 文・${u.ops} 操作 → id 操作 ${u.ident_ops.length} 個（Lean の AmendUnit）</summary><pre>${esc(u.ident_ops.join('\n') || '（束縛できなかった）')}</pre></details>`;
-  }
-  h += `<details><summary>報告の JSON</summary><pre>${esc(JSON.stringify(r, null, 1))}</pre></details>`;
-  $('report').innerHTML = h;
+  const note = expect === null ? '' : expect ? '・ケースの期待どおり' : '・ケースの期待と違う（改め文を編集した？）';
+  const extra = current && LEAN[current.id] ? `<p class="lean">Lean 側の対応: <code>${esc(LEAN[current.id])}</code></p>` : '';
+  $('report').innerHTML = renderReport(r, ms, { note, extra, baseXml: lastBaseXml });
 }
 
 (async () => {
-  await init();
+  await setup();
   fill($('base'), REVISIONS, false);
   fill($('expected'), REVISIONS, true);
+  fill($('base_draft'), REVISIONS, true);
   fill($('laws'), LAWS, false);
   cases = JSON.parse(await load('cases/cases.json'));
   const sel = $('case');
   for (const kind of ['success', 'failure']) {
     const g = document.createElement('optgroup');
-    g.label = kind === 'success' ? '成功例（実際の改正）' : '失敗例';
+    g.label = kind === 'success' ? '成功例（実際の改正）' : '失敗例（実際に起きたもの・実際の改め文から作ったもの）';
     for (const c of cases.filter(c => c.kind === kind)) g.append(new Option(c.title, c.id));
     sel.append(g);
   }

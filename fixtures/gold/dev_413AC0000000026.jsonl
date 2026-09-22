@@ -1,0 +1,60 @@
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:11/para:3/sent:1", "expected": [{"field": "within", "raw": "その承継の日から三十日以内"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:12/para:1/sent:1", "expected": [{"field": "before", "raw": "その日の三十日前までに"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:12/para:2/sent:1", "expected": [{"field": "within", "raw": "その日から三十日以内"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:5/para:2/sent:1", "expected": [{"field": "every", "raw": "五年ごとに"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:8/para:1/item:2/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなった日から起算して一年を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:8/para:1/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から起算して一年を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:8/para:1/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "同号に規定する暴力団員でなくなった日から五年を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:1/art:9/para:1/sent:1", "expected": [{"field": "within", "raw": "その日から三十日以内"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:4/art:27/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "その公告の日から三十日を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:5/art:29/para:1/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなった日から起算して二年を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:5/art:29/para:1/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "その取消しの日から起算して二年を経過し"}]}
+{"sentence": "413AC0000000026/main/chap:3/sec:5/art:31/para:2/sent:1", "expected": [{"field": "before", "raw": "変更しようとする日の二週間前までに"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:54/para:1/item:2/sent:2", "expected": [{"field": "within", "raw": "一年以内"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:59/para:1/item:4/sent:1", "expected": [{"field": "compare", "raw": "六月以上"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:59/para:1/sent:2", "expected": [{"field": "elapsed", "raw": "解約の申入れの日から一月を経過すること"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:61/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "それを知った日から一月を経過する日"}, {"field": "quantity", "raw": "二人以上"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:62/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "当該賃借人の死亡があったことを知った日から一月を経過する日"}, {"field": "quantity", "raw": "二人以上"}]}
+{"sentence": "413AC0000000026/main/chap:5/art:62/para:2/sent:1", "expected": [{"field": "elapsed", "raw": "当該賃借人の死亡があったことを知った日から一月を経過する日"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:79/para:1/item:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第三十二条第一項"}, {"field": "penalty_act", "raw": "その職務に関し知り得た秘密を漏らし、又は自己の利益のために使用した"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:79/para:1/sent:1", "expected": [{"field": "sanction", "raw": "一年以下の懲役"}, {"field": "sanction", "raw": "五十万円以下の罰金"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:80/para:1/item:7/sent:1", "expected": [{"field": "penalty_target", "raw": "第三十四条第一項"}, {"field": "penalty_act", "raw": "帳簿を備え付けず、帳簿に記載せず、若しくは帳簿に虚偽の記載をし、又は帳簿を保存しなかった"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:80/para:1/sent:1", "expected": [{"field": "sanction", "raw": "三十万円以下の罰金"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:81/para:1/sent:1", "expected": [{"field": "sanction", "raw": "二十万円以下の罰金"}]}
+{"sentence": "413AC0000000026/main/chap:8/art:82/para:1/sent:1", "expected": [{"field": "sanction", "raw": "罰金"}]}
+{"sentence": "413AC0000000026/suppl:0/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して四月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:0/art:1/para:1/sent:2", "expected": [{"field": "enforcement", "raw": "公布の日から起算して六月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:0/art:3/para:3/sent:1", "expected": [{"field": "duration", "raw": "五年"}, {"field": "within", "raw": "二年以内"}]}
+{"sentence": "413AC0000000026/suppl:1/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:10/art:1/para:1/item:1/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して一年を超えない範囲内において政令で定める日"}]}
+{"sentence": "413AC0000000026/suppl:10/art:1/para:1/item:2/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して六月を超えない範囲内において政令で定める日"}]}
+{"sentence": "413AC0000000026/suppl:10/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:10/art:8/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "この法律の施行後五年を経過した場合"}]}
+{"sentence": "413AC0000000026/suppl:11/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して六月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:11/art:9/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "この法律の施行後五年を経過した場合"}]}
+{"sentence": "413AC0000000026/suppl:12/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して一年を超えない範囲内において政令で定める日（以下「施行日」という。）から施行する"}]}
+{"sentence": "413AC0000000026/suppl:13/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して二十日を経過した日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:14/art:1/para:1/item:1/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日"}]}
+{"sentence": "413AC0000000026/suppl:14/art:1/para:1/item:2/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を経過した日"}]}
+{"sentence": "413AC0000000026/suppl:14/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "平成二十九年四月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:15/art:1/para:1/item:2/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を経過した日"}]}
+{"sentence": "413AC0000000026/suppl:15/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "平成三十年四月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:16/art:1/para:1/item:1/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日"}]}
+{"sentence": "413AC0000000026/suppl:16/art:1/para:1/item:2/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して六月を経過した日"}]}
+{"sentence": "413AC0000000026/suppl:16/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を経過した日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:16/art:7/para:1/sent:1", "expected": [{"field": "approx", "raw": "この法律の公布後一年以内を目途"}]}
+{"sentence": "413AC0000000026/suppl:17/art:1/para:1/item:1/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日"}]}
+{"sentence": "413AC0000000026/suppl:17/art:1/para:1/item:4/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して一年を超えない範囲内において、各規定につき、政令で定める日"}]}
+{"sentence": "413AC0000000026/suppl:17/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "令和三年九月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:17/art:73/para:1/sent:1", "expected": [{"field": "approx", "raw": "この法律の公布後一年以内を目途"}]}
+{"sentence": "413AC0000000026/suppl:2/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:3/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "平成十六年七月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:4/art:1/para:1/item:1/col:2/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を超えない範囲内において政令で定める日"}]}
+{"sentence": "413AC0000000026/suppl:4/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "平成十六年四月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:5/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から起算して六月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:6/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:6/art:1/para:1/sent:2", "expected": [{"field": "enforcement", "raw": "公布の日から起算して三月を超えない範囲内において政令で定める日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:7/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "平成十九年四月一日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:7/art:1/para:1/sent:2", "expected": [{"field": "enforcement", "raw": "公布の日から施行する"}]}
+{"sentence": "413AC0000000026/suppl:9/art:1/para:1/sent:1", "expected": [{"field": "enforcement", "raw": "公布の日から施行する"}]}
+{"sentence": "413AC0000000026/main/chap:1/art:1/para:1/sent:1", "expected": []}

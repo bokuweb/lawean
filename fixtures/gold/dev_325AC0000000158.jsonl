@@ -1,0 +1,21 @@
+{"sentence": "325AC0000000158/main/art:14/para:1/sent:1", "expected": [{"field": "period", "raw": "最終の記載をした日から三年間"}]}
+{"sentence": "325AC0000000158/main/art:16/para:2/sent:1", "expected": [{"field": "compare", "raw": "三月未満"}, {"field": "compare", "raw": "一月未満"}]}
+{"sentence": "325AC0000000158/main/art:20/para:2/sent:1", "expected": [{"field": "period", "raw": "その日から六月間"}]}
+{"sentence": "325AC0000000158/main/art:22/para:1/sent:2", "expected": [{"field": "elapsed", "raw": "盗難又は遺失のときから一年を経過した後"}]}
+{"sentence": "325AC0000000158/main/art:23/para:1/sent:1", "expected": [{"field": "within", "raw": "三十日以内"}]}
+{"sentence": "325AC0000000158/main/art:25/para:1/item:2/sent:1", "expected": [{"field": "within_before", "raw": "許可の取消し若しくは営業の停止をしようとするとき以前三年以内"}, {"field": "within_before", "raw": "許可の取消し若しくは営業の停止をしようとするとき以前三年以内"}]}
+{"sentence": "325AC0000000158/main/art:25/para:1/item:3/sent:1", "expected": [{"field": "within_before", "raw": "許可の取消し若しくは営業の停止をしようとするとき以前三年以内"}, {"field": "within_before", "raw": "許可の取消し若しくは営業の停止をしようとするとき以前三年以内"}, {"field": "within_before", "raw": "許可の取消し若しくは営業の停止をしようとするとき以前三年以内"}]}
+{"sentence": "325AC0000000158/main/art:25/para:1/sent:1", "expected": [{"field": "within", "raw": "一年以内"}]}
+{"sentence": "325AC0000000158/main/art:26/para:2/sent:1", "expected": [{"field": "before", "raw": "その期日の一週間前までに"}]}
+{"sentence": "325AC0000000158/main/art:3/para:1/item:1/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることのなくなつた後、三年を経過し"}]}
+{"sentence": "325AC0000000158/main/art:3/para:1/item:2/sent:1", "expected": [{"field": "within_before", "raw": "許可の申請前三年以内"}]}
+{"sentence": "325AC0000000158/main/art:3/para:1/item:7/sent:1", "expected": [{"field": "elapsed", "raw": "取消しの日から三年を経過し"}]}
+{"sentence": "325AC0000000158/main/art:30/para:1/sent:1", "expected": [{"field": "sanction", "raw": "三年以下の拘禁刑"}, {"field": "sanction", "raw": "十万円以下の罰金"}]}
+{"sentence": "325AC0000000158/main/art:31/para:1/sent:1", "expected": [{"field": "sanction", "raw": "一年以下の拘禁刑"}, {"field": "sanction", "raw": "三万円以下の罰金"}]}
+{"sentence": "325AC0000000158/main/art:32/para:1/sent:1", "expected": [{"field": "sanction", "raw": "六月以下の拘禁刑"}, {"field": "sanction", "raw": "二万円以下の罰金"}]}
+{"sentence": "325AC0000000158/main/art:33/para:1/sent:1", "expected": [{"field": "sanction", "raw": "二万円以下の罰金"}]}
+{"sentence": "325AC0000000158/main/art:34/para:1/sent:1", "expected": [{"field": "sanction", "raw": "拘留"}, {"field": "sanction", "raw": "科料"}]}
+{"sentence": "325AC0000000158/main/art:35/para:1/sent:1", "expected": [{"field": "sanction", "raw": "罰金"}]}
+{"sentence": "325AC0000000158/main/art:9/para:1/sent:1", "expected": [{"field": "within", "raw": "十日以内"}]}
+{"sentence": "325AC0000000158/main/art:1/para:1/sent:1", "expected": []}
+{"sentence": "325AC0000000158/main/art:2/para:1/sent:1", "expected": []}

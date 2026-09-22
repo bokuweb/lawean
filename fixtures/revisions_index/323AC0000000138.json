@@ -1,0 +1,89 @@
+{
+ "law_id": "323AC0000000138",
+ "revisions": [
+  {
+   "law_revision_id": "323AC0000000138_20250601_504AC0000000068",
+   "amendment_law_id": "504AC0000000068",
+   "amendment_enforcement_date": "2025-06-01",
+   "amendment_promulgate_date": "2022-06-17",
+   "current_revision_status": "CurrentEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20231213_505AC0000000052",
+   "amendment_law_id": "505AC0000000052",
+   "amendment_enforcement_date": "2023-12-13",
+   "amendment_promulgate_date": "2023-06-14",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20230713_505AC0000000067",
+   "amendment_law_id": "505AC0000000067",
+   "amendment_enforcement_date": "2023-07-13",
+   "amendment_promulgate_date": "2023-06-23",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20230713_505AC0000000066",
+   "amendment_law_id": "505AC0000000066",
+   "amendment_enforcement_date": "2023-07-13",
+   "amendment_promulgate_date": "2023-06-23",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20230614_505AC0000000052",
+   "amendment_law_id": "505AC0000000052",
+   "amendment_enforcement_date": "2023-06-14",
+   "amendment_promulgate_date": "2023-06-14",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20220617_504AC0000000068",
+   "amendment_law_id": "504AC0000000068",
+   "amendment_enforcement_date": "2022-06-17",
+   "amendment_promulgate_date": "2022-06-17",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20191214_501AC0000000037",
+   "amendment_law_id": "501AC0000000037",
+   "amendment_enforcement_date": "2019-12-14",
+   "amendment_promulgate_date": "2019-06-14",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20190914_501AC0000000037",
+   "amendment_law_id": "501AC0000000037",
+   "amendment_enforcement_date": "2019-09-14",
+   "amendment_promulgate_date": "2019-06-14",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20190614_501AC0000000037",
+   "amendment_law_id": "501AC0000000037",
+   "amendment_enforcement_date": "2019-06-14",
+   "amendment_promulgate_date": "2019-06-14",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20180615_429AC0000000084",
+   "amendment_law_id": "429AC0000000084",
+   "amendment_enforcement_date": "2018-06-15",
+   "amendment_promulgate_date": "2017-12-15",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20171215_429AC0000000084",
+   "amendment_law_id": "429AC0000000084",
+   "amendment_enforcement_date": "2017-12-15",
+   "amendment_promulgate_date": "2017-12-15",
+   "current_revision_status": "PreviousEnforced"
+  },
+  {
+   "law_revision_id": "323AC0000000138_20170401_428AC0000000047",
+   "amendment_law_id": "428AC0000000047",
+   "amendment_enforcement_date": "2017-04-01",
+   "amendment_promulgate_date": "2016-05-20",
+   "current_revision_status": "PreviousEnforced"
+  }
+ ]
+}

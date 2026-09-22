@@ -12,3 +12,11 @@ import Lawean.Properties
 import Lawean.Frame
 import Lawean.FrameExamples
 import Lawean.Cases
+import Lawean.Refs
+import Lawean.RefsExamples
+import Lawean.Space
+import Lawean.SpaceExamples
+import Lawean.Koshoku
+import Lawean.Pending
+import Lawean.Check
+import Lawean.Ffi

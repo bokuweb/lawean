@@ -1,0 +1,31 @@
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:4/para:1/item:2/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることのなくなつた日から起算して五年を経過し"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:4/para:1/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "当該命令又は指示を受けた日から起算して三年を経過し"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:4/para:1/item:6/sent:1", "expected": [{"field": "elapsed", "raw": "当該取消しの日から起算して五年を経過し"}, {"field": "within_before", "raw": "当該取消しに係る聴聞の期日及び場所が公示された日前六十日以内"}, {"field": "elapsed", "raw": "当該取消しの日から起算して五年を経過し"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:4/para:1/item:7/sent:1", "expected": [{"field": "elapsed", "raw": "当該返納の日から起算して五年を経過し"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:6/para:1/item:3/sent:1", "expected": [{"field": "within", "raw": "許可を受けてから六月以内"}, {"field": "compare", "raw": "六月以上"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:1/art:6/para:2/sent:1", "expected": [{"field": "elapsed", "raw": "その公告の日から三十日を経過し"}]}
+{"sentence": "324AC0000000108/main/chap:2/sec:2/art:10_2/para:1/sent:1", "expected": [{"field": "within", "raw": "営業開始の日から二週間以内"}]}
+{"sentence": "324AC0000000108/main/chap:3/art:18/para:1/sent:1", "expected": [{"field": "period", "raw": "最終の記載をした日から三年間"}, {"field": "period", "raw": "当該記録をした日から三年間"}]}
+{"sentence": "324AC0000000108/main/chap:3/art:19/para:2/sent:1", "expected": [{"field": "period", "raw": "その日から六月間"}]}
+{"sentence": "324AC0000000108/main/chap:3/art:20/para:1/sent:2", "expected": [{"field": "elapsed", "raw": "盗難又は遺失の時から一年を経過した後"}]}
+{"sentence": "324AC0000000108/main/chap:3/art:21/para:1/sent:1", "expected": [{"field": "within", "raw": "三十日以内"}]}
+{"sentence": "324AC0000000108/main/chap:4/art:24/para:1/sent:1", "expected": [{"field": "within", "raw": "六月を超えない範囲内"}]}
+{"sentence": "324AC0000000108/main/chap:4/art:24/para:2/sent:1", "expected": [{"field": "within", "raw": "六月を超えない範囲内"}]}
+{"sentence": "324AC0000000108/main/chap:4/art:25/para:2/sent:1", "expected": [{"field": "before", "raw": "その期日の一週間前までに"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:31/para:1/item:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第三条"}, {"field": "penalty_act", "raw": "許可を受けないで第二条第二項第一号又は第二号に掲げる営業を営んだ"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:31/para:1/sent:1", "expected": [{"field": "sanction", "raw": "三年以下の拘禁刑"}, {"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:32/para:1/sent:1", "expected": [{"field": "sanction", "raw": "一年以下の拘禁刑"}, {"field": "sanction", "raw": "五十万円以下の罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:33/para:1/item:2/sent:1", "expected": [{"field": "penalty_target", "raw": "第十六条又は第十七条"}, {"field": "penalty_act", "raw": "必要な記載若しくは電磁的方法による記録をせず、又は虚偽の記載若しくは電磁的方法による記録をした"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:33/para:1/item:3/sent:1", "expected": [{"field": "penalty_target", "raw": "第十八条第二項"}, {"field": "penalty_act", "raw": "届出をせず、又は虚偽の届出をした"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:33/para:1/item:4/sent:1", "expected": [{"field": "penalty_target", "raw": "第十九条第二項"}, {"field": "penalty_act", "raw": "品触れに係る書面に到達の日付を記載せず、若しくは虚偽の日付を記載し、又はこれを保存しなかつた"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:33/para:1/sent:1", "expected": [{"field": "sanction", "raw": "六月以下の拘禁刑"}, {"field": "sanction", "raw": "三十万円以下の罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:34/para:1/item:2/sent:1", "expected": [{"field": "penalty_target", "raw": "第十条第一項又は第三項"}, {"field": "penalty_act", "raw": "届出をせず、又は虚偽の届出をした"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:34/para:1/item:3/sent:1", "expected": [{"field": "penalty_target", "raw": "第十条の二第一項"}, {"field": "penalty_act", "raw": "届出書若しくは添付書類を提出せず、又は同項の届出書若しくは添付書類に虚偽の記載をして提出した"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:34/para:1/sent:1", "expected": [{"field": "sanction", "raw": "二十万円以下の罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:35/para:1/item:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第七条第一項、第二項若しくは第四項若しくは第十条の二第二項"}, {"field": "penalty_act", "raw": "届出書若しくは添付書類を提出せず、又は第七条第一項、第二項若しくは第四項若しくは第十条の二第二項の届出書若しくは添付書類に虚偽の記載をして提出した"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:35/para:1/sent:1", "expected": [{"field": "sanction", "raw": "十万円以下の罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:37/para:1/sent:1", "expected": [{"field": "sanction", "raw": "拘留"}, {"field": "sanction", "raw": "科料"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:38/para:1/sent:1", "expected": [{"field": "sanction", "raw": "罰金"}]}
+{"sentence": "324AC0000000108/main/chap:6/art:39/para:1/sent:1", "expected": [{"field": "sanction", "raw": "五万円以下の過料"}]}
+{"sentence": "324AC0000000108/main/chap:1/art:1/para:1/sent:1", "expected": []}
+{"sentence": "324AC0000000108/main/chap:1/art:2/para:1/sent:1", "expected": []}

@@ -56,6 +56,7 @@ fn reiwa3_act37_art35_binds_to_ident_ops() {
             IdentOp::InsertAfter { .. } => "insert",
             IdentOp::Delete { .. } => "delete",
             IdentOp::Resolve { .. } => "resolve",
+            IdentOp::Renumber { .. } => "renumber",
         })
         .collect();
     assert_eq!(
@@ -206,4 +207,41 @@ fn touched_paragraphs_in_egov_ids() {
             "403AC0000000090/main/chap:3/sec:3/art:39/para:3",
         ]
     );
+}
+
+/// 改め文の無い先行改正を、2 つのリビジョンの差から id の操作列にする（docs/13）。
+/// 当てた結果が施行時の版と一致し、令4-68 第98条（古物営業法）と独立 = 可換
+#[test]
+fn derived_unit_reproduces_revision_and_is_independent_of_the_real_unit() {
+    use lawean_amend::ident::{
+        apply_unit as apply_ident, bind, derive_unit, from_document, independent_units,
+    };
+    let rev =
+        |id: &str| lawean_source::parse_response(&fixture(&format!("revisions/{id}.xml"))).unwrap();
+    let draft = rev("324AC0000000108_20220617_504AC0000000068");
+    let enf = rev("324AC0000000108_20240401_505AC0000000063");
+    let after = rev("324AC0000000108_20250601_504AC0000000068");
+    let (rd, re, ra) = (
+        from_document(&draft),
+        from_document(&enf),
+        from_document(&after),
+    );
+    let b = derive_unit(&rd, &re, "derived");
+    assert!(!b.is_empty());
+    assert_eq!(apply_ident(&rd, &b).unwrap().render(), re.render());
+    // 令4-68 第98条を起草時の版に束縛したものと独立。どちらの順でも e-Gov の 2025-06-01 版になる
+    let units =
+        lawean_amend::parse_units(&fixture("amendments/504AC0000000068_5laws.txt")).unwrap();
+    let u98 = units
+        .iter()
+        .find(|u| u.target_title == "古物営業法")
+        .unwrap();
+    let x = bind(&draft, u98, "504AC0000000068/art98").unwrap().ops;
+    assert!(independent_units(&x, &b));
+    let mut xb = x.clone();
+    xb.extend(b.iter().cloned());
+    let mut bx = b.clone();
+    bx.extend(x.iter().cloned());
+    assert_eq!(apply_ident(&rd, &xb).unwrap().render(), ra.render());
+    assert_eq!(apply_ident(&rd, &bx).unwrap().render(), ra.render());
 }

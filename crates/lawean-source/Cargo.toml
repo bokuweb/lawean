@@ -9,3 +9,4 @@ description = "Source IR: a lossless typed representation of e-Gov 法令標準 
 [dependencies]
 roxmltree.workspace = true
 thiserror.workspace = true
+serde.workspace = true

@@ -151,7 +151,7 @@ theorem art3_ge_30 : ∀ w, consistent model w → 360 ≤ w.ints "存続期間"
 | ~~M1~~ | `Sem.lean`（型・評価器・`consistent`）と第3条の手書きデータ。性質 2 件 | 済み。≥ 30 年は `simp` + `omega`、= 30 年の反例は証人を `native_decide`。Z3 と同じ結論 |
 | ~~M2~~ | `lawean-lean::sem` が手書き 8 条を層化して出力。[07](07-verification.md) の 6 性質を `Properties.lean` に | 済み。6 件が Lean と Z3 で一致。公理は `propext` / `Classical.choice` / `Quot.sound`（`ofReduceBool` は反例の証人だけ）。**層化が手書き IR のバグを 1 件検出**（§8） |
 | ~~M3~~ | `Frame.lean`（`applies_agree` / `consistentOn_agree` / `transfer`）。令3-37 第35条の前後で 5 性質を移送。触る改正（架空）で `Sub` が壊れて反例 | 済み。`drafts/widen-30.txt` は第30条の手書き IR が無いので未。層 2 が出せるようになったら |
-| M4 | Lean → C。`Ident.applyUnit` と `Sem.applies` を C に出して Rust / WASM から呼ぶ | `ident::apply_unit`（Rust の写し）を削除。三者一致テストが二者に減る |
+| M4 | Lean → C。`Ident.applyUnit` と `Sem.applies` を C に出して Rust / WASM から呼ぶ | **ネイティブは済み**（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)、`lawean-leanrt`）。`lawean-check` は Lean 経路が本線。WASM（Emscripten）と写しの削除、`Sem.applies` の入口は次 |
 | M5 | 層 2 の出力を同じ経路に（[11](11-layer2.md)）。確度と Unknown を前提に持つ性質 | 手書きでない IR で M2 の性質が通る（または Unknown が前提に出る） |
 
 M1〜M3 は Rust 側の変更が小さい。M4 はツールチェーン（Lean の C 出力 + `leanc` / Emscripten）の作業。

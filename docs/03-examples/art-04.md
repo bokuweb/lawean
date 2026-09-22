@@ -18,6 +18,7 @@ Rule R4-1'
   subject:    Ref(D:借地権)
   condition:  And(Pred(更新する), Pred(最初の更新))
   effect:     Set(存続期間, Duration(20, Year, from = Event(更新の日)))
+  overrides:  [R4-1, R4-2]                              ← 最初の更新では 10 年の原則も、それに対するただし書き R4-2 も退く
   provenance: main/art:4/para:1/sent:1 (high, human)     ← 同じ文から 2 Rule
 
 Rule R4-2                                              ← R4-1 に対するただし書き
@@ -32,6 +33,10 @@ Rule R4-2'                                             ← R4-1' に対するた
   overrides:  [R4-1']
   provenance: main/art:4/para:1/sent:2 (high, human)
 ```
+
+R4-1' が R4-2 も上書きするのは、Z3 の無矛盾検査（[07](../07-verification.md)）が見つけた 3 件目のバグの修正。
+当初は R4-1 だけを上書きしていたため、最初の更新で 11〜19 年と定めた世界で R4-1'（20 年）と R4-2（その期間）が同時に適用され、
+更新後の期間に 2 つの値が要求されて模型が無くなっていた。
 
 属性は「存続期間」ではなく **「更新後の期間」**（見出しどおり）。第3条の「存続期間」と同じ属性にすると、更新時に両方が値を定めて矛盾する。
 

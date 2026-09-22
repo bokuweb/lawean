@@ -1,0 +1,15 @@
+{"sentence": "323AC0000000138/main/art:10/para:1/item:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第三条第一項"}, {"field": "penalty_act", "raw": "同項の規定による許可を受けないで旅館業を営んだ"}]}
+{"sentence": "323AC0000000138/main/art:10/para:1/sent:1", "expected": [{"field": "sanction", "raw": "六月以下の拘禁刑"}, {"field": "sanction", "raw": "百万円以下の罰金"}]}
+{"sentence": "323AC0000000138/main/art:11/para:1/sent:1", "expected": [{"field": "sanction", "raw": "五十万円以下の罰金"}]}
+{"sentence": "323AC0000000138/main/art:12/para:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第六条第二項"}, {"field": "penalty_act", "raw": "同条第一項の事項を偽つて告げた"}, {"field": "sanction", "raw": "拘留"}, {"field": "sanction", "raw": "科料"}]}
+{"sentence": "323AC0000000138/main/art:13/para:1/sent:1", "expected": [{"field": "sanction", "raw": "罰金"}]}
+{"sentence": "323AC0000000138/main/art:2/para:4/sent:1", "expected": [{"field": "compare", "raw": "一月以上"}]}
+{"sentence": "323AC0000000138/main/art:3/para:2/item:3/sent:1", "expected": [{"field": "elapsed", "raw": "執行を受けることがなくなつた日から起算して三年を経過し"}]}
+{"sentence": "323AC0000000138/main/art:3/para:2/item:4/sent:1", "expected": [{"field": "elapsed", "raw": "取消しの日から起算して三年を経過し"}]}
+{"sentence": "323AC0000000138/main/art:3/para:2/item:5/sent:1", "expected": [{"field": "elapsed", "raw": "同号に規定する暴力団員でなくなつた日から起算して五年を経過し"}]}
+{"sentence": "323AC0000000138/main/art:3_4/para:1/sent:1", "expected": [{"field": "within", "raw": "被相続人の死亡後六十日以内"}, {"field": "quantity", "raw": "二人以上"}]}
+{"sentence": "323AC0000000138/main/art:8/para:1/sent:1", "expected": [{"field": "within", "raw": "一年以内"}]}
+{"sentence": "323AC0000000138/main/art:9/para:1/sent:1", "expected": [{"field": "before", "raw": "聴聞の期日又は弁明を記載した書面の提出期限（口頭による弁明の機会の付与を行う場合には、その日時）の一週間前までに"}]}
+{"sentence": "323AC0000000138/main/art:1/para:1/sent:1", "expected": []}
+{"sentence": "323AC0000000138/main/art:2/para:1/sent:1", "expected": []}
+{"sentence": "323AC0000000138/main/art:7/para:1/sent:1", "expected": []}

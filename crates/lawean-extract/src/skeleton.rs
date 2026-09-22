@@ -2,6 +2,7 @@
 
 use crate::clause::{self, Concession, ConditionClause, OverrideSpan};
 use crate::effect::{self, EffectKind};
+use crate::temporal::{self, TimeExpr, TimeKind};
 use lawean_resolve::{resolve_sentence_with, Antecedent, Index, Resolution};
 use lawean_semantic::build;
 use lawean_semantic::*;
@@ -191,10 +192,20 @@ pub fn to_model(doc: &LegalDocument, skeletons: &[Skeleton]) -> SemanticModel {
         let condition = if cond_text.is_empty() {
             Expr::True
         } else {
-            Expr::Unknown(build::unknown(
+            let mut parts = Vec::new();
+            for c in &sk.conditions {
+                parts.extend(typed_conditions(&c.text));
+            }
+            let rest = Expr::Unknown(build::unknown(
                 UnknownKind::Unparsed,
                 &cond_text.join(" / "),
-            ))
+            ));
+            if parts.is_empty() {
+                rest
+            } else {
+                parts.push(rest);
+                build::and(parts)
+            }
         };
         let mut r = build::rule(&rule_id(&sk.sentence).0)
             .condition(condition)
@@ -324,15 +335,122 @@ fn effect_of(sk: &Skeleton, under: &dyn Fn(&StableId) -> Vec<RuleId>) -> Effect 
             topic: sk.text.clone(),
         },
         EffectKind::Preserve => Effect::Preserve(Target::Contract(sk.text.clone())),
-        EffectKind::Set | EffectKind::Follow | EffectKind::Suffice | EffectKind::Lapse => {
-            Effect::Set {
+        // 「借地権の存続期間は、三十年とする」「更新の日から十年とする」: 主題を属性、時間表現を値に
+        EffectKind::Set => match set_value(&sk.text) {
+            Some((attribute, value)) => Effect::Set { attribute, value },
+            None => Effect::Set {
                 attribute: sk.effect_tail.clone().unwrap_or_default(),
                 value: Value::Unknown(u()),
-            }
-        }
+            },
+        },
+        EffectKind::Follow | EffectKind::Suffice | EffectKind::Lapse => Effect::Set {
+            attribute: sk.effect_tail.clone().unwrap_or_default(),
+            value: Value::Unknown(u()),
+        },
         EffectKind::Fragment
         | EffectKind::Definition
         | EffectKind::Enforce
         | EffectKind::Repeal => Effect::Unknown(u()),
     }
+}
+
+// ---------------------------------------------------------------- 時間表現 → Semantic IR の値・条件（L3 の一部）
+
+fn duration_of(d: &temporal::Dur) -> Option<Duration> {
+    match d.unit {
+        temporal::Unit::Year => Some(build::years(d.n)),
+        temporal::Unit::Month => Some(build::months(d.n)),
+        _ => None,
+    }
+}
+
+/// 値の直前の主題（「借地権の存続期間は、三十年とする」→「存続期間」、
+/// 「…場合においては、その期間は、更新の日から十年とする」→「期間」）。値より前の最後の「Xは、」の X
+fn topic(text: &str, before: usize) -> Option<String> {
+    let head = &text[..before];
+    let i = head.rfind("は、")?;
+    let seg = &head[..i];
+    let seg = seg
+        .rfind(|c: char| "、。（）".contains(c))
+        .map(|j| &seg[j + 3..])
+        .unwrap_or(seg);
+    let t = seg.rsplit('の').next()?.trim();
+    let t = t.trim_start_matches("その").trim_start_matches("当該");
+    (!t.is_empty() && t.chars().count() <= 12).then(|| t.to_string())
+}
+
+/// 「〜は、三十年とする」「〜は、更新の日から十年とする」の (属性, 値)
+fn set_value(text: &str) -> Option<(String, Value)> {
+    let es = temporal::time_exprs(text);
+    // 文末の「とする」に掛かる値: 最後の時間表現
+    let last = es
+        .iter()
+        .rev()
+        .find(|e| matches!(e.kind, TimeKind::DurationValue(_) | TimeKind::Period { .. }))?;
+    let attribute = topic(text, last.start)?;
+    let value = match &last.kind {
+        TimeKind::DurationValue(d) => Value::Duration(duration_of(d)?),
+        TimeKind::Period { event, dur, .. } => {
+            // 起算点は「更新の日」のように「の日」まで含めて名づける（手書き IR と同じ）
+            let from = if last.text.starts_with(&format!("{event}の日")) {
+                format!("{event}の日")
+            } else {
+                event.clone()
+            };
+            Value::Period(build::after(&from, duration_of(dur)?))
+        }
+        _ => return None,
+    };
+    Some((attribute, value))
+}
+
+/// 条件節の中の型のある部分: 「存続期間を三十年以上として」→ Cmp、「〜の日から六月を経過した後」→ Elapsed
+fn typed_conditions(text: &str) -> Vec<Expr> {
+    let mut out = Vec::new();
+    // 「存続期間を三十年以上五十年未満として」: 続く比較は同じ変数
+    let mut last_var: Option<String> = None;
+    for e in temporal::time_exprs(text) {
+        match &e.kind {
+            TimeKind::Compare { dur, op } => {
+                let Some(d) = duration_of(dur) else { continue };
+                let var = match var_before(text, &e) {
+                    Some(v) => v,
+                    None => last_var.clone().unwrap_or_else(|| "期間".to_string()),
+                };
+                last_var = Some(var.clone());
+                let op = match op {
+                    temporal::CmpOp::Ge => CmpOp::Ge,
+                    temporal::CmpOp::Le => CmpOp::Le,
+                    temporal::CmpOp::Lt => CmpOp::Lt,
+                    temporal::CmpOp::Gt => CmpOp::Gt,
+                };
+                out.push(build::cmp(build::var(&var), op, Value::Duration(d)));
+            }
+            TimeKind::Elapsed { event, dur, .. } => {
+                if let Some(d) = duration_of(dur) {
+                    out.push(Expr::Time(TimeCond::Elapsed(build::after(event, d))));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// 比較の対象の変数名: 時間表現の直前の「Xを」「Xが」「Xは」の X（無ければ None）
+fn var_before(text: &str, e: &TimeExpr) -> Option<String> {
+    let before = &text[..e.start];
+    let cut = before
+        .rfind(|c: char| "、。（）".contains(c))
+        .map(|i| i + 3)
+        .unwrap_or(0);
+    let seg = before.get(cut..).unwrap_or(before);
+    for p in ["を", "が", "は"] {
+        if let Some(v) = seg.strip_suffix(p) {
+            if !v.is_empty() && v.chars().count() <= 20 {
+                return Some(v.rsplit('の').next().unwrap_or(v).to_string());
+            }
+        }
+    }
+    None
 }

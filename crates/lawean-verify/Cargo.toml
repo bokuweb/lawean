@@ -10,4 +10,5 @@ description = "Verification IR: compile Semantic IR to SMT-LIB and check propert
 lawean-source = { path = "../lawean-source" }
 lawean-semantic = { path = "../lawean-semantic" }
 lawean-resolve = { path = "../lawean-resolve" }
+lawean-extract = { path = "../lawean-extract" }
 thiserror.workspace = true

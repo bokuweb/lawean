@@ -34,8 +34,11 @@
 - [x] 3 段施行の順序依存を `applyUnit … = none` の定理に（`art74_before_art73_fails`）
 - [x] Rust `ident::apply_unit`（Lean の写し）と `apply_unit`（Source IR 版）と Lean の三者一致。Rust 側は `tests/ident_binding.rs`、Lean 側は `Consolidate.lean`。Lean → C 抽出で Rust の写しを不要にするのは未
 - [ ] 条の見出し・条名の変更は `render` に入っていない（`snapshot_main` と同じ。全部改正で見出しが変わるケースは検査できない）
-- [ ] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（[ADR-0014](adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）。エディタから呼ぶ判定関数
-- [ ] WASM 化の経路: **Lean → C** を本線に決めた（[ADR-0015](adr/0015-service-architecture.md)、[ADR-0016](adr/0016-lean-as-semantic-backend.md)、[docs/10](10-lean-semantics.md) M4）。C 呼び出しができたら `ident::apply_unit` を消す
+- [x] `checkUnit : Revision → AmendUnit → Bool` と正しさの定理（`lean/Lawean/Check.lean`: `checkUnit_iff`、`applyUnit_none_iff`）
+- [x] Lean → C → Rust（ネイティブ）: `lawean-leanrt`（[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）
+- [x] Lean → C → WASM（`docs/playground/build-lean-wasm.sh`。Lean の wasm32 版ツールチェーン + libuv スタブ）。playground は Lean 経路
+- [ ] `ident::apply_unit`（Rust の写し）を消す: `IdentOp` / `IdentRevision` を型だけの crate に出し、`id_map` 等も `lawean-leanrt` 経由にする。Lean が無い環境（CI の一部）の代役をどうするかも決める
+- [ ] `Sem.applies` / `haneFixes` / `impact` の `@[export]` 入口（今は `applyUnit` / `checkUnit` / 依存の 3 つ）
 - [ ] 証跡の形式（[ADR-0015](adr/0015-service-architecture.md) §5）: 発射台リビジョンのハッシュ、改正単位、結果のハッシュ、WASM のバージョン。ハッシュ対象の正規化を Rust / Lean / WASM で揃える
 - [ ] エディタの各判定に裏付けの定理名を添える（`applyUnit_comm` / `scheduleOk` 等）
 - [ ] Z3 の WASM ビルドで自法令内の性質検査をブラウザで閉じられるか測る。法令空間（他法令への波及）はサーバー側
@@ -45,7 +48,7 @@
 
 - [x] Lean: `Ident.lean`（id ベースの `Op`、衝突を値に、`dependsOn` / `scheduleOk`、`paraNum`）と `applyOp_comm` / `applyUnit_comm`
 - [x] Rust: `lawean-amend::ident::bind`（複数箇所は id ごとに展開、全部改正は旧第1項に anchor した insert + delete、繰り下げは消える）
-- [ ] Source IR の参照を id 参照にし、番号を描画で出す。ハネ手当ての改め文を生成し、成立した改め文との差分で検査する
+- [x] ハネ手当ての生成（`hane::render_fix`、`lawean-check` の `suggested_fixes`）と、成立した改め文との突き合わせ。Lean `Refs.lean` で本文を id 参照で持つ `Body` と完全性。Source IR そのものを id 参照にする（層 2 の参照解決で `Body` を出す）のは未
 - [x] id の決定性: `<改正法ID>/art<条>/art:<条>/new:<連番>`。Lean は id を計算しない（Rust が出したものを使う）ので揃える対象は Rust だけ
 - [x] 3 段施行（令和4年法律第48号）を `dependsOn` / `scheduleOk` の実データで検査（Rust と Lean の両方）
 - [x] `Ident` の `Revision` に目次（`toc`）を足し、ADR-0011 の `consolidates` を `Ident.applyUnit` で行う。`Node.art` は `String`（枝番 `42_2` のため）
@@ -58,7 +61,7 @@
 - [x] `impact(space, u)`: 参照切れ・ずれ・意味変化・時期不整合
 - [x] 高齢者居住安定確保法 第52条 / 借地借家法 第30条の Semantic IR（テスト内の手書き）と上書き循環の検出
 - [x] テスト計画 1〜5
-- [ ] Lean: `LawSpace` と §4 の定理形
+- [x] Lean: `LawSpace` と分類の健全性・完全性（`Space.lean`）。施行日の区間（TimingGap）は Lean の外
 - [ ] 略称の解決（「同法」「新借地借家法」「旧法」）。附則の「（以下「新法」という。）」を拾う
 - [ ] 政令委任（「政令で定めるところにより」）を A → C の依存として参照グラフに足す
 - [ ] `impact` の結果を `lawean-render` で日本語の報告書にする
@@ -66,7 +69,7 @@
 ## 改正（[docs/08](08-amendment.md)）
 
 - [ ] Lean と Rust の対応: Rust の apply を Lean の定義に対してテストで突き合わせる（同じ Op 列を両方で実行して比較）。将来的には Lean から C へ抽出して Rust から呼ぶ
-- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）と参照索引の更新の定理（ハネの完全性）
+- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）。ハネの完全性は `Refs.lean` で済み（項の参照。条の参照は条ずれと一緒に）
 - [ ] 令和4年法律第48号の 3 段施行をシナリオとして検査（§6 の 5）
 - [ ] 令和5年法律第53号（2028 施行、第46〜48条の挿入 = 条ずれ）の改め文を取得して条の挿入・繰り下げに対応
 - [ ] 他法令へのハネ（被改正法令を参照する他法令）
@@ -76,4 +79,8 @@
 
 - [ ] 03-examples の残り: 第7条（建物再築）、第13条第2項（裁判所が主体）
 - [ ] `law_revisions` API の調査（過去版取得）→ 改正 patch
-- [ ] 民法第142条（休日）と遡り計算（「一年前から」）の規則
+- [ ] 民法第142条（休日）。遡りは応当日で逆算する扱いで `temporal::before` に実装済み（判例・実務の扱い。要確認）
+- [ ] `TimeCond::Within` / `Elapsed` を `temporal` の日付制約に自動展開し、`Value::Period` を日付で持つ（今は月数の Int と別）
+- [x] 施行日の許容区間を附則から取る（`lawean-extract::suppl`、`lawean-check` の Enforcement）。廃止・経過措置の区間（`validity::Interval` の `to`）はまだ手で与える
+- [ ] Lean の WASM: 大きな法令（公職選挙法 1167 項）で Emscripten の既定スタック（64KB）では落ちるので `-sSTACK_SIZE=32MB` にした。落ちたときは JS が Rust の写しに戻す。Lean 側の再帰の深さ（`List` の非末尾再帰）を減らせば既定に戻せる
+- [ ] **新旧対照表の生成は後回し**（2026-09-22 の判断）。`Report.taisho_generated` は溶け込みから作れる最小形（項単位の新/旧、`check_taisho` の形式）で置いてあるが、見た目（欄の対照・傍線・条見出し）や部分改正の表現は詰めていない。優先は精度と実際の改正での検証

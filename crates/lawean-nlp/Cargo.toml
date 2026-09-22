@@ -1,0 +1,18 @@
+[package]
+name = "lawean-nlp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Layer 1.5: subject / object / act of a sentence from GiNZA dependency parses (jewel, Python-free), as evidence-backed candidates"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-extract = { path = "../lawean-extract" }
+jewel-core = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.8", default-features = false, features = ["sudachi-tokenizer"] }
+jewel-yoyogi = { git = "https://github.com/bokuweb/jewel.git", tag = "0.0.8" }
+thiserror.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -106,7 +106,11 @@ fn hane_candidates_for_art38_are_exactly_the_two_handled_ones() {
             .collect()
     );
 
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     for c in &cands {
         eprintln!(
             "{} 「{}」 → {} (new para {:?}) handled={}",
@@ -143,7 +147,11 @@ fn removing_the_fixups_makes_hane_unhandled() {
         ins.ops.retain(|o| !matches!(o, Op::Replace { .. }));
     }
     let before = revision("403AC0000000090_20210519_503AC0000000037");
-    let cands = hane_candidates(&before, &units[0]);
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
     assert_eq!(cands.len(), 2);
     assert!(cands.iter().all(|c| !c.handled));
 }
@@ -229,4 +237,342 @@ fn units_touching_different_articles_are_confluent() {
     let report = explore(&base, &stages);
     assert_eq!(report.successes, 2, "{:?}", report.outcomes);
     assert!(report.confluent);
+}
+
+/// 手当ての生成: 令3-37 第35条の 2 箇所は、生成した手当てが実際の改め文と同じ字句になる
+#[test]
+fn generated_hane_fixes_match_the_real_amendment() {
+    let units = parse_units(&fixture("amendments/503AC0000000037_art35.txt")).unwrap();
+    let before = revision("403AC0000000090_20210519_503AC0000000037");
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
+    let fixes: Vec<(String, String, Option<String>)> = cands
+        .iter()
+        .map(|c| {
+            (
+                c.sentence.0.rsplit("/main/").next().unwrap().to_string(),
+                c.text.clone(),
+                c.fix.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        fixes,
+        [
+            (
+                "chap:3/sec:3/art:38/para:2/sent:1".to_string(),
+                "前項".to_string(),
+                Some("第一項".to_string())
+            ),
+            (
+                "chap:3/sec:3/art:38/para:3/sent:1".to_string(),
+                "前項".to_string(),
+                Some("第三項".to_string())
+            ),
+        ]
+    );
+    assert!(
+        cands.iter().all(|c| c.handled && c.found_to == c.fix),
+        "{cands:#?}"
+    );
+    // 生成した手当てを改め文の操作にすると、番号は改正前のもの
+    let op = cands[1].fix_op.clone().unwrap();
+    assert_eq!(
+        op,
+        Op::Replace {
+            at: Loc {
+                article: ArticleNum::Single {
+                    base: 38,
+                    branch: vec![]
+                },
+                paragraph: Some(ParaRef::Num(3)),
+                item: None,
+                part: None,
+                suppl: false,
+            },
+            from: "前項".into(),
+            to: "第三項".into(),
+        }
+    );
+}
+
+// ---------------------------------------------------------------- 公職選挙法（実際に起きた改正漏れ）
+
+/// 平成30年法律第75号（公職選挙法の一部を改正する法律、参議院の特定枠）は第142条の4に第4項を挿入して第6項を第7項に繰り下げたが、
+/// 罰則の第244条第1項第2号の2の「第百四十二条の四第六項」を改めなかった。表示義務違反の罰則が消えた状態が
+/// 施行（2018-10-25）から令和3年法律第51号（2021-06-02）まで続いた（衆議院 第204回国会 質問第120号）。
+/// 改め文は衆議院「制定法律」からの写し（34 文のうち、入れ子の読替え規定の書き換え 1 文と別表 1 文を除く 32 文）
+#[test]
+fn h30_act75_koshoku_senkyo_missed_the_penalty_reference() {
+    let units = parse_units(&fixture("amendments/430AC0100000075.txt")).unwrap();
+    let before = revision("325AC1000000100_20180620_430AC0000000059");
+    // 助言（1 項だけの条に項を加えたときの「第二十二条」の精密化）は数えない
+    let cands: Vec<HaneCandidate> = hane_candidates(&before, &units[0])
+        .into_iter()
+        .filter(|c| !c.advisory)
+        .collect();
+    let unhandled: Vec<&HaneCandidate> = cands.iter().filter(|c| !c.handled).collect();
+    // 唯一の未手当てが、実際に見落とされた第244条の参照
+    assert_eq!(unhandled.len(), 1, "{cands:#?}");
+    let c = unhandled[0];
+    assert!(c.sentence.0.ends_with("/art:244/para:1/item:2_2/sent:1"));
+    assert_eq!(c.text, "第百四十二条の四第六項");
+    assert_eq!(c.new_target_paragraph, Some(7));
+    assert_eq!(c.fix.as_deref(), Some("第百四十二条の四第七項"));
+    // 手当てされている参照（第243条の「第五項」→「第六項」、削られる字句の中の「前項」等）は候補に挙がるが handled
+    assert!(cands.len() > 1);
+    // 生成した手当てを改め文にすると、3 年後に成立した令和3年法律第51号の第一文と一字違わず同じ
+    let fix = lawean_render::render_instruction(&Instruction {
+        text: String::new(),
+        ops: vec![c.fix_op.clone().unwrap()],
+    });
+    let fix_law = fixture("amendments/503AC0000000051.txt");
+    assert!(
+        fix_law.contains(fix.trim()),
+        "generated: {fix}\nreal: {fix_law}"
+    );
+    // 溶け込みは、除いた 1 文（第86条の3第2項）以外は e-Gov の改正後リビジョンと一致する
+    let got = apply_unit(&before, &units[0], "test").unwrap();
+    let want = revision("325AC1000000100_20181025_430AC0100000075");
+    let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&want));
+    assert_eq!(d.len(), 1, "{}", d.join("\n"));
+    assert!(d[0].starts_with("art 86_3"), "{}", d[0]);
+}
+
+/// 令和3年法律第51号（同法の誤りを正す改正）は 2020-12-12 版に当てると 2021-06-02 版に一致する（本則 1167 項）
+#[test]
+fn r3_act51_koshoku_senkyo_fix_reproduces_egov() {
+    let units = parse_units(&fixture("amendments/503AC0000000051.txt")).unwrap();
+    let before = revision("325AC1000000100_20201212_502AC1000000045");
+    let after = revision("325AC1000000100_20210602_503AC0000000051");
+    let got = apply_unit(&before, &units[0], "test").unwrap();
+    assert_same_main(&got, &after);
+}
+
+/// 令和5年法律第53号 第125条: 条ずれ（第47条〜第61条 → 第49条〜第64条）、3 条の新設、見出しの改め、後段の読替え表
+#[test]
+fn reiwa5_act53_art125_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art125.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let unit = &units[0];
+    let ops: Vec<&Op> = unit.instructions.iter().flat_map(|i| &i.ops).collect();
+    assert!(ops
+        .iter()
+        .any(|o| matches!(o, Op::RenumberArticle { from, to }
+        if from.to_num_string() == "61" && to.to_num_string() == "64")));
+    assert!(ops.iter().any(|o| matches!(
+        o,
+        Op::ShiftArticles {
+            from: 49,
+            to: 53,
+            by: 3
+        }
+    )));
+    assert!(ops
+        .iter()
+        .any(|o| matches!(o, Op::ReplaceCaption { from, to, .. }
+        if from == "適用除外" && to == "適用関係")));
+    assert!(ops.iter().any(|o| matches!(o, Op::SetCaption { text, .. }
+        if text == "（非電磁的事件記録の閲覧等）")));
+    assert!(ops.iter().any(
+        |o| matches!(o, Op::ReplaceSentencePart { part: SentencePart::Back, text, .. }
+        if text.len() > 1 && text[0].starts_with("この場合において、次の表"))
+    ));
+    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text }
+        if after.to_num_string() == "46" && text.iter().filter(|l| l.starts_with("第四十")).count() == 2)));
+
+    let got = apply_unit(
+        &revision("403AC0000000090_20260521_504AC0000000048"),
+        unit,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("403AC0000000090_20280613_505AC0000000053"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+
+    // 条ずれのハネ: 本則で番号の変わる条を指す絶対参照 5 件が、改め文の字句改めで全部手当て済み
+    let cands = hane_candidates(&current(), unit);
+    let arts: Vec<&HaneCandidate> = cands
+        .iter()
+        .filter(|c| c.new_target_article.is_some())
+        .collect();
+    assert_eq!(arts.len(), 5, "{arts:#?}");
+    assert!(arts.iter().all(|c| c.handled));
+    assert!(arts
+        .iter()
+        .any(|c| c.text == "第五十五条第一項" && c.fix.as_deref() == Some("第五十八条第一項")));
+}
+
+/// 令和4年法律第68号（刑法等の一部改正に伴う整備法、拘禁刑）: 5 法令を改正する 1 つの改め文。
+/// 位置の列挙（「、」「及び」「第N条から第M条までの規定」「第七号ロ」）と、
+/// 「次に掲げる法律の規定中「懲役」を「拘禁刑」に改める」＋号の列挙形（医師法）
+#[test]
+fn reiwa4_act68_five_laws_reproduce_egov_revisions() {
+    let units = parse_units(&fixture("amendments/504AC0000000068_5laws.txt")).unwrap();
+    assert_eq!(units.len(), 5);
+    let ishi = units.iter().find(|u| u.target_title == "医師法").unwrap();
+    assert_eq!(ishi.article_of_amending_law, "第二百二十一条");
+    assert!(ishi.instructions[0]
+        .ops
+        .iter()
+        .any(|o| matches!(o, Op::Replace { at, .. }
+        if matches!(&at.article, ArticleNum::Range { from, to }
+            if from.to_num_string() == "31" && to.to_num_string() == "33"))));
+    for (law, before, after) in [
+        (
+            "古物営業法",
+            "324AC0000000108_20240401_505AC0000000063",
+            "324AC0000000108_20250601_504AC0000000068",
+        ),
+        (
+            "質屋営業法",
+            "325AC0000000158_20240401_505AC0000000063",
+            "325AC0000000158_20250601_504AC0000000068",
+        ),
+        (
+            "旅館業法",
+            "323AC0000000138_20231213_505AC0000000052",
+            "323AC0000000138_20250601_504AC0000000068",
+        ),
+        (
+            "宅地建物取引業法",
+            "327AC1000000176_20250401_506AC0000000053",
+            "327AC1000000176_20250601_504AC0000000068",
+        ),
+        (
+            "医師法",
+            "323AC0000000201_20250401_503AC0000000049",
+            "323AC0000000201_20250601_504AC0000000068",
+        ),
+    ] {
+        let unit = units.iter().find(|u| u.target_title == law).unwrap();
+        let got = apply_unit(&revision(before), unit, "test").unwrap();
+        assert_same_main(&got, &revision(after));
+    }
+}
+
+/// 1 項だけの条に項を加えると、その条を丸ごと指す「前条」「第N条」は助言の候補になる。
+/// 令3-37 第44条（高齢者居住法）は第52条に第2項を加え、第53〜57条の 6 箇所を「前条第一項」「第五十二条第一項」にしている。
+/// 第17条にも第2項を加えるが、第75条の「第十五条から第十七条まで」（省令の根拠規定の列挙）はそのまま = 助言止まりでよい例
+#[test]
+fn appending_a_paragraph_to_a_single_paragraph_article_advises_refinement() {
+    let units = parse_units(&fixture("amendments/503AC0000000037_art44.txt")).unwrap();
+    let before = parse_response(&fixture(
+        "laws/413AC0000000026_20210519_503AC0000000037.xml",
+    ))
+    .unwrap();
+    let cands = hane_candidates(&before, &units[0]);
+    let adv: Vec<&HaneCandidate> = cands.iter().filter(|c| c.advisory).collect();
+    assert_eq!(adv.len(), 7, "{adv:#?}");
+    assert_eq!(adv.iter().filter(|c| c.handled).count(), 6);
+    let left = adv.iter().find(|c| !c.handled).unwrap();
+    assert!(left.sentence.0.contains("/art:75/"));
+    assert_eq!(left.text, "第十七条");
+    assert_eq!(left.fix.as_deref(), Some("第十七条第一項"));
+    assert!(adv
+        .iter()
+        .any(|c| c.text == "前条" && c.fix.as_deref() == Some("前条第一項") && c.handled));
+}
+
+/// 令和7年法律第47号 第2条: 被災区分所有建物の再建等に関する特別措置法（大部分を削り、区分所有法の新しい章に委ねる）。
+/// テストを先に書く（test first）: 通るまで改め文の語彙を足す
+#[test]
+fn reiwa7_act47_art2_hisai_mansion_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/507AC0000000047_art2.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("407AC0000000043_20250530_507AC0000000047"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("407AC0000000043_20260401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第4条（第2号施行日 2025-11-28）→ 第5条（2026-04-01）: マンションの管理の適正化の推進に関する法律。
+/// 発射台は令4-68 施行後の 2025-06-01 版。2 段で当てて、各段が e-Gov の版と一致する
+#[test]
+fn reiwa7_act47_art4_then_art5_kanri_tekiseika_reproduce_egov_revisions() {
+    let u4 = parse_units(&fixture("amendments/507AC0000000047_art4.txt")).unwrap();
+    let u5 = parse_units(&fixture("amendments/507AC0000000047_art5.txt")).unwrap();
+    let mid = apply_unit(
+        &revision("412AC1000000149_20250601_504AC0000000068"),
+        &u4[0],
+        "stage2",
+    )
+    .unwrap();
+    assert_same_main(&mid, &revision("412AC1000000149_20251128_507AC0000000047"));
+    let got = apply_unit(&mid, &u5[0], "main").unwrap();
+    assert_same_main(&got, &revision("412AC1000000149_20260401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第6条（第3号施行日、2027-04-01 未施行）: 2026-04-01 版に当てると e-Gov の 2027-04-01 版（未施行リビジョン）になる
+#[test]
+fn reiwa7_act47_art6_kanri_tekiseika_reproduces_the_unenforced_revision() {
+    let u6 = parse_units(&fixture("amendments/507AC0000000047_art6.txt")).unwrap();
+    let got = apply_unit(
+        &revision("412AC1000000149_20260401_507AC0000000047"),
+        &u6[0],
+        "stage3",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("412AC1000000149_20270401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第7・12・13・14・15・17条: 令7-47 が改める残りの法律（住宅金融支援機構法・耐震改修促進法・密集市街地整備法・
+/// 都市再生機構法・長期優良住宅法・所有者不明土地法）。各法令の直前の版に当てて e-Gov の改正後と一致する
+#[test]
+fn reiwa7_act47_other_six_laws_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "417AC0000000082_20251001_506AC0000000043",
+            "417AC0000000082_20260401_507AC0000000047",
+        ),
+        (
+            "12",
+            "407AC0000000123_20250530_507AC0000000047",
+            "407AC0000000123_20260401_507AC0000000047",
+        ),
+        (
+            "13",
+            "409AC0000000049_20250601_504AC0000000068",
+            "409AC0000000049_20260401_507AC0000000047",
+        ),
+        (
+            "14",
+            "415AC0000000100_20241108_506AC0000000040",
+            "415AC0000000100_20260401_507AC0000000047",
+        ),
+        (
+            "15",
+            "420AC0000000087_20250530_507AC0000000047",
+            "420AC0000000087_20251128_507AC0000000047",
+        ),
+        (
+            "17",
+            "430AC0000000049_20250601_504AC0000000068",
+            "430AC0000000049_20260401_507AC0000000047",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/507AC0000000047_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+    }
 }

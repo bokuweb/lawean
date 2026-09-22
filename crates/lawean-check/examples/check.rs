@@ -1,5 +1,5 @@
 //! 改正案を検査して報告を表示する。
-//! cargo run -p lawean-check --example check -- <発射台.xml> <改め文.txt> [--expected 改正後.xml] [--taisho 新旧対照表.txt] [--law 他法令.xml]... [--enforced YYYY-MM-DD] [--json]
+//! cargo run -p lawean-check --example check -- <発射台.xml> <改め文.txt> [--expected 改正後.xml] [--taisho 新旧対照表.txt] [--law 他法令.xml]... [--enforced YYYY-MM-DD] [--base-draft 起草時の発射台.xml] [--law-draft 他法令の起草時の版.xml]... [--json]
 //! cargo run -p lawean-check --example check -- --case <id>   # fixtures/cases/cases.json のケース
 
 use lawean_check::*;
@@ -32,19 +32,28 @@ fn main() {
             c["title"].as_str().unwrap(),
             c["note"].as_str().unwrap_or("")
         );
-        run_texts(
-            &s("base").unwrap(),
-            &s("amendment").unwrap(),
-            s("expected").as_deref(),
-            s("taisho").as_deref(),
-            &others,
-            c["enforced"].as_str(),
-        )
+        let others_draft: Vec<String> = c["other_laws_draft"]
+            .as_array()
+            .map(|v| v.iter().map(|p| read(p.as_str().unwrap())).collect())
+            .unwrap_or_default();
+        run_text_input(&TextInput {
+            base_xml: &s("base").unwrap(),
+            amendment: &s("amendment").unwrap(),
+            expected_xml: s("expected").as_deref(),
+            taisho: s("taisho").as_deref(),
+            other_laws: &others,
+            enforced: c["enforced"].as_str(),
+            base_draft_xml: s("base_draft").as_deref(),
+            other_laws_draft: &others_draft,
+            ..Default::default()
+        })
     } else {
         let mut expected = None;
         let mut taisho = None;
         let mut laws = Vec::new();
         let mut enforced = None;
+        let mut base_draft = None;
+        let mut laws_draft = Vec::new();
         let mut pos = Vec::new();
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -53,24 +62,33 @@ fn main() {
                 "--taisho" => taisho = Some(read(it.next().unwrap())),
                 "--law" => laws.push(read(it.next().unwrap())),
                 "--enforced" => enforced = Some(it.next().unwrap().clone()),
+                "--base-draft" => base_draft = Some(read(it.next().unwrap())),
+                "--law-draft" => laws_draft.push(read(it.next().unwrap())),
                 "--json" => {}
                 p => pos.push(p.to_string()),
             }
         }
-        run_texts(
-            &read(&pos[0]),
-            &read(&pos[1]),
-            expected.as_deref(),
-            taisho.as_deref(),
-            &laws,
-            enforced.as_deref(),
-        )
+        run_text_input(&TextInput {
+            base_xml: &read(&pos[0]),
+            amendment: &read(&pos[1]),
+            expected_xml: expected.as_deref(),
+            taisho: taisho.as_deref(),
+            other_laws: &laws,
+            enforced: enforced.as_deref(),
+            base_draft_xml: base_draft.as_deref(),
+            other_laws_draft: &laws_draft,
+            ..Default::default()
+        })
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
         return;
     }
-    println!("{}", if report.ok { "PASS" } else { "FAIL" });
+    println!(
+        "{} (engine: {})",
+        if report.ok { "PASS" } else { "FAIL" },
+        report.engine
+    );
     for u in &report.units {
         println!(
             "- {}: {} 文, {} 操作 → id 操作 {} 個",
@@ -95,10 +113,19 @@ fn main() {
             println!("    {d}");
         }
     }
+    for f in &report.suggested_fixes {
+        println!("suggested fix (改め文、番号は改正前): {f}");
+    }
     if !report.diff.is_empty() {
         println!("diff:");
         for d in &report.diff {
             println!("    {d}");
+        }
+    }
+    if !report.taisho_generated.is_empty() {
+        println!("新旧対照表（溶け込みから生成、--taisho に渡せる形式）:");
+        for l in &report.taisho_generated {
+            println!("    {l}");
         }
     }
 }

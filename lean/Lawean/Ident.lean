@@ -44,6 +44,8 @@ inductive Op where
   | delete      (id : NodeId)
   /-- 調整規定: 衝突を解消して本文を確定する -/
   | resolve     (id : NodeId) (text : String)
+  /-- 条ずれ: id の項の条番号を art にする（「第六十一条を第六十四条とする」は条の全項にこれを 1 つずつ）。本文は触らない -/
+  | renumber    (id : NodeId) (art : ArtNum)
 deriving Repr, DecidableEq
 
 /-- 操作が読む・書く id -/
@@ -52,6 +54,7 @@ def Op.touches : Op → List NodeId
   | .insertAfter a n _ _  => [a, n]
   | .delete id            => [id]
   | .resolve id _         => [id]
+  | .renumber id _        => [id]
 
 /-- 操作が新しく作る id -/
 def Op.creates : Op → List NodeId
@@ -64,6 +67,7 @@ def Op.key : Op → NodeId
   | .insertAfter a _ _ _ => a
   | .delete id           => id
   | .resolve id _        => id
+  | .renumber id _       => id
 
 /-- 見つかった項を、0 個以上の項の列に置き換える -/
 def Op.edit : Op → Node → List Node
@@ -73,6 +77,7 @@ def Op.edit : Op → Node → List Node
   | .insertAfter _ n art text, x => [x, { id := n, art, text }]
   | .delete _, _ => []
   | .resolve _ text, x => [{ x with text, conflicts := [] }]
+  | .renumber _ art, x => [{ x with art }]
 
 /-- 最初に id が k の要素を見つけ、g で要素の列に置き換える。無ければ none -/
 def editAt (k : NodeId) (g : Node → List Node) : List Node → Option (List Node)
@@ -154,6 +159,7 @@ theorem edit_id (op : Op) (x : Node) : ∀ y ∈ op.edit x, y.id = x.id ∨ y.id
     rcases hy with rfl | rfl <;> simp
   | delete id => simp [Op.edit] at hy
   | resolve id t => simp_all [Op.edit]
+  | renumber id a => simp_all [Op.edit]
 
 theorem editAt_cons (k : NodeId) (g : Node → List Node) (x : Node) (xs : List Node) :
     editAt k g (x :: xs) = if x.id = k then some (g x ++ xs) else (editAt k g xs).map (x :: ·) := rfl

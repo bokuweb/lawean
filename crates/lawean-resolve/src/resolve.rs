@@ -28,6 +28,9 @@ pub enum Unresolved {
     UnknownOrigin(StableId),
     /// 参照先の条・項・号・文が存在しない
     NotFound(String),
+    /// 読替え規定の「」の中（「同項中「前条第二項」とあるのは…と読み替える」）。読替え先の規定に相対する字句で、
+    /// この文の位置からは解決しない
+    InReadReplace,
 }
 
 /// 「同条」「同項」「同法」のための先行詞。項の中では文をまたいで引き継ぐ
@@ -100,9 +103,9 @@ fn resolve_inner(
         // 列挙の続き（「第百三十三条の二第五項及び第六項」）は `resolve_sentence_with` が
         // SameArticle / External に書き換えてから渡してくる。ここに来る裸の「第N項」は現在の条の項
         RefKind::Paragraph(n) => (art, art.paragraphs.iter().filter(|p| p.num == *n).collect()),
-        RefKind::Item(n) => {
+        RefKind::Item(_) | RefKind::PrevItem(_) | RefKind::AllPrevItems | RefKind::NextItem => {
             let Some(cp) = cur_para else {
-                return not_found(format!("第{n}号 from {from}: no paragraph"));
+                return not_found(format!("{:?} from {from}: no paragraph", r.kind));
             };
             (art, art.paragraphs.iter().filter(|p| p.num == cp).collect())
         }
@@ -194,9 +197,13 @@ fn resolve_inner(
             )
         }
         RefKind::Article { suppl, num } => {
-            // 「附則第N条」は原始附則、それ以外は参照元と同じ領域（附則から本則の「第N条」を指す場合は本則）
+            // 「附則第N条」は、参照元が附則の中ならその附則（改正法の附則が自分の条を指す）、本則からなら原始附則。
+            // それ以外は本則（附則から本則の「第N条」を指す場合も本則）
             let region = if *suppl {
-                Region::Suppl(0)
+                match art.region {
+                    Region::Suppl(k) => Region::Suppl(k),
+                    Region::Main => Region::Suppl(0),
+                }
             } else {
                 Region::Main
             };
@@ -274,6 +281,9 @@ fn resolve_inner(
                 | RefKind::SameParagraph
                 | RefKind::Paragraph(_)
                 | RefKind::Item(_)
+                | RefKind::PrevItem(_)
+                | RefKind::AllPrevItems
+                | RefKind::NextItem
         )
     {
         Resolution::Internal(target_paras.iter().map(|p| p.stable_id.clone()).collect())
@@ -321,7 +331,16 @@ pub fn resolve_sentence_with(
     let mut out = Vec::with_capacity(spans.len());
     // 括弧の深さごとに「直前の参照の終わり」を持つ。括弧書きの中の参照が外側の列挙判定を壊さないように
     let mut prev_end: Vec<usize> = vec![0];
+    let read_replace = text.contains("とあるのは") || text.contains("読み替える");
     for span in spans {
+        // 読替え規定の「」の中の参照は読替え先の規定に相対する字句。ここからは解決しない
+        if read_replace && quote_depth(&text[..span.start]) > 0 {
+            out.push(ResolvedSpan {
+                span,
+                resolution: Resolution::Unresolved(Unresolved::InReadReplace),
+            });
+            continue;
+        }
         // 列挙（「、」「及び」「並びに」「又は」「若しくは」「から〜まで」だけで繋がる）は直前の参照の続き。
         // 「第十九条第一項（同条第七項において準用する場合を含む。）若しくは第三項」のような括弧書きは飛ばす
         let depth = paren_depth(&text[..span.start]);
@@ -329,10 +348,16 @@ pub fn resolve_sentence_with(
             prev_end.resize(depth + 1, span.start);
         }
         let between = strip_parentheticals(&text[prev_end[depth]..span.start]);
-        let list_continues = !between.is_empty()
-            && between
-                .chars()
-                .all(|c| "、及び並に又は若しくからまで".contains(c));
+        // 「第十九条第二項（第三号及び第五号を除く。）」: 参照の直後に開く括弧の中は、その参照の続き
+        let opens_after_prev = depth > 0
+            && prev_end.get(depth - 1).is_some_and(|&e| {
+                text[e..span.start].trim_start_matches('（').is_empty() && e < span.start
+            });
+        let list_continues = opens_after_prev
+            || (!between.is_empty()
+                && between
+                    .chars()
+                    .all(|c| "、及び並に又は若しくからまで".contains(c)));
         // 「同法」の解決先が未知なら、この文でそれまでに名前の出た法令を拾う
         if ante.last_law.is_none() {
             ante.last_law = last_law_mention(&text[..span.start]);
@@ -362,6 +387,22 @@ pub fn resolve_sentence_with(
                     None => span.parsed.clone(),
                 }
             }
+            // 他法令の項の号の列挙: 「同法第十九条第二項（第三号及び第五号を除く。）」
+            (RefKind::Item(n), true) if ante.prev_was_external => match ante.external.clone() {
+                Some((law, num, para)) => ParsedRef {
+                    kind: RefKind::External { law, num },
+                    paragraph: para,
+                    item: Some(*n),
+                    ..span.parsed.clone()
+                },
+                None => span.parsed.clone(),
+            },
+            // 項の号の列挙: 「第一項第一号又は第二号」「第七項（第四号を除く。）」
+            (RefKind::Item(n), true) if ante.paragraph.is_some() => ParsedRef {
+                kind: RefKind::SameParagraph,
+                item: Some(*n),
+                ..span.parsed.clone()
+            },
             // 条の項の列挙: 「前条第五項及び第六項」「第十七条第一項から第三項まで」
             (RefKind::Paragraph(n), true) if ante.article.is_some() => ParsedRef {
                 kind: RefKind::SameArticle,
@@ -376,6 +417,15 @@ pub fn resolve_sentence_with(
         out.push(ResolvedSpan { span, resolution });
     }
     out
+}
+
+/// `s` の末尾時点でのかぎ括弧の深さ
+fn quote_depth(s: &str) -> usize {
+    s.chars().fold(0usize, |d, c| match c {
+        '「' => d + 1,
+        '」' => d.saturating_sub(1),
+        _ => d,
+    })
 }
 
 /// `s` の末尾時点での全角括弧の深さ

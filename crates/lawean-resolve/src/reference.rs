@@ -38,6 +38,12 @@ pub enum RefKind {
     Paragraph(u32),
     /// 「第三号」— 同じ項の号（条・項を伴わない）
     Item(u32),
+    /// 「前号」「前二号」— 同じ項の前の号
+    PrevItem(u32),
+    /// 「前各号」
+    AllPrevItems,
+    /// 「次号」
+    NextItem,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +73,7 @@ fn re() -> &'static Regex {
             r"(?x)
             (?P<suppl>附則)?第(?P<art>{N})条(?P<branch>(?:の{N})*)(?:第(?P<para>{N})項)?(?:第(?P<item>{N})号)?(?P<part1>前段|後段)?
             |
-            (?P<rel>前各項|前(?P<reln>{N})?条|前(?P<relp>{N})?項|次条|次項|同条|同項)(?:第(?P<relpara>{N})項)?(?:第(?P<relitem>{N})号)?(?P<part2>前段|後段)?
+            (?P<rel>前各項|前各号|前(?P<reln>{N})?条|前(?P<relp>{N})?項|前(?P<reli>{N})?号|次条|次項|次号|同条|同項)(?:第(?P<relpara>{N})項)?(?:第(?P<relitem>{N})号)?(?P<part2>前段|後段)?
             |
             第(?P<bpara>{N})項(?:第(?P<bitem>{N})号)?(?P<part3>前段|後段)?
             |
@@ -179,6 +185,10 @@ pub fn find_references(text: &str) -> Vec<RefSpan> {
             {
                 continue;
             }
+            // 「第一号法定受託事務」（地方自治法の用語）は号の参照ではない
+            if text[whole.end()..].starts_with("法定受託事務") {
+                continue;
+            }
             ParsedRef {
                 kind: RefKind::Item(i),
                 paragraph: None,
@@ -189,11 +199,14 @@ pub fn find_references(text: &str) -> Vec<RefSpan> {
             let rel = m.name("rel").unwrap().as_str();
             let kind = match rel {
                 "前各項" => RefKind::AllPrevParagraphs,
+                "前各号" => RefKind::AllPrevItems,
                 "次条" => RefKind::NextArticle,
                 "次項" => RefKind::NextParagraph,
+                "次号" => RefKind::NextItem,
                 "同条" => RefKind::SameArticle,
                 "同項" => RefKind::SameParagraph,
                 r if r.ends_with('条') => RefKind::PrevArticle(num("reln").unwrap_or(1)),
+                r if r.ends_with('号') => RefKind::PrevItem(num("reli").unwrap_or(1)),
                 _ => RefKind::PrevParagraph(num("relp").unwrap_or(1)),
             };
             ParsedRef {

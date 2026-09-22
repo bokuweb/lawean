@@ -11,6 +11,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      # Lean を先に入れる: lawean-leanrt の build.rs が lake を呼び、証明した applyUnit を C 経由で呼ぶテストを走らせる
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: lean
+          use-mathlib-cache: false
+      - run: echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - run: cd lean && lean --version
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: sudo apt-get install -y z3

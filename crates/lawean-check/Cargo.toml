@@ -11,5 +11,17 @@ lawean-source = { path = "../lawean-source" }
 lawean-resolve = { path = "../lawean-resolve" }
 lawean-amend = { path = "../lawean-amend" }
 lawean-space = { path = "../lawean-space" }
+lawean-render = { path = "../lawean-render" }
+lawean-leanrt = { path = "../lawean-leanrt", optional = true }
+lawean-extract = { path = "../lawean-extract" }
 serde.workspace = true
 serde_json.workspace = true
+
+[features]
+default = ["lean"]
+# 証明した Lean の applyUnit（C 経由）で溶け込みを計算する。無ければ Rust の写し（結果は同じ。テストで三者一致）
+lean = ["dep:lawean-leanrt"]
+
+[dev-dependencies]
+lawean-extract = { path = "../lawean-extract" }
+lawean-verify = { path = "../lawean-verify" }

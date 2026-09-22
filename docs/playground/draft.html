@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>lawean 改正法を書いて検査する playground</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="playground.css">
+<!-- Z3（z3-solver の WASM）はスレッドを使うので SharedArrayBuffer が要る。GitHub Pages では COOP/COEP を service worker で足す -->
+<script src="coi-serviceworker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/z3-solver@4.13.4/build/z3-built.js"></script>
+<style>
+  main { grid-template-columns: 1fr 1fr; }
+  .outline { border:1px solid var(--line); border-radius:6px; background:#fff; max-height: 300px; overflow:auto; font-size:12px; }
+  .outline .art { padding:4px 8px; border-bottom:1px solid var(--line); cursor:pointer; }
+  .outline .art:hover { background:#f2f4f8; }
+  .outline .art b { color:var(--accent); }
+  .outline .art .cap { color:var(--muted); margin-left:6px; }
+  .outline .para { color:#3a3a36; margin:2px 0 0 1em; white-space:pre-wrap; }
+  .grammar { font-size:12px; color:var(--muted); }
+  .grammar code { background:#fff; border:1px solid var(--line); border-radius:3px; padding:0 3px; }
+  .hint { font-size:12px; color:var(--muted); margin:4px 0 0; }
+  input[type=file] { font: 12px sans-serif; border:none; padding:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>改正法を書いて検査する playground</h1>
+  <span class="sub">発射台（改正前の法令）を選び、改め文と附則を書き、公布予定日・施行日を与えて検査する。判定はブラウザ内の WASM（溶け込みは Lean の証明済み <code>applyUnit</code>）。<a href="index.html">実例のケース集はこちら</a></span>
+</header>
+<main>
+  <section class="left">
+    <label for="base">発射台（fixtures の e-Gov 法令 XML）</label>
+    <select id="base"></select>
+    <p class="hint">手元の e-Gov XML（<code>law_data</code> API の応答）を読ませることもできる: <input type="file" id="basefile" accept=".xml,text/xml"></p>
+    <label>条文（クリックで改め文の雛形を挿入。<input id="filter" placeholder="絞り込み（例: 三十年、第三十八条）" style="width:14em;display:inline;padding:2px 6px"></label>
+    <div class="outline" id="outline"><p class="status" style="padding:8px">発射台を選ぶと本則の条が出る。</p></div>
+    <label for="amend">改め文（改正法の本則）</label>
+    <textarea id="amend" spellcheck="false"></textarea>
+    <p class="grammar">読める形: <code>第N条[第M項][第K号]中「A」を「B」に改める</code>、<code>「A」の下に「B」を加える</code>、<code>「A」を削る</code>、<code>第N条に次の一項を加える</code>、<code>第N条第M項の次に次の一項を加える</code>、<code>第N条の次に次の一条を加える</code>、<code>第N章に次の一条を加える</code>、<code>第N条を次のように改める</code>、<code>第N条中第P項を第Q項とし、第A項から第B項までをK項ずつ繰り下げ</code>、<code>第N条[第M項]を削る</code>、<code>目次中「A」を「B」に改める</code>、<code>後段として次のように加える</code>。加える条文は次の行に全角スペース 1 つでインデント。</p>
+    <label for="suppl">附則（施行期日）</label>
+    <textarea id="suppl" class="small" spellcheck="false">第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。</textarea>
+    <p class="grammar">読める形: <code>公布の日から施行する</code>、<code>令和N年M月D日から施行する</code>、<code>公布の日から起算してN年を経過した日から</code>、<code>公布の日から起算してN年を超えない範囲内において政令で定める日から</code>、<code>令和N年M月D日までの間において政令で定める日から</code>、ただし書き <code>ただし、第N条の改正規定は、公布の日から施行する</code>。</p>
+    <div class="row">
+      <div><label for="promulgated">公布予定日</label><input id="promulgated" placeholder="YYYY-MM-DD"></div>
+      <div><label for="enforced">施行日（予定）</label><input id="enforced" placeholder="YYYY-MM-DD"></div>
+    </div>
+    <label for="laws">他法令（参照の波及を見る。発射台を引いている法令は自動で選ぶ。複数選択）</label>
+    <select id="laws" multiple size="4"></select>
+    <label for="future">施行日までに施行される未施行の改正（任意）。選ぶと、改め文はその版に当たるものとして検査し、上の発射台は「起草時の版」になる（先行改正との競合: 空振り・別の項・参照のずれ・可換性）</label>
+    <select id="future"></select>
+    <button id="run">検査する</button>
+    <button id="z3" class="secondary">Z3 で確かめる（ブラウザ内の z3。初回に 33MB 読む）</button>
+    <span class="status" id="status"></span>
+  </section>
+  <section class="right">
+    <div id="report"><p class="status">発射台を選び、改め文を書いて「検査する」。</p></div>
+  </section>
+</main>
+<script type="module">
+import { setup, load, fill, $, esc, renderReport, check, outline, smt_scripts } from './common.js';
+
+const BASES = [
+  ['revisions/403AC0000000090_20210519_503AC0000000037.xml', '借地借家法（2021-05-19、令和3年法律第37号の発射台）'],
+  ['revisions/403AC0000000090_20220518_503AC0000000037.xml', '借地借家法（2022-05-18、令和4年法律第48号の発射台）'],
+  ['403AC0000000090.xml', '借地借家法（現行 2026-05-21）'],
+  ['revisions/325AC1000000100_20180620_430AC0000000059.xml', '公職選挙法（2018-06-20、平成30年法律第75号の発射台）'],
+  ['revisions/325AC1000000100_20201212_502AC1000000045.xml', '公職選挙法（2020-12-12、令和3年法律第51号の発射台）'],
+  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律'],
+  ['laws/327AC1000000176.xml', '宅地建物取引業法'],
+  ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律'],
+  ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
+  ['laws/323AC0000000138.xml', '旅館業法'],
+  ['laws/325AC0000000158.xml', '質屋営業法'],
+  ['laws/323AC0000000201.xml', '医師法'],
+  ['laws/324AC0000000108.xml', '古物営業法'],
+  ['revisions/325AC1000000100_20210602_503AC0000000051.xml', '公職選挙法（2021-06-02）'],
+];
+// 未施行の改正が溶け込んだ版（e-Gov は未施行のリビジョンも返す）。起草時の発射台との競合を見るのに使う
+const FUTURES = [
+  ['revisions/403AC0000000090_20280613_505AC0000000053.xml', '借地借家法 2028-06-13（令5-53 第125条 施行後。条ずれ）'],
+  ['revisions/403AC0000000090_20260521_504AC0000000048.xml', '借地借家法 2026-05-21（令4-48 第74条 施行後 = 現行）'],
+  ['revisions/403AC0000000090_20220518_503AC0000000037.xml', '借地借家法 2022-05-18（令3-37 第35条 施行後）'],
+  ['revisions/327AC1000000176_20250401_506AC0000000053.xml', '宅建業法 2025-04-01（令6-53 施行後）'],
+  ['revisions/414AC0000000078_20220401_502AC0000000008.xml', '建替え円滑化法 2022-04-01（令3-37 施行後）'],
+];
+// 発射台ごとの初期値: 実際に成立した改正法の改め文と、その附則（施行期日）・公布日・施行日
+const PRESETS = {
+  'revisions/403AC0000000090_20210519_503AC0000000037.xml': {
+    amendment: 'amendments/503AC0000000037_art35.txt',
+    suppl: '第一条　この法律は、令和三年九月一日から施行する。ただし、第三十五条の規定は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。',
+    promulgated: '2021-05-19', enforced: '2022-05-18',
+    note: '令和3年法律第37号（デジタル社会形成整備法）第35条: 第22条・第38条・第39条に電磁的記録の項を加える。実際の改め文と附則第一条（第四号を第三十五条だけに要約）。e-Gov の施行日は 2022-05-18',
+  },
+  'revisions/403AC0000000090_20220518_503AC0000000037.xml': {
+    amendment: 'amendments/504AC0000000048_art73.txt',
+    suppl: '第一条　この法律は、公布の日から起算して四年を超えない範囲内において政令で定める日から施行する。ただし、第七十三条の規定は、公布の日から起算して九月を超えない範囲内において政令で定める日から施行する。',
+    promulgated: '2022-05-25', enforced: '2023-02-20',
+    note: '令和4年法律第48号（民事訴訟法等改正法）附則第73条: 目次・第42条・第61条の新設。実際の改め文と附則第一条（第二号を要約）。e-Gov の施行日は 2023-02-20',
+  },
+  '403AC0000000090.xml': {
+    amendment: 'amendments/505AC0000000053_art125-129.txt',
+    suppl: '第一条　この法律は、公布の日から起算して五年を超えない範囲内において政令で定める日から施行する。',
+    promulgated: '2023-06-14', enforced: '2028-06-13',
+    note: '令和5年法律第53号（民事関係手続のデジタル化）第125条: 第47条〜第61条を第49条〜第64条に繰り下げる条ずれと第47・48・51条の新設、読替え表。第129条は大規模災害借地借家特別措置法の「第五十九条」を「第六十二条」に改める（他法令への波及の手当て）。実際の改め文と附則第一条本文。e-Gov の施行日は 2028-06-13（未施行）',
+  },
+  'revisions/325AC1000000100_20180620_430AC0000000059.xml': {
+    amendment: 'amendments/430AC0100000075.txt',
+    suppl: '第一条　この法律は、公布の日から起算して十日を経過した日から施行する。',
+    promulgated: '2018-10-15', enforced: '2018-10-25',
+    note: '【実際に起きた改正漏れ】平成30年法律第75号（参議院の特定枠）: 第142条の4の繰り下げで第244条の罰則の引用「第六項」を改め忘れた。ハネと罰則の 2 つの検査で出る',
+  },
+  'revisions/325AC1000000100_20201212_502AC1000000045.xml': {
+    amendment: 'amendments/503AC0000000051.txt',
+    suppl: '第一条　この法律は、公布の日から施行する。',
+    promulgated: '2021-06-02', enforced: '2021-06-02',
+    note: '令和3年法律第51号: 上の誤りの訂正（「第百四十二条の四第六項」→「第七項」）と第273条。本則 1167 項',
+  },
+};
+const LAWS = [
+  ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律'],
+  ['laws/504CO0000000187.xml', '借地借家法施行令'],
+  ['laws/504M60000010029.xml', '借地借家法施行規則'],
+  ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
+  ['403AC0000000090.xml', '借地借家法（現行）'],
+  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律'],
+  ['laws/327AC1000000176.xml', '宅地建物取引業法'],
+];
+
+let baseXml = '';
+let info = null;
+
+function header() {
+  if (!info) return '';
+  return `第一条　${info.title}（${info.law_num}）の一部を次のように改正する。\n`;
+}
+
+function showOutline() {
+  if (!info) return;
+  const q = $('filter').value.trim();
+  let h = '';
+  for (const a of info.articles) {
+    const text = a.paragraphs.map(p => p.text).join('\n');
+    if (q && !(a.label.includes(q) || a.caption.includes(q) || text.includes(q))) continue;
+    h += `<div class="art" data-num="${esc(a.label)}"><b>${esc(a.label)}</b><span class="cap">${esc(a.caption)}</span>` +
+      a.paragraphs.map(p => `<div class="para">${p.num !== '1' ? p.num + '　' : ''}${esc(p.text.length > 160 && !q ? p.text.slice(0, 160) + '…' : p.text)}</div>`).join('') + '</div>';
+  }
+  $('outline').innerHTML = h || '<p class="status" style="padding:8px">該当なし</p>';
+  for (const el of $('outline').querySelectorAll('.art')) {
+    el.onclick = () => {
+      const ta = $('amend');
+      if (!ta.value.trim()) ta.value = header();
+      if (!ta.value.endsWith('\n')) ta.value += '\n';
+      ta.value += `　　${el.dataset.num}中「」を「」に改める。\n`;
+      ta.focus();
+    };
+  }
+}
+
+async function setBase(xml) {
+  baseXml = xml;
+  const o = JSON.parse(outline(xml));
+  if (o.error) { $('outline').innerHTML = `<pre>${esc(o.error)}</pre>`; info = null; return; }
+  info = o;
+  const preset = PRESETS[$('base').value];
+  if (preset) {
+    $('amend').value = await load(preset.amendment);
+    $('suppl').value = preset.suppl;
+    $('promulgated').value = preset.promulgated;
+    $('enforced').value = preset.enforced;
+  } else if (!$('amend').value.trim() || $('amend').value.startsWith('第一条　')) {
+    $('amend').value = header();
+  }
+  showOutline();
+  // 他法令: 発射台の題名を「〜法第N条」の形で引いている法令を先に選んでおく（参照の波及を見るため）
+  for (const o of $('laws').options) {
+    o.selected = false;
+    if (o.value === $('base').value) continue;
+    try {
+      const x = await load(o.value);
+      // 同じ法令の別の版は除く。題名を「〜法第N条」「〜法（」の形で引いていれば選ぶ
+      if (x.includes('<law_id>' + info.law_id + '</law_id>')) continue;
+      if (x.includes(info.title + '第') || x.includes(info.title + '（')) o.selected = true;
+    } catch (e) { /* 無ければ選ばない */ }
+  }
+  $('report').innerHTML = `<p class="status">${esc(info.title)}（${esc(info.law_num)}、本則 ${info.articles.length} 条）。${preset ? '初期値は実際の改正法: ' + esc(preset.note) + '。そのまま、または書き換えて' : '改め文を書いて'}「検査する」。</p>`;
+}
+
+// ---- Z3 をブラウザで: lawean-wasm が作った SMT-LIB を z3-solver の WASM に渡す
+const Z3_CDN = 'https://cdn.jsdelivr.net/npm/z3-solver@4.13.4/build/';
+let z3 = null;
+async function loadZ3() {
+  if (z3) return z3;
+  if (typeof SharedArrayBuffer === 'undefined') throw new Error('SharedArrayBuffer が無い（COOP/COEP が効いていない）。ページを再読み込みしてください');
+  const js = await (await fetch(Z3_CDN + 'z3-built.js')).text();
+  const blob = new Blob([js], { type: 'text/javascript' });
+  const M = await initZ3({ locateFile: f => Z3_CDN + f, mainScriptUrlOrBlob: blob });
+  // 問いごとに context を作る（同じ context で set-logic を繰り返すと z3 が exit(1) する）。
+  // 解くのは worker（z3-solver の async 版）。主スレッドで同期に解くと、z3 がスレッドを起こすときに固まる
+  z3 = { eval: async (script) => {
+    const ctx = M._Z3_mk_context(M._Z3_mk_config());
+    M._set_noop_error_handler(ctx);
+    try { return await M.async_call(() => M.ccall('async_Z3_eval_smtlib2_string', 'void', ['number', 'string'], [ctx, script])); }
+    finally { M._Z3_del_context(ctx); }
+  } };
+  return z3;
+}
+let lastInput = null;
+async function runZ3() {
+  if (!lastInput) { $('status').textContent = '先に「検査する」'; return; }
+  $('status').textContent = 'Z3 を読み込み中…';
+  try {
+    const solver = await loadZ3();
+    $('status').textContent = 'Z3 で解いている…';
+    const scripts = JSON.parse(smt_scripts(JSON.stringify(lastInput)));
+    if (scripts.error) throw new Error(scripts.error);
+    const KIND = { enforcement: '施行期日（暦）', vacuity: '空振り', conflict: '効力の齟齬' };
+    let rows = '';
+    let t0 = performance.now();
+    for (const sc of scripts) {
+      const out = String(await solver.eval(sc.script)).trim();
+      const first = out.split('\n')[0].trim();
+      const verdict = first === 'sat' ? sc.sat_means : first === 'unsat' ? sc.unsat_means : ('? ' + out.slice(0, 80));
+      const bad = (sc.kind === 'enforcement' && first === 'unsat') || (sc.kind === 'vacuity' && first === 'unsat') || (sc.kind === 'conflict' && first === 'sat');
+      rows += `<tr class="${bad ? 'fail' : 'pass'}"><td><span class="mark">${bad ? '✗' : '✓'}</span>${KIND[sc.kind] || sc.kind}</td><td>${esc(sc.name)}</td><td>${first} = ${esc(verdict)}</td><td><details><summary>SMT-LIB</summary><pre>${esc(sc.script)}</pre></details></td></tr>`;
+    }
+    const ms = performance.now() - t0;
+    const h = `<details open id="z3out"><summary>Z3 の結果（${scripts.length} 問、${ms.toFixed(0)} ms、ブラウザ内の z3-solver ${scripts.length ? '' : '— 型のある条件が無いので問いが無い'}）</summary><table class="cands"><tr><th>種類</th><th>問い</th><th>答え</th><th></th></tr>${rows}</table></details>`;
+    const old = $('z3out'); if (old) old.remove();
+    $('report').insertAdjacentHTML('afterbegin', h);
+  } catch (e) {
+    const msg = e && (e.message || e.stack) ? (e.message || e.stack) : (typeof e === 'object' ? JSON.stringify(e) : String(e));
+    $('report').insertAdjacentHTML('afterbegin', `<p class="verdict fail">Z3 エラー</p><pre>${esc(msg)}</pre>`);
+  }
+  $('status').textContent = '';
+}
+
+async function run() {
+  $('status').textContent = '検査中…';
+  try {
+    const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
+    const future = $('future').value ? await load($('future').value) : null;
+    const input = {
+      base: future || baseXml, base_draft: future ? baseXml : null,
+      amendment: $('amend').value, expected: null, taisho: null, other_laws,
+      enforced: $('enforced').value || null, suppl: $('suppl').value.trim() || null, promulgated: $('promulgated').value || null,
+    };
+    lastInput = input;
+    const t0 = performance.now();
+    const r = JSON.parse(check(JSON.stringify(input)));
+    let extra = '';
+    if (r.after && r.after.length && r.diff && r.diff.length) {
+      // 変わった条の改正後の本文
+      // diff の「第22条第2項」「第142条の4第7項」から条番号（after の形 "22" / "142_4"）を取る
+      const touched = new Set(r.diff.map(d => (d.match(/第(\d+(?:の\d+)*)条/) || [])[1]).filter(Boolean).map(n => n.replaceAll('の', '_')));
+      const rows = r.after.filter(([art]) => touched.has(art));
+      if (rows.length) extra = `<details open><summary>改正後の本文（変わった条、${touched.size} 条）</summary><pre>${rows.map(([a, t]) => '第' + esc(a.replaceAll('_', '条の')) + '条　' + esc(t)).join('\n\n')}</pre></details>`;
+    }
+    $('report').innerHTML = renderReport(r, performance.now() - t0, { extra, baseXml });
+  } catch (e) {
+    $('report').innerHTML = `<p class="verdict fail">エラー</p><pre>${String(e)}</pre>`;
+  }
+  $('status').textContent = '';
+}
+
+(async () => {
+  await setup();
+  fill($('base'), BASES, false);
+  fill($('laws'), LAWS, false);
+  fill($('future'), FUTURES, true);
+  $('basefile').onchange = async (e) => { const f = e.target.files[0]; if (f) setBase(await f.text()); };
+  $('filter').oninput = showOutline;
+  $('run').onclick = run;
+  $('z3').onclick = runZ3;
+  const today = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+  $('promulgated').value = iso(today);
+  $('enforced').value = iso(new Date(today.getFullYear() + 1, today.getMonth(), today.getDate()));
+  $('base').onchange = async () => {
+    if (!PRESETS[$('base').value]) { $('amend').value = ''; $('promulgated').value = iso(today); $('enforced').value = iso(new Date(today.getFullYear() + 1, today.getMonth(), today.getDate())); $('suppl').value = '第一条　この法律は、公布の日から起算して一年を超えない範囲内において政令で定める日から施行する。'; }
+    setBase(await load($('base').value));
+  };
+  await setBase(await load(BASES[0][0]));
+})();
+</script>
+</body>
+</html>

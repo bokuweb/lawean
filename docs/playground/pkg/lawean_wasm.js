@@ -1,5 +1,26 @@
 /**
- * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced? }。出力は `Report` の JSON
+ * 法令 XML の全文から、層 1 の候補（時間表現・罰則・金額）を JSON Lines ではなく JSON 配列で。
+ * 入力: e-Gov の XML。出力: `[{ field, category, raw, normalized, unit, role, source_label, evidence: { sentence, start, end, snippet, context }, confidence, reason }, ...]`
+ * @param {string} xml
+ * @returns {string}
+ */
+export function candidates(xml) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(xml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.candidates(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * 入力 JSON: { base, amendment, expected?, taisho?, other_laws?: [xml], enforced?, suppl?（起草中の附則）, promulgated?（公布予定日）, base_draft?（起草時の発射台）, other_laws_draft?: [xml] }。出力は `Report` の JSON
  * @param {string} input_json
  * @returns {string}
  */
@@ -17,9 +38,68 @@ export function check(input_json) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * 法令の題名・法令番号と、本則の条・項の一覧（起草の画面で条文を見ながら改め文を書くため）。
+ * 出力: { title, law_num, law_id, articles: [{ id, num, label, caption, paragraphs: [{ id, num, text }] }] }
+ * @param {string} xml
+ * @returns {string}
+ */
+export function outline(xml) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(xml, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.outline(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Z3 に渡す SMT-LIB（z3 はブラウザ側の z3-solver の WASM で走らせる）。
+ * 入力 JSON: { base, amendment, enforced?, suppl?, promulgated? }。
+ * 出力: [{ kind, name, script, sat_means, unsat_means }]。
+ *
+ * - `enforcement`: 単位ごとの施行日が附則の区間にあるか（Z3 の暦、民法第143条。Rust の暦と同じ答えになるはず）
+ * - `vacuity`: 改正後の本文から層 1 が出した Rule のうち、条件に型のある部分（期間の比較・経過）を持つものについて、
+ *   例外を差し引いても適用される世界が残るか（unsat = 空振り）
+ * - `conflict`: 相反する効果の組が同時に適用される世界があるか（sat = 齟齬）
+ * @param {string} input_json
+ * @returns {string}
+ */
+export function smt_scripts(input_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.smt_scripts(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_lawean_lean_apply_unit_4fe3c5d438647114: function(arg0, arg1, arg2, arg3, arg4) {
+            const ret = lawean_lean_apply_unit(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
+        __wbg_lawean_lean_available_17694e11e9f6250e: function() {
+            const ret = lawean_lean_available();
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
@@ -34,6 +114,14 @@ function __wbg_get_imports() {
         __proto__: null,
         "./lawean_wasm_bg.js": import0,
     };
+}
+
+let cachedDataViewMemory0 = null;
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -119,6 +207,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedDataViewMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

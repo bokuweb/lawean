@@ -65,6 +65,46 @@ pub fn emit_revision(doc: &str, name: &str, rev: &IdentRevision) -> String {
     s
 }
 
+/// `def <name> : Bodies`（Refs.lean）。参照を id で持つ本文の列
+pub fn emit_bodies(doc: &str, name: &str, bodies: &[(String, lawean_amend::body::Body)]) -> String {
+    use lawean_amend::body::{Piece, RefForm};
+    let mut s = header(doc);
+    s = s.replace("import Lawean.Ident\n", "import Lawean.Refs\n");
+    writeln!(s, "def {name} : Bodies :=").unwrap();
+    for (i, (id, body)) in bodies.iter().enumerate() {
+        let open = if i == 0 { "[" } else { " " };
+        let close = if i + 1 == bodies.len() { " ]" } else { "," };
+        let pieces: Vec<String> = body
+            .iter()
+            .map(|p| match p {
+                Piece::Text(t) => format!(".text {}", lean_string(t)),
+                Piece::Ref { target, form } => format!(
+                    ".ref {} {}",
+                    lean_string(target),
+                    match form {
+                        RefForm::Absolute => ".absolute".to_string(),
+                        RefForm::AbsoluteArt => ".absoluteArt".to_string(),
+                        RefForm::Prev(k) => format!("(.prev {k})"),
+                        RefForm::Next => ".next".to_string(),
+                    }
+                ),
+            })
+            .collect();
+        writeln!(
+            s,
+            "  {open} ({}, [{}]){close}",
+            lean_string(id),
+            pieces.join(", ")
+        )
+        .unwrap();
+    }
+    if bodies.is_empty() {
+        writeln!(s, "  []").unwrap();
+    }
+    s.push_str("\nend Lawean.Data\n");
+    s
+}
+
 /// `def <name> : AmendUnit`
 pub fn emit_unit(doc: &str, name: &str, ops: &[IdentOp]) -> String {
     let mut s = header(doc);
@@ -95,6 +135,9 @@ pub fn emit_unit(doc: &str, name: &str, ops: &[IdentOp]) -> String {
             IdentOp::Resolve { id, text } => {
                 format!(".resolve {} {}", lean_string(id), lean_string(text))
             }
+            IdentOp::Renumber { id, art } => {
+                format!(".renumber {} {}", lean_string(id), lean_string(art))
+            }
         };
         writeln!(s, "  {open} {body}{close}").unwrap();
     }
@@ -120,6 +163,7 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let r1 = rev("403AC0000000090_20220518_503AC0000000037");
     let r2 = rev("403AC0000000090_20230220_504AC0000000048");
     let r3 = parse_response(&read("403AC0000000090.xml")).unwrap();
+    let r4 = rev("403AC0000000090_20280613_505AC0000000053");
 
     let u35 = parse_units(&read("amendments/503AC0000000037_art35.txt"))
         .unwrap()
@@ -141,25 +185,122 @@ pub fn generate(fixtures: &std::path::Path) -> Vec<(String, String)> {
     let uca = uc.remove(0);
     let bca = bind(&r0, &uca, "case-conflict-22/A").unwrap();
     let bcb = bind(&r0, &ucb, "case-conflict-22/B").unwrap();
+    // 他法令への波及（docs/09）の自作改正案: 第38条への項の挿入（現行に対して）、第28条の削除（2022-05-18 版に対して）
+    let u_ins = parse_units(&read("amendments/drafts/insert-38-4.txt"))
+        .unwrap()
+        .remove(0);
+    let b_ins = bind(&r3, &u_ins, "draft/insert-38-4").unwrap();
+    let u_del = parse_units(&read("amendments/drafts/delete-28.txt"))
+        .unwrap()
+        .remove(0);
+    let b_del = bind(&r1, &u_del, "draft/delete-28").unwrap();
     let b73 = bind(&r1, &u73, "504AC0000000048/art73").unwrap();
     // 第74条は第73条が作った id を触るので、e-Gov の版ではなく第73条を束縛した文書に対して束縛する
     let b74 = bind(&b73.doc, &u74, "504AC0000000048/art74").unwrap();
 
+    // 令和5年法律第53号 第125条（民事関係手続のデジタル化）: 現行に当てると 2028-06-13 版になる。条ずれ（renumber）を含む
+    let u125 = parse_units(&read("amendments/505AC0000000053_art125.txt"))
+        .unwrap()
+        .remove(0);
+    let b125 = bind(&r3, &u125, "505AC0000000053/art125").unwrap();
+
+    // 先行改正との可換性（docs/13）: 古物営業法。令4-68 第98条（公布 2022-06-17）を公布時の版に束縛し、
+    // 先に施行された令5-79（2024-04-01）を 2 つの版の差から id の操作列にする（改め文は使わない）
+    let g0 = rev("324AC0000000108_20220617_504AC0000000068");
+    let g1 = rev("324AC0000000108_20240401_505AC0000000063");
+    let g2 = rev("324AC0000000108_20250601_504AC0000000068");
+    let u98 = parse_units(&read("amendments/504AC0000000068_5laws.txt"))
+        .unwrap()
+        .into_iter()
+        .find(|u| u.target_title == "古物営業法")
+        .unwrap();
+    let b98 = bind(&g0, &u98, "504AC0000000068/art98").unwrap();
+    let derived = lawean_amend::ident::derive_unit(
+        &from_document(&g0),
+        &from_document(&g1),
+        "505AC0000000063/derived",
+    );
+
+    // 先行改正で加える本文の参照がずれる実例（docs/13 §2.1）: 令2-62 第2条（抜粋）を起草時の版に当て、
+    // 令3-37 を差分から起こして当て、加えた条の本文を id の参照で描き直す
+    let m0 = rev("414AC0000000078_20200624_502AC0000000062");
+    let m1 = rev("414AC0000000078_20220401_502AC0000000008");
+    let m2 = rev("414AC0000000078_20220401_502AC0000000062");
+    let u262 = parse_units(&read("amendments/502AC0000000062_art2_excerpt.txt"))
+        .unwrap()
+        .remove(0);
+    let x262 = bind(&m0, &u262, "502AC0000000062/art2").unwrap().ops;
+    let rm0 = from_document(&m0);
+    let rmx = lawean_amend::ident::apply_unit(&rm0, &x262).unwrap();
+    let b337 =
+        lawean_amend::ident::derive_unit(&rm0, &from_document(&m1), "503AC0000000037/derived");
+    let bodies262: Vec<(String, lawean_amend::body::Body)> = x262
+        .iter()
+        .flat_map(|op| op.creates())
+        .filter_map(|id| {
+            let n = rmx.nodes.iter().find(|n| n.id == id)?;
+            // 第178条と第180条第4項だけ（定理で使う 2 項。全部出すと大きい）
+            (n.art == "178" || n.art == "180").then(|| {
+                (
+                    id.to_string(),
+                    lawean_amend::body::body_of(&rmx, id, &n.text),
+                )
+            })
+        })
+        .collect();
+
+    // 公職選挙法（実際に起きた改正漏れ、docs/12 §6）: 平成30年法律第75号の発射台と、令和3年法律第51号（誤りの訂正）の前後
+    let k0 = rev("325AC1000000100_20180620_430AC0000000059");
+    let k1 = rev("325AC1000000100_20201212_502AC1000000045");
+    let k2 = rev("325AC1000000100_20210602_503AC0000000051");
+    let uk75 = parse_units(&read("amendments/430AC0100000075.txt"))
+        .unwrap()
+        .remove(0);
+    let bk75 = bind(&k0, &uk75, "430AC0100000075").unwrap();
+    let uk51 = parse_units(&read("amendments/503AC0000000051.txt"))
+        .unwrap()
+        .remove(0);
+    let bk51 = bind(&k1, &uk51, "503AC0000000051").unwrap();
+
     let revs = [
+        ("Rev_414AC0000000078_draft_r2_62", "rev_414AC0000000078_draft_r2_62", "マンション建替え円滑化法 `414AC0000000078_20200624_502AC0000000062`（令2-62 第2条の起草時の版）に第2条（抜粋）を当てたもの（改正法が振った id つき）", rmx.clone()),
+        ("Rev_414AC0000000078_20220401", "rev_414AC0000000078_20220401", "マンション建替え円滑化法 `414AC0000000078_20220401_502AC0000000062`（令2-62 第2条の施行後 = 令3-37 附則第63条の手当ての後）", from_document(&m2)),
+        ("Rev_324AC0000000108_20220617", "rev_324AC0000000108_20220617", "古物営業法 `324AC0000000108_20220617_504AC0000000068`（令和4年法律第68号の公布時 = 第98条の起草時の発射台）", from_document(&g0)),
+        ("Rev_324AC0000000108_20250601", "rev_324AC0000000108_20250601", "古物営業法 `324AC0000000108_20250601_504AC0000000068`（令4-68 第98条の施行後。間に令5-79 が 2024-04-01 に施行されている）", from_document(&g2)),
+        ("Rev_325AC1000000100_20180620", "rev_325AC1000000100_20180620", "公職選挙法 `325AC1000000100_20180620_430AC0000000059`（平成30年法律第75号の発射台。本則 1164 項）", from_document(&k0)),
+        ("Rev_325AC1000000100_20201212", "rev_325AC1000000100_20201212", "公職選挙法 `325AC1000000100_20201212_502AC1000000045`（令和3年法律第51号の発射台）", from_document(&k1)),
+        ("Rev_325AC1000000100_20210602", "rev_325AC1000000100_20210602", "公職選挙法 `325AC1000000100_20210602_503AC0000000051`（令和3年法律第51号の施行後）", from_document(&k2)),
         ("Rev_403AC0000000090_20210519", "rev_403AC0000000090_20210519", "借地借家法 `403AC0000000090_20210519_503AC0000000037`（令和3年法律第37号 第35条の発射台）", from_document(&r0)),
         ("Rev_403AC0000000090_20220518", "rev_403AC0000000090_20220518", "借地借家法 `403AC0000000090_20220518_503AC0000000037`（令和3年法律第37号 第35条の施行後 = 令和4年法律第48号 第73条の発射台。20220525 版と本則は同じ）", from_document(&r1)),
         ("Rev_403AC0000000090_20230220", "rev_403AC0000000090_20230220", "借地借家法 `403AC0000000090_20230220_504AC0000000048`（令和4年法律第48号 第73条の施行後。20230614 版と本則は同じ）", from_document(&r2)),
         ("Rev_403AC0000000090_20260521", "rev_403AC0000000090_20260521", "借地借家法 `403AC0000000090_20260521_504AC0000000048`（現行。令和4年法律第48号 第74条の施行後）", from_document(&r3)),
+        ("Rev_403AC0000000090_20280613", "rev_403AC0000000090_20280613", "借地借家法 `403AC0000000090_20280613_505AC0000000053`（令和5年法律第53号 第125条の施行後。未施行）", from_document(&r4)),
     ];
     let units = [
+        ("Unit_derived_414AC0000000078_20220401", "unit_derived_414AC0000000078_20220401", "先行改正（令3-37。2021-09-01 施行、第28条に 2 項を挿入し第124条第3項を書き換え）を 2020-06-24 版と 2022-04-01 版（令2-62 第2条の直前）の差から起こした id の操作列（docs/13 §2.1）", b337),
+        ("Unit_504AC0000000068_art98", "unit_504AC0000000068_art98", "刑法等一部改正法整備法（令和4年法律第68号）第98条（古物営業法、`fixtures/amendments/504AC0000000068_5laws.txt`）を公布時の版 `rev_324AC0000000108_20220617` に束縛したもの", b98.ops),
+        ("Unit_derived_324AC0000000108_20240401", "unit_derived_324AC0000000108_20240401", "先行改正（令和5年法律第79号、2024-04-01 施行）を、改め文ではなく 2022-06-17 版と 2024-04-01 版の差から起こした id の操作列（`ident::derive_unit`）。\n令4-68 より後に公布され先に施行された = 公布順と施行順が逆の実例（docs/13）", derived),
+        ("Unit_430AC0100000075", "unit_430AC0100000075", "公職選挙法の一部を改正する法律（平成30年法律第75号、参議院の特定枠）を `rev_325AC1000000100_20180620` に束縛したもの（34 文のうち 32 文。入れ子の読替え規定の書き換えと別表を除く）。\n第142条の4に第4項を挿入し第6項を第7項に繰り下げたが、第244条第1項第2号の2の「第百四十二条の四第六項」を改めておらず、罰則が消えた（実際に起きた改正漏れ。docs/12 §6）", bk75.ops),
+        ("Unit_503AC0000000051", "unit_503AC0000000051", "公職選挙法の一部を改正する法律（令和3年法律第51号）を `rev_325AC1000000100_20201212` に束縛したもの。上の誤りを「第百四十二条の四第六項」→「第百四十二条の四第七項」で正す", bk51.ops),
         ("Unit_503AC0000000037_art35", "unit_503AC0000000037_art35", "デジタル社会形成整備法（令和3年法律第37号）第35条（`fixtures/amendments/503AC0000000037_art35.txt`）を `rev_403AC0000000090_20210519` に束縛したもの。\n繰り下げ・「第P項を第Q項とし」は id の世界では操作にならないので消え、「前項」の手当ては本文全体の `replace` になる", b35.ops.clone()),
         ("Unit_504AC0000000048_art73", "unit_504AC0000000048_art73", "民事訴訟法等改正法（令和4年法律第48号）第73条（`fixtures/amendments/504AC0000000048_art73-74.txt`）を `rev_403AC0000000090_20220518` に束縛したもの。目次・第42条第1項・第61条の新設", b73.ops),
         ("Unit_504AC0000000048_art74", "unit_504AC0000000048_art74", "同 第74条を、第73条を当てた後の状態に束縛したもの。第61条の全部改正 = 第73条が作った id に anchor した `insertAfter` と、その id の `delete`。\n第73条が作った id を触るので第73条に依存する（`dependsOn`）", b74.ops),
+        ("Unit_505AC0000000053_art125", "unit_505AC0000000053_art125", "民事関係手続等における情報通信技術の活用等の推進を図るための関係法律の整備に関する法律（令和5年法律第53号）第125条（`fixtures/amendments/505AC0000000053_art125.txt`）を現行 `rev_403AC0000000090_20260521` に束縛したもの。\n第47条〜第61条を第49条〜第64条に繰り下げる条ずれ（`renumber`）と、第47・48・51条の新設", b125.ops),
         ("Unit_case_hane_missing", "unit_case_hane_missing", "失敗例 `hane-missing`（fixtures/cases）: 令和3年 第35条から「同条第三項中「前項」を「第三項」に改め」を落としたもの。`rev_403AC0000000090_20210519` に束縛。溶け込みはするが e-Gov の改正後と一致しない", b35_hane.ops),
         ("Unit_case_conflict_22_A", "unit_case_conflict_22_A", "失敗例 `conflict-22`（fixtures/cases）の第一条: 第22条第1項「書面によって」を「書面又は電磁的記録によって」に。`rev_403AC0000000090_20210519` に束縛", bca.ops),
+        ("Unit_draft_insert_38_4", "unit_draft_insert_38_4", "自作の改正案 `fixtures/amendments/drafts/insert-38-4.txt`（docs/09 計画 3）: 第38条第3項の次に 1 項を挿入し、以降を繰り下げる。現行 `rev_403AC0000000090_20260521` に束縛。施行令の「第三十八条第四項」がずれる", b_ins.ops),
+        ("Unit_draft_delete_28", "unit_draft_delete_28", "自作の改正案 `fixtures/amendments/drafts/delete-28.txt`（docs/09 計画 5）: 第28条を削る。`rev_403AC0000000090_20220518` に束縛。高齢者居住安定確保法第58条の「借地借家法第二十八条」が参照切れになる", b_del.ops),
         ("Unit_case_conflict_22_B", "unit_case_conflict_22_B", "同 第二条: 「書面によって」を「書面（電磁的記録を含む。）によって」に。同じ発射台に束縛。A の後に当てると期待した本文と違うので衝突として残る", bcb.ops),
     ];
     let mut out = Vec::new();
+    out.push((
+        "Bodies_502AC0000000062_art2.lean".to_string(),
+        emit_bodies(
+            "令2-62 第2条が加える第178条・第180条の本文を、起草時の版に当てたリビジョンで id の参照にしたもの（`body::body_of`）。\n「第二十八条第五項」「第四項」「第六項」は第28条の項の id を指す",
+            "bodies_502AC0000000062_art2",
+            &bodies262,
+        ),
+    ));
     for (file, name, doc, r) in &revs {
         out.push((format!("{file}.lean"), emit_revision(doc, name, r)));
     }

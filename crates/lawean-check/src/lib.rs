@@ -14,14 +14,21 @@
 //! | `Expected` | `IdentRevision::render` の比較 | e-Gov の改正後リビジョンと本文が違う |
 //! | `Taisho`（新旧対照表） | 本文の突き合わせ | 新旧対照表の「新」欄が溶け込み後の本文と違う（2021 年のデジタル改革関連法案の誤りの型） |
 //! | `CrossLaw`（他法令） | `lawean-space::impact` | 他法令からの参照切れ・ずれ |
+//! | `Enforcement`（施行期日） | `lawean-extract::suppl` + 暦 | 施行日が改正法の附則「公布の日から起算して一年を超えない範囲内」の外 |
+//! | `Stale`（先行改正との競合） | `stale`（`ident::bind` を起草時・施行時の両方の発射台に） | 起草後・施行前に別の改正が施行されて、字句が消える（空振り）・「第N項」が別の項を指す・加える本文の参照がずれる・同じ項を両方が改める。独立なら可換（Lean `applyUnit_comm`）で調整規定は要らない（令3-37 附則第63条 ← 令2-62 の実例、docs/13） |
+//! | `Penalty`（罰則の空振り） | `lawean-extract::penalty` | 罰則が指す規定に、罰則の行為（「表示しなかつた」）が無い。改正で新たに生じたものが Fail（公職選挙法 平成30年法律第75号の実例） |
 //!
-//! Lean との関係: `Consolidate` / `Conflict` / `Order` は Lean の `Ident.applyUnit` の Rust 写しで判定している。
-//! 同じデータを `lawean-lean` が Lean に出し、`lean/Lawean/Cases.lean` が `native_decide` で同じ結論を確かめる（docs/12）。
+//! Lean との関係: `Consolidate` / `Conflict` / `Order` の溶け込みは、Lean ランタイムがリンクされていれば
+//! **証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、Lean → C）で計算し、無ければ Rust の写しで計算する
+//! （`Report.engine` にどちらかを書く）。同じデータを `lawean-lean` が Lean に出し、`lean/Lawean/Cases.lean` が
+//! `native_decide` で同じ結論を確かめる（docs/12）。
 
 use lawean_amend::ident::{self, IdentOp, IdentRevision};
-use lawean_amend::{hane_candidates, parse_units, AmendUnit};
-use lawean_source::{parse_response, ArticleNum, LegalDocument};
+use lawean_amend::{article_label, hane_candidates, parse_units, AmendUnit};
+use lawean_source::{parse_law_xml, ArticleNum, LegalDocument};
 use lawean_space::{impact, locate, ImpactKind, LawSpace};
+
+pub mod stale;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +43,9 @@ pub enum Kind {
     Expected,
     Taisho,
     CrossLaw,
+    Enforcement,
+    Penalty,
+    Stale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +86,41 @@ pub struct Report {
     pub after: Vec<(String, String)>,
     /// 発射台との差分（変わった・増えた・消えた項）
     pub diff: Vec<String>,
+    /// 生成したハネの手当て（改め文の形。番号は改正前で、繰り下げの文より前に置く）。手当てが足りないときだけ
+    pub suggested_fixes: Vec<String>,
+    /// 溶け込みから生成した新旧対照表（`taisho` の形式: 1 行 1 項、「新 第三十八条第五項　本文」「旧 …」）。
+    /// 起草者が添付資料として使う。手で写す代わりにここから取れば、新旧対照表の転記ミス（2021 年の型）は起きない
+    pub taisho_generated: Vec<String>,
+    /// 溶け込みを計算したもの: `"lean"`（証明した定義を C 経由で）か `"rust"`（写し）
+    pub engine: String,
+}
+
+/// Lean の `applyUnit`（リンクされていれば）か Rust の写し
+#[cfg(feature = "lean")]
+fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision> {
+    match lawean_leanrt::apply_unit(rev, ops) {
+        Ok(r) => r,
+        Err(_) => ident::apply_unit(rev, ops),
+    }
+}
+
+#[cfg(not(feature = "lean"))]
+fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision> {
+    ident::apply_unit(rev, ops)
+}
+
+#[cfg(feature = "lean")]
+fn engine_name() -> &'static str {
+    if lawean_leanrt::available() {
+        "lean"
+    } else {
+        "rust"
+    }
+}
+
+#[cfg(not(feature = "lean"))]
+fn engine_name() -> &'static str {
+    "rust"
 }
 
 impl Report {
@@ -94,6 +139,9 @@ pub struct Input<'a> {
     pub base: &'a LegalDocument,
     /// 改正単位（施行の順）。ラベルは表示用
     pub units: Vec<(String, AmendUnit)>,
+    /// 同じ改正法のうち、他法令（`space` にあるもの）を改正する単位: (ラベル, 法令 ID, 単位)。
+    /// 他法令への波及（CrossLaw）の手当てとして突き合わせる（「手当ては生成するもの」なので、生成した字句と同じ置換があるか）
+    pub other_units: Vec<(String, String, AmendUnit)>,
     /// e-Gov の改正後リビジョン（あれば本文を突き合わせる）
     pub expected: Option<&'a LegalDocument>,
     /// 新旧対照表（`taisho` の形式）
@@ -101,6 +149,14 @@ pub struct Input<'a> {
     /// 他法令（波及を見る）。`enforced` は改正の施行日
     pub space: Option<&'a LawSpace>,
     pub enforced: Option<&'a str>,
+    /// 起草中の改正法の附則（平文）。あれば改正後リビジョンの附則より優先して施行期日を読む
+    pub suppl: Option<&'a str>,
+    /// 公布（予定）日 `YYYY-MM-DD`。附則の「公布の日から起算して…」の起点
+    pub promulgated: Option<&'a str>,
+    /// 起草時の発射台（改め文を書いたときの法令の状態）。`base` は施行時の状態。両方あれば先行改正との競合を見る
+    pub base_draft: Option<&'a LegalDocument>,
+    /// 他法令の起草時の版（`space` と同じ法令 ID で）
+    pub space_draft: Option<&'a LawSpace>,
 }
 
 fn check(kind: Kind, status: Status, message: impl Into<String>, details: Vec<String>) -> Check {
@@ -146,6 +202,7 @@ fn op_line(op: &IdentOp) -> String {
         ),
         IdentOp::Delete { id } => format!("delete {}", tail(id)),
         IdentOp::Resolve { id, text } => format!("resolve {} 「{}」", tail(id), short(text)),
+        IdentOp::Renumber { id, art } => format!("renumber {} → 第{art}条", tail(id)),
     }
 }
 
@@ -163,7 +220,11 @@ pub fn run(input: &Input<'_>) -> Report {
     let mut order_fail = Vec::new();
     let mut conflict_fail = Vec::new();
     let mut hane_fail = Vec::new();
+    let mut hane_warn = Vec::new();
     let mut hane_ok = 0usize;
+    let mut suggested: Vec<lawean_amend::Op> = Vec::new();
+    // 先行改正とのずれの手当て（改め文の本文に施すもの。改正法の改正の形）
+    let mut stale_fixes: Vec<String> = Vec::new();
     let mut stopped = false;
 
     for (i, (label, unit)) in input.units.iter().enumerate() {
@@ -176,13 +237,49 @@ pub fn run(input: &Input<'_>) -> Report {
             });
             continue;
         }
-        // ハネ: この単位を当てる直前の状態で
+        // ハネ: この単位を当てる直前の状態で。参照元の項をこの単位が削る（章・節・条ごと）なら手当ては要らない
+        let deleted: Vec<String> = ident::bind(&cur_doc, unit, "probe")
+            .map(|b| {
+                b.ops
+                    .iter()
+                    .filter_map(|o| match o {
+                        IdentOp::Delete { id } => Some(id.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         for c in hane_candidates(&cur_doc, unit) {
+            let para_of_sentence = c.sentence.0.split("/sent:").next().unwrap_or("");
+            let para_id = para_of_sentence.split("/item:").next().unwrap_or("");
+            if !c.handled && deleted.iter().any(|d| d == para_id) {
+                continue;
+            }
             if c.handled {
                 hane_ok += 1;
+            } else if c.advisory {
+                // 参照先は変わらない。1 項だけの条に項を加えたので、条を丸ごと指す参照に「第一項」を添える慣行
+                hane_warn.push(format!(
+                    "{label}: {} の「{}」は {} を丸ごと指す。項を加えるので、第一項を指すなら「{}」に精密化する（参照先は変わらないので誤りではない）",
+                    c.sentence.0.rsplit("/main/").next().unwrap_or(&c.sentence.0),
+                    c.text,
+                    c.target.0.rsplit("/main/").next().unwrap_or(&c.target.0),
+                    c.fix.clone().unwrap_or_default()
+                ));
+                // 助言なので suggested_fixes（改め文に足すべき手当て）には入れない
             } else {
+                let expected = match &c.fix {
+                    Some(f) => format!("正しい手当ては「{}」→「{f}」", c.text),
+                    None => {
+                        "参照先が削られるので、参照を消すか別の規定に向ける（人が決める）".into()
+                    }
+                };
+                let found = match &c.found_to {
+                    Some(t) => format!("改め文にあるのは「{t}」（番号違い）"),
+                    None => "改め文に手当てが無い".into(),
+                };
                 hane_fail.push(format!(
-                    "{label}: {} の「{}」は {} を指すが、改正後は{}。手当てが無いか、改めた先の番号が違う",
+                    "{label}: {} の「{}」は {} を指すが、改正後は{}。{expected}。{found}",
                     c.sentence
                         .0
                         .rsplit("/main/")
@@ -190,17 +287,21 @@ pub fn run(input: &Input<'_>) -> Report {
                         .unwrap_or(&c.sentence.0),
                     c.text,
                     c.target.0.rsplit("/main/").next().unwrap_or(&c.target.0),
-                    match c.new_target_paragraph {
-                        Some(n) => format!("第{n}項になる"),
-                        None => "削られる".into(),
+                    match (&c.new_target_article, c.new_target_paragraph) {
+                        (Some(a), _) => format!("{}になる", article_label(a)),
+                        (None, Some(n)) => format!("第{n}項になる"),
+                        (None, None) => "削られる".into(),
                     }
                 ));
+                if let Some(op) = c.fix_op {
+                    suggested.push(op);
+                }
             }
         }
         let amend_id = format!("unit{}", i + 1);
         match ident::bind(&cur_doc, unit, &amend_id) {
             Ok(b) => {
-                let next = ident::apply_unit(&cur_rev, &b.ops);
+                let next = apply_verified(&cur_rev, &b.ops);
                 match next {
                     Some(r) if r.has_conflict() => {
                         for (id, text, news) in r.conflicts() {
@@ -243,7 +344,7 @@ pub fn run(input: &Input<'_>) -> Report {
                 // 分類: 発射台そのものに当たるか、先行する単位の後でだけ当たらないか、後続の単位の後なら当たるか
                 if i > 0 {
                     if let Ok(b0) = ident::bind(input.base, unit, &amend_id) {
-                        match ident::apply_unit(&cur_rev, &b0.ops) {
+                        match apply_verified(&cur_rev, &b0.ops) {
                             Some(r) if r.has_conflict() => {
                                 for (id, text, news) in r.conflicts() {
                                     conflict_fail.push(format!(
@@ -283,6 +384,27 @@ pub fn run(input: &Input<'_>) -> Report {
                 }
                 stopped = true;
             }
+        }
+    }
+
+    // 他法令を改正する単位は、その法令に当たるかだけ見る（波及の手当ての突き合わせは CrossLaw で）
+    for (label, law_id, unit) in &input.other_units {
+        let Some(doc) = input.space.and_then(|s| s.get(law_id)) else {
+            continue;
+        };
+        let title = doc
+            .title
+            .as_ref()
+            .map(|t| lawean_source::inline_text(&t.text))
+            .unwrap_or_else(|| law_id.clone());
+        units_out.push(UnitSummary {
+            label: format!("{label}（{title}）"),
+            instructions: unit.instructions.len(),
+            ops: unit.instructions.iter().map(|x| x.ops.len()).sum(),
+            ident_ops: vec![],
+        });
+        if let Err(e) = lawean_amend::apply_unit(doc, unit, label) {
+            base_fail.push(format!("{label}（{title}）: {e}"));
         }
     }
 
@@ -358,7 +480,16 @@ pub fn run(input: &Input<'_>) -> Report {
     } else {
         check(Kind::Conflict, Status::Fail, "衝突がある", conflict_fail)
     });
-    checks.push(if hane_fail.is_empty() {
+    checks.push(if hane_fail.is_empty() && !hane_warn.is_empty() {
+        check(
+            Kind::Hane,
+            Status::Warn,
+            format!(
+                "ハネ改正の手当て漏れは無い（候補 {hane_ok} 件は手当て済み）が、精密化の助言がある"
+            ),
+            hane_warn,
+        )
+    } else if hane_fail.is_empty() {
         check(
             Kind::Hane,
             Status::Pass,
@@ -383,12 +514,53 @@ pub fn run(input: &Input<'_>) -> Report {
     } else if !cur_rev.wf() {
         check(Kind::Consolidate, Status::Fail, "id が重複している", vec![])
     } else {
-        check(
-            Kind::Consolidate,
-            Status::Pass,
-            format!("溶け込んだ（本則 {} 項）", cur_rev.nodes.len()),
-            vec![],
-        )
+        // 条の連番: 溶け込みで新しく崩れたもの（「第二条の次に次の一条を加える」で第四条と番号を振った、など）は Fail。
+        // 発射台にもともとある崩れは e-Gov のデータの都合なので明細に添えるだけ
+        use lawean_amend::numbering::check_art_strings;
+        let before: Vec<String> = check_art_strings(base_rev.nodes.iter().map(|n| n.art.as_str()))
+            .into_iter()
+            .map(|i| i.message)
+            .collect();
+        let after: Vec<String> = check_art_strings(cur_rev.nodes.iter().map(|n| n.art.as_str()))
+            .into_iter()
+            .map(|i| i.message)
+            .collect();
+        let new_issues: Vec<String> = after
+            .iter()
+            .filter(|m| !before.contains(m))
+            .cloned()
+            .collect();
+        let old_issues: Vec<String> = after
+            .iter()
+            .filter(|m| before.contains(m))
+            .cloned()
+            .collect();
+        if !new_issues.is_empty() {
+            let mut d: Vec<String> = new_issues
+                .iter()
+                .map(|m| format!("溶け込みで生じた: {m}"))
+                .collect();
+            d.extend(old_issues.iter().map(|m| format!("発射台から: {m}")));
+            check(
+                Kind::Consolidate,
+                Status::Fail,
+                "溶け込み後の条番号が連番でない",
+                d,
+            )
+        } else {
+            check(
+                Kind::Consolidate,
+                Status::Pass,
+                format!(
+                    "溶け込んだ（本則 {} 項、条番号は連番）",
+                    cur_rev.nodes.len()
+                ),
+                old_issues
+                    .iter()
+                    .map(|m| format!("発射台から: {m}"))
+                    .collect(),
+            )
+        }
     });
 
     // 期待するリビジョンとの一致
@@ -445,11 +617,51 @@ pub fn run(input: &Input<'_>) -> Report {
             let target = input.base.law_id.clone().unwrap_or_default();
             let mut fails = Vec::new();
             let mut warns = Vec::new();
+            let mut handled = Vec::new();
+            // 手当て済みの参照（法令, 文, 字句）。同じ改正法で同時に施行されるので、その間の意味のずれ（TimingGap）は無い
+            let mut handled_refs: Vec<(String, String, String)> = Vec::new();
+            // 他法令の側の改正単位に、参照元の文（条・項）への置換があるか。`to` があればその置換先も見る
+            let fixed_by = |law: &str, sentence: &str, text: &str, to: Option<&str>| -> Option<String> {
+                let src_art = sentence
+                    .split("/art:")
+                    .nth(1)
+                    .and_then(|x| x.split('/').next())
+                    .map(ArticleNum::parse)?;
+                let src_para: Option<u32> = sentence
+                    .split("/para:")
+                    .nth(1)
+                    .and_then(|x| x.split('/').next())
+                    .and_then(|x| x.parse().ok());
+                input
+                    .other_units
+                    .iter()
+                    .filter(|(_, id, _)| id == law)
+                    .flat_map(|(l, _, u)| u.instructions.iter().flat_map(move |i| i.ops.iter().map(move |o| (l, o))))
+                    .find_map(|(l, op)| match op {
+                        lawean_amend::Op::Replace { at, from, to: t }
+                            if at.article == src_art
+                                && match &at.paragraph {
+                                    Some(lawean_amend::ParaRef::Num(n)) => src_para == Some(*n),
+                                    _ => true,
+                                }
+                                && from.contains(text)
+                                && to.is_none_or(|want| t.contains(want) || !from.ends_with(text)) =>
+                        {
+                            Some(l.clone())
+                        }
+                        lawean_amend::Op::Delete { at } if at.article == src_art => Some(l.clone()),
+                        _ => None,
+                    })
+            };
             for (label, unit) in &input.units {
                 match impact(space, &target, unit, day) {
                     Ok(imps) => {
                         for i in imps {
                             let r = &i.reference;
+                            // 「同項」「同条」は先行詞に追随するので、先行詞の側の報告で足りる
+                            if r.text.starts_with('同') {
+                                continue;
+                            }
                             let where_ = format!(
                                 "{} の {}「{}」",
                                 r.from_law,
@@ -462,18 +674,46 @@ pub fn run(input: &Input<'_>) -> Report {
                             );
                             match i.kind {
                                 ImpactKind::Dangling => {
-                                    fails.push(format!("{label}: {where_} が参照切れになる"))
+                                    match fixed_by(&r.from_law, &r.sentence.0, &r.text, None) {
+                                        Some(l) => {
+                                            handled_refs.push((r.from_law.clone(), r.sentence.0.clone(), r.text.clone()));
+                                            handled.push(format!(
+                                                "{label}: {where_} は参照切れになるが、{l} が改めている"
+                                            ))
+                                        }
+                                        None => fails
+                                            .push(format!("{label}: {where_} が参照切れになる")),
+                                    }
                                 }
-                                ImpactKind::Shifted { moved_to, .. } => fails.push(format!(
-                                    "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま",
-                                    moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0)
-                                )),
+                                ImpactKind::Shifted { moved_to, .. } => {
+                                    let new_ref = render_ref_of(&moved_to.0);
+                                    match fixed_by(&r.from_law, &r.sentence.0, &r.text, Some(&new_ref)) {
+                                        Some(l) => {
+                                            handled_refs.push((r.from_law.clone(), r.sentence.0.clone(), r.text.clone()));
+                                            handled.push(format!(
+                                                "{label}: {where_} の指す先が {} に動く。{l} の「{}」→「{new_ref}」で手当て済み",
+                                                moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
+                                                r.text
+                                            ))
+                                        }
+                                        None => fails.push(format!(
+                                            "{label}: {where_} の指す先が {} に動くのに参照は旧番号のまま。手当て: 「{}」→「{new_ref}」",
+                                            moved_to.0.rsplit("/main/").next().unwrap_or(&moved_to.0),
+                                            r.text
+                                        )),
+                                    }
+                                }
                                 ImpactKind::SemanticChange { .. } => {
                                     warns.push(format!("{label}: {where_} の参照先の本文が変わる"))
                                 }
-                                ImpactKind::TimingGap { from, to, .. } => warns.push(format!(
-                                    "{label}: {where_} は {from}〜{to} の間、改正後と違う意味になる"
-                                )),
+                                ImpactKind::TimingGap { from, to, .. } => {
+                                    let key = (r.from_law.clone(), r.sentence.0.clone(), r.text.clone());
+                                    if !handled_refs.contains(&key) {
+                                        warns.push(format!(
+                                            "{label}: {where_} は {from}〜{to} の間、改正後と違う意味になる"
+                                        ))
+                                    }
+                                }
                             }
                         }
                     }
@@ -488,6 +728,13 @@ pub fn run(input: &Input<'_>) -> Report {
                     Status::Warn,
                     "他法令の参照の意味が変わる",
                     warns,
+                )
+            } else if !handled.is_empty() {
+                check(
+                    Kind::CrossLaw,
+                    Status::Pass,
+                    format!("他法令への波及 {} 件はすべて改正法の中で手当て済み", handled.len()),
+                    handled,
                 )
             } else {
                 check(
@@ -504,15 +751,184 @@ pub fn run(input: &Input<'_>) -> Report {
         _ => check(Kind::CrossLaw, Status::Skip, "他法令が無い", vec![]),
     });
 
+    // 施行期日: 改正法の附則（改正後リビジョンに載る）から各単位の許容区間を出し、施行日がその中にあるか
+    checks.push(match (input.suppl, input.expected, input.enforced) {
+        (Some(suppl), _, Some(day)) => {
+            let p = input.promulgated.and_then(lawean_extract::calendar::parse);
+            let spec = lawean_extract::suppl::spec_from_text(suppl, p);
+            check_enforcement_with(&spec, "起草中の附則", day, &input.units, true)
+        }
+        (None, Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
+        (None, None, Some(_)) => check(
+            Kind::Enforcement,
+            Status::Skip,
+            "改正法の附則（起草中の附則か、改正後リビジョン）が無い",
+            vec![],
+        ),
+        _ => check(Kind::Enforcement, Status::Skip, "施行日が無い", vec![]),
+    });
+
+    // 先行改正との競合: 起草時の発射台があれば、両方に束縛して比べる
+    checks.push(match input.base_draft {
+        None => check(
+            Kind::Stale,
+            Status::Skip,
+            "起草時の発射台が無い（施行時の発射台だけで検査）",
+            vec![],
+        ),
+        Some(draft) => {
+            let mut fails = Vec::new();
+            let mut warns = Vec::new();
+            let mut infos = Vec::new();
+            for (label, unit) in &input.units {
+                let o = stale::check_unit(
+                    label,
+                    unit,
+                    draft,
+                    input.base,
+                    input.space_draft,
+                    input.space,
+                );
+                fails.extend(o.fails);
+                warns.extend(o.warns);
+                infos.extend(o.infos);
+                stale_fixes.extend(o.fixes);
+            }
+            let mut details = fails.clone();
+            details.extend(warns.iter().cloned());
+            details.extend(infos.iter().cloned());
+            if !fails.is_empty() {
+                check(
+                    Kind::Stale,
+                    Status::Fail,
+                    "起草後に施行された改正とぶつかる（空振り・別の項・参照のずれ・同じ項）",
+                    details,
+                )
+            } else if !warns.is_empty() {
+                check(
+                    Kind::Stale,
+                    Status::Warn,
+                    "起草後に施行された改正との関係を確かめる",
+                    details,
+                )
+            } else {
+                check(
+                    Kind::Stale,
+                    Status::Pass,
+                    "起草後に施行された改正と独立（順序を入れ替えても同じ結果）",
+                    details,
+                )
+            }
+        }
+    });
+
+    // 罰則の空振り: 改正後の本文で、罰則の行為・効果種別が対象規定と合わないもの。改正前から在るものは Warn
+    checks.push(if stopped {
+        check(Kind::Penalty, Status::Skip, "溶け込みが止まった", vec![])
+    } else {
+        check_penalty(input.base, &clean_doc)
+    });
+
     let ok = checks.iter().all(|c| c.status != Status::Fail);
     let diff = id_diff(&base_rev, &cur_rev);
+    let mut suggested_fixes = if suggested.is_empty() {
+        vec![]
+    } else {
+        vec![
+            lawean_render::render_instruction(&lawean_amend::Instruction {
+                text: String::new(),
+                ops: suggested,
+            })
+            .trim()
+            .to_string(),
+        ]
+    };
+    suggested_fixes.extend(stale_fixes);
     Report {
         ok,
         units: units_out,
         checks,
         after: cur_rev.render(),
         diff,
+        suggested_fixes,
+        taisho_generated: generate_taisho(&base_rev, &cur_rev),
+        engine: engine_name().into(),
     }
+}
+
+/// 溶け込みの前後から新旧対照表を作る（`check_taisho` が読む形式。変わった項・増えた項・消えた項）
+pub fn generate_taisho(base: &IdentRevision, after: &IdentRevision) -> Vec<String> {
+    use lawean_resolve::numeral::to_kanji;
+    let label = |r: &IdentRevision, id: &str| -> Option<String> {
+        let n = r.nodes.iter().find(|x| x.id == id)?;
+        if n.art == ident::TOC_ID {
+            return None;
+        }
+        let art: String = n
+            .art
+            .split('_')
+            .filter_map(|x| x.parse::<u32>().ok())
+            .map(to_kanji)
+            .collect::<Vec<_>>()
+            .join("条の");
+        let p = r.para_num(id)?;
+        Some(if p == 1 {
+            format!("第{art}条")
+        } else {
+            format!("第{art}条第{}項", to_kanji(p as u32))
+        })
+    };
+    let mut out = Vec::new();
+    for n in &after.nodes {
+        match base.nodes.iter().find(|b| b.id == n.id) {
+            Some(b) if b.text == n.text => {}
+            Some(b) => {
+                if let (Some(new), Some(old)) = (label(after, &n.id), label(base, &b.id)) {
+                    out.push(format!("新 {new}\u{3000}{}", n.text));
+                    out.push(format!("旧 {old}\u{3000}{}", b.text));
+                }
+            }
+            None => {
+                if let Some(new) = label(after, &n.id) {
+                    out.push(format!("新 {new}\u{3000}{}", n.text));
+                }
+            }
+        }
+    }
+    for b in &base.nodes {
+        if !after.nodes.iter().any(|n| n.id == b.id) {
+            if let Some(old) = label(base, &b.id) {
+                out.push(format!("旧 {old}\u{3000}{}", b.text));
+            }
+        }
+    }
+    out
+}
+
+/// stable_id（`…/art:38/para:6`）から参照の字句「第三十八条第六項」を作る（他法令側の手当て）
+fn render_ref_of(id: &str) -> String {
+    use lawean_resolve::numeral::to_kanji;
+    let art = id
+        .split("/art:")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .map(|a| {
+            let mut parts = a.split('_').filter_map(|x| x.parse::<u32>().ok());
+            let mut s = format!("第{}条", to_kanji(parts.next().unwrap_or(0)));
+            for b in parts {
+                s.push_str(&format!("の{}", to_kanji(b)));
+            }
+            s
+        })
+        .unwrap_or_default();
+    let para = id
+        .split("/para:")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .and_then(|p| p.parse::<u32>().ok())
+        .map(|p| format!("第{}項", to_kanji(p)))
+        .unwrap_or_default();
+    format!("{art}{para}")
 }
 
 /// 発射台と溶け込み後の差分。id で突き合わせる（発射台の id は残り、新しい項は改正法の id）
@@ -677,24 +1093,338 @@ pub fn check_taisho(
 /// 「第三十八条第五項」→ (38, 5)。項が無ければ第1項
 fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
     let rest = pos.strip_prefix('第')?;
-    let (art_k, rest) = rest.split_once('条')?;
+    let (art_k, mut rest) = rest.split_once('条')?;
     let base = lawean_resolve::numeral::kanji_to_u32(art_k)?;
+    // 枝番「第百四十二条の四」「第六十四条の三の二」
+    let mut branch = Vec::new();
+    while let Some(r) = rest.strip_prefix('の') {
+        let end = r.find('第').unwrap_or(r.len());
+        branch.push(lawean_resolve::numeral::kanji_to_u32(&r[..end])?);
+        rest = &r[end..];
+    }
     let para = if rest.is_empty() {
         1
     } else {
         let p = rest.strip_prefix('第')?.strip_suffix('項')?;
         lawean_resolve::numeral::kanji_to_u32(p)?
     };
-    Some((
-        ArticleNum::Single {
-            base,
-            branch: vec![],
-        },
-        para,
-    ))
+    Some((ArticleNum::Single { base, branch }, para))
+}
+
+/// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
+/// 単位が複数なら、最後の単位の区間に施行日が入り、それより前の単位はその日までに施行できる（下限 ≤ 施行日）こと
+fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit)]) -> Check {
+    use lawean_extract::suppl::spec_for_law_id;
+    // 改正法の法令 ID は改正後リビジョンの id（403AC0000000090_20230220_504AC0000000048）の末尾
+    let amend_id = exp
+        .version_id
+        .as_deref()
+        .and_then(|v| v.rsplit('_').next())
+        .unwrap_or_default();
+    let Some(spec) = spec_for_law_id(exp, amend_id) else {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            format!("改正後リビジョンに改正法（{amend_id}）の附則が無い"),
+            vec![],
+        );
+    };
+    check_enforcement_with(
+        &spec,
+        "改正後リビジョンに載る改正法の附則",
+        day,
+        units,
+        false,
+    )
+}
+
+fn check_enforcement_with(
+    spec: &lawean_extract::suppl::EnforcementSpec,
+    source: &str,
+    day: &str,
+    units: &[(String, AmendUnit)],
+    drafted: bool,
+) -> Check {
+    use lawean_extract::calendar::{fmt, parse};
+    use lawean_extract::suppl::{admissible, kanji_num};
+    let Some(day) = parse(day) else {
+        return check(
+            Kind::Enforcement,
+            Status::Fail,
+            format!("施行日が読めない: {day}"),
+            vec![],
+        );
+    };
+    let Some(p) = spec.promulgated else {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            format!("{source}: 公布日が無い（起草中なら公布予定日を与える）"),
+            vec![],
+        );
+    };
+    if spec.main.is_none() {
+        return check(
+            Kind::Enforcement,
+            Status::Skip,
+            format!("{source}: 「…から施行する」の文が無い"),
+            vec![],
+        );
+    }
+    let (mut details, mut fails, mut warns) = (Vec::new(), 0, 0);
+    let n = units.len();
+    for (i, (label, unit)) in units.iter().enumerate() {
+        // 附則の号・ただし書きは、整備法なら改正法の条（「第三十五条」）、単独法の改正なら被改正法の条
+        // （「第三十四条の二第一項の改正規定」）で範囲を書く。両方で引き、被改正法の条の側を優先
+        let target_arts: Vec<String> = unit
+            .instructions
+            .iter()
+            .flat_map(|i| i.ops.iter())
+            .filter_map(|o| o.article().map(|a| a.to_num_string()))
+            .collect();
+        let by_target = spec
+            .for_target_articles(&target_arts)
+            .filter(|(_, sc)| sc.is_some());
+        let by_amending = label
+            .trim_start_matches('第')
+            .split('条')
+            .next()
+            .and_then(kanji_num)
+            .and_then(|art| spec.for_article(art, None));
+        let Some((clause, scope)) = by_target.or(by_amending) else {
+            warns += 1;
+            details.push(format!("{label}: 附則に施行期日が無い"));
+            continue;
+        };
+        // 「第三条中第九条第一項の改正規定」のように、この単位の一部だけを別の日にする号なら、
+        // 単位全体（残り）は本文の日。一部の改正規定が別の日に施行されることは Warn で知らせる
+        // 「第三条の規定（…の改正規定に限る。）」の括弧も一部限定
+        let partial = scope.is_some_and(|sc| {
+            sc.contains(&format!("{label}中"))
+                || sc
+                    .split_once(&format!("{label}の規定（"))
+                    .is_some_and(|(_, rest)| {
+                        rest.split('）')
+                            .next()
+                            .is_some_and(|p| p.contains("に限る"))
+                    })
+        });
+        let (clause, scope, where_note) = if partial {
+            warns += 1;
+            details.push(format!(
+                "{label}: 附則の号「{}」は {label} の一部の改正規定だけを別の日（{}）にしている。残りは本文の日で見る",
+                scope.unwrap_or("").chars().take(60).collect::<String>(),
+                clause.text
+            ));
+            (spec.main.as_ref().unwrap(), None, "")
+        } else {
+            (clause, scope, "")
+        };
+        let _ = where_note;
+        let where_ = match scope {
+            Some(sc) if lawean_extract::suppl::scope_is_target_side(sc) => {
+                "附則第一条のただし書き・号（被改正法の条で）"
+            }
+            Some(_) => "附則第一条の号",
+            None => "附則第一条本文",
+        };
+        let Some(enf) = &clause.enforcement else {
+            warns += 1;
+            details.push(format!(
+                "{label}: {where_}「{}」は読めない（他法令の施行日に依る）",
+                clause.text
+            ));
+            continue;
+        };
+        let Some((lo, hi)) = admissible(p, enf) else {
+            warns += 1;
+            details.push(format!(
+                "{label}: {where_}「{}」の区間が出せない",
+                clause.text
+            ));
+            continue;
+        };
+        let range = format!(
+            "{where_}「{}」→ {}〜{}（公布 {}）",
+            clause.text,
+            fmt(lo),
+            fmt(hi),
+            fmt(p)
+        );
+        let last = i + 1 == n;
+        let verdict = if last {
+            if lo <= day && day <= hi {
+                format!("施行日 {} は範囲内", fmt(day))
+            } else {
+                fails += 1;
+                format!("施行日 {} は範囲外", fmt(day))
+            }
+        } else if lo <= day {
+            format!("施行日 {} までに施行できる", fmt(day))
+        } else {
+            fails += 1;
+            format!("施行日 {} にはまだ施行できない", fmt(day))
+        };
+        details.push(format!("{label}: {range}。{verdict}"));
+    }
+    // 附則の号・ただし書きが挙げる条のうち、改め文のどの単位にも当たらないもの（「第九十五条の規定は」と書いたが
+    // 改め文にあるのは第三十五条、など）。起草中の附則（改め文と一緒に書いたもの）でだけ見る。
+    // 成立した改正法の附則（改正後リビジョンから読んだもの）は改め文が改正法の一部なので、挙げる条が無いのは普通
+    let unit_arts: Vec<u32> = units
+        .iter()
+        .filter_map(|(l, _)| {
+            l.trim_start_matches('第')
+                .split('条')
+                .next()
+                .and_then(kanji_num)
+        })
+        .collect();
+    let target_arts: Vec<String> = units
+        .iter()
+        .flat_map(|(_, u)| u.instructions.iter().flat_map(|i| i.ops.iter()))
+        .filter_map(|o| o.article().map(|a| a.to_num_string()))
+        .collect();
+    let mut dangling = 0;
+    for it in spec.items.iter().filter(|_| drafted) {
+        use lawean_extract::suppl::{scope_articles, scope_is_target_side, scope_target_articles};
+        let hit = if scope_is_target_side(&it.scope) {
+            scope_target_articles(&it.scope)
+                .iter()
+                .any(|a| target_arts.contains(a))
+        } else {
+            scope_articles(&it.scope)
+                .iter()
+                .any(|r| !r.suppl && unit_arts.iter().any(|a| r.from <= *a && *a <= r.to))
+        };
+        if !hit {
+            dangling += 1;
+            details.push(format!(
+                "附則の「{}」が挙げる条は改め文のどの単位にも無い（改正法の別の条を指しているのでなければ、条番号の誤り。改め文にあるのは {}）",
+                it.scope.chars().take(40).collect::<String>(),
+                units.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("・")
+            ));
+        }
+    }
+    if fails > 0 {
+        check(
+            Kind::Enforcement,
+            Status::Fail,
+            "施行日が附則の施行期日の範囲外",
+            details,
+        )
+    } else if warns > 0 || dangling > 0 {
+        check(
+            Kind::Enforcement,
+            Status::Warn,
+            if warns > 0 {
+                "施行期日に注意（読めない単位か、一部の改正規定だけ別の日）"
+            } else {
+                "附則が挙げる条が改め文に無い"
+            },
+            details,
+        )
+    } else {
+        check(
+            Kind::Enforcement,
+            Status::Pass,
+            "施行日は附則の施行期日の範囲内",
+            details,
+        )
+    }
+}
+
+fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {
+    use lawean_extract::penalty::{mismatches, MismatchKind};
+    let key = |m: &lawean_extract::penalty::Mismatch| {
+        (
+            m.target.0.clone(),
+            m.referenced.0.clone(),
+            format!("{:?}", m.kind),
+        )
+    };
+    let before: std::collections::BTreeSet<_> = mismatches(base).iter().map(key).collect();
+    let after_ms = mismatches(after);
+    if after_ms.is_empty() && before.is_empty() {
+        return check(
+            Kind::Penalty,
+            Status::Pass,
+            "罰則の対象規定と行為は合っている",
+            vec![],
+        );
+    }
+    let line = |m: &lawean_extract::penalty::Mismatch| {
+        let what = match &m.kind {
+            MismatchKind::ActNotInTarget { word } => format!("行為「{word}」が対象規定に無い"),
+            MismatchKind::NotADuty { kinds } => {
+                format!("対象規定に義務・禁止が無い（{}）", kinds.join(", "))
+            }
+        };
+        format!(
+            "{}「{}」→ {}「{}」: {what}",
+            m.target.0.rsplit("/main/").next().unwrap_or(&m.target.0),
+            m.target_text.chars().take(40).collect::<String>(),
+            m.referenced
+                .0
+                .rsplit("/main/")
+                .next()
+                .unwrap_or(&m.referenced.0),
+            m.referenced_text.chars().take(40).collect::<String>(),
+        )
+    };
+    let (new, old): (Vec<_>, Vec<_>) = after_ms.iter().partition(|m| !before.contains(&key(m)));
+    let mut details: Vec<String> = new
+        .iter()
+        .map(|m| format!("改正で生じた: {}", line(m)))
+        .collect();
+    details.extend(old.iter().map(|m| format!("改正前から: {}", line(m))));
+    if !new.is_empty() {
+        check(
+            Kind::Penalty,
+            Status::Fail,
+            "改正で罰則が空振りになる",
+            details,
+        )
+    } else if !old.is_empty() {
+        check(
+            Kind::Penalty,
+            Status::Warn,
+            "改正前から罰則と対象規定が合わない箇所がある",
+            details,
+        )
+    } else {
+        check(
+            Kind::Penalty,
+            Status::Pass,
+            "罰則の対象規定と行為は合っている",
+            vec![],
+        )
+    }
+}
+
+/// 改め文を発射台に当てた改正後の文書（Rust の写しで。SMT の生成など、本文の再パースが要る用途）。
+/// 当たらない単位があればそこで止めて、そこまでの文書を返す
+pub fn consolidated_document(base_xml: &str, amendment: &str) -> Result<LegalDocument, String> {
+    let base = parse_law_xml(base_xml).map_err(|e| e.to_string())?;
+    let units = parse_units(amendment).map_err(|e| e.to_string())?;
+    let title = base
+        .title
+        .as_ref()
+        .map(|t| lawean_source::inline_text(&t.text))
+        .unwrap_or_default();
+    let mut doc = base;
+    for u in &units {
+        // 別の法令を改正する単位は飛ばす（1 つの改め文で複数法令）
+        if !title.is_empty() && u.target_title != title {
+            continue;
+        }
+        doc = lawean_amend::apply_unit(&doc, u, "after")
+            .map_err(|e| format!("{}: {e}", u.article_of_amending_law))?;
+    }
+    Ok(doc)
 }
 
 /// 文字列だけで動く版（WASM・playground 用）。`other_laws` は他法令の XML
+#[allow(clippy::too_many_arguments)]
 pub fn run_texts(
     base_xml: &str,
     amendment: &str,
@@ -702,8 +1432,53 @@ pub fn run_texts(
     taisho: Option<&str>,
     other_laws: &[String],
     enforced: Option<&str>,
+    suppl: Option<&str>,
+    promulgated: Option<&str>,
 ) -> Report {
-    let base = match parse_response(base_xml) {
+    run_text_input(&TextInput {
+        base_xml,
+        amendment,
+        expected_xml,
+        taisho,
+        other_laws,
+        enforced,
+        suppl,
+        promulgated,
+        ..Default::default()
+    })
+}
+
+/// `run_texts` の入力をまとめたもの（起草時の発射台つき）
+#[derive(Default)]
+pub struct TextInput<'a> {
+    pub base_xml: &'a str,
+    pub amendment: &'a str,
+    pub expected_xml: Option<&'a str>,
+    pub taisho: Option<&'a str>,
+    pub other_laws: &'a [String],
+    pub enforced: Option<&'a str>,
+    pub suppl: Option<&'a str>,
+    pub promulgated: Option<&'a str>,
+    /// 起草時の発射台の XML（あれば `Stale` 検査）
+    pub base_draft_xml: Option<&'a str>,
+    /// 他法令の起草時の版
+    pub other_laws_draft: &'a [String],
+}
+
+pub fn run_text_input(t: &TextInput<'_>) -> Report {
+    let TextInput {
+        base_xml,
+        amendment,
+        expected_xml,
+        taisho,
+        other_laws,
+        enforced,
+        suppl,
+        promulgated,
+        base_draft_xml,
+        other_laws_draft,
+    } = *t;
+    let base = match parse_law_xml(base_xml) {
         Ok(d) => d,
         Err(e) => {
             return Report {
@@ -717,6 +1492,9 @@ pub fn run_texts(
                 )],
                 after: vec![],
                 diff: vec![],
+                suggested_fixes: vec![],
+                taisho_generated: vec![],
+                engine: engine_name().into(),
             }
         }
     };
@@ -734,40 +1512,96 @@ pub fn run_texts(
                 )],
                 after: vec![],
                 diff: vec![],
+                suggested_fixes: vec![],
+                taisho_generated: vec![],
+                engine: engine_name().into(),
             }
         }
     };
-    let expected = expected_xml.and_then(|x| parse_response(x).ok());
+    let expected = expected_xml.and_then(|x| parse_law_xml(x).ok());
     let mut space = None;
     if !other_laws.is_empty() {
         let mut s = LawSpace::new();
         s.add(base.clone());
         for x in other_laws {
-            if let Ok(d) = parse_response(x) {
+            if let Ok(d) = parse_law_xml(x) {
+                // 発射台と同じ法令の別の版が他法令に混じっても、発射台を上書きしない
+                if d.law_id == base.law_id {
+                    continue;
+                }
                 s.add(d);
             }
         }
         space = Some(s);
     }
-    let labels: Vec<(String, AmendUnit)> = units
-        .into_iter()
-        .map(|u| (u.article_of_amending_law.clone(), u))
-        .collect();
+    // 発射台と違う法令（他法令にあるもの）を改正する単位は、波及の手当てとして別に持つ
+    let base_title = base
+        .title
+        .as_ref()
+        .map(|t| lawean_source::inline_text(&t.text))
+        .unwrap_or_default();
+    let mut labels: Vec<(String, AmendUnit)> = Vec::new();
+    let mut other_units: Vec<(String, String, AmendUnit)> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for u in units {
+        let label = u.article_of_amending_law.clone();
+        if u.target_title == base_title || base_title.is_empty() {
+            labels.push((label, u));
+            continue;
+        }
+        let other = space
+            .as_ref()
+            .and_then(|s| s.resolve_name(&u.target_title))
+            .filter(|id| Some(id.to_string()) != base.law_id)
+            .map(str::to_string);
+        match other {
+            Some(id) => other_units.push((label, id, u)),
+            // 発射台でも他法令でもない法令の改正（同じ改正法の別の条）。見ない
+            None => skipped.push(format!(
+                "{label}（{}）は発射台でも他法令でもない法令の改正なので見ない",
+                u.target_title
+            )),
+        }
+    }
+    let base_draft = base_draft_xml.and_then(|x| parse_law_xml(x).ok());
+    let mut space_draft = None;
+    if !other_laws_draft.is_empty() {
+        let mut s = LawSpace::new();
+        for x in other_laws_draft {
+            if let Ok(d) = parse_law_xml(x) {
+                s.add(d);
+            }
+        }
+        space_draft = Some(s);
+    }
     let mut report = run(&Input {
         base: &base,
         units: labels,
+        other_units,
         expected: expected.as_ref(),
         taisho,
         space: space.as_ref(),
         enforced,
+        suppl,
+        promulgated,
+        base_draft: base_draft.as_ref(),
+        space_draft: space_draft.as_ref(),
     });
     report.checks.insert(
         0,
         check(
             Kind::Parse,
             Status::Pass,
-            format!("改め文を {} 単位に読んだ", report.units.len()),
-            vec![],
+            format!(
+                "改め文を {} 単位に読んだ{}",
+                report.units.len(),
+                if skipped.is_empty() {
+                    String::new()
+                } else {
+                    format!("（他に {} 単位は別の法令の改正）", skipped.len())
+                }
+            ),
+            skipped,
         ),
     );
     report

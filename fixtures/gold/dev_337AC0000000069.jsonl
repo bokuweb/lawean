@@ -1,0 +1,41 @@
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:61/para:11/sent:1", "expected": [{"field": "compare", "raw": "四月以上"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:61/para:14/sent:1", "expected": [{"field": "within", "raw": "建物の一部が滅失した日から六月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:61/para:7/sent:1", "expected": [{"field": "elapsed", "raw": "その決議の日から二週間を経過したとき"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:61/para:7/sent:2", "expected": [{"field": "within", "raw": "その請求の日から二月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:61/para:8/sent:1", "expected": [{"field": "within", "raw": "第五項の決議の日から二週間以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:62/para:6/sent:1", "expected": [{"field": "before", "raw": "当該集会の会日より少なくとも二月前に"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:62/para:8/sent:1", "expected": [{"field": "before", "raw": "当該集会の会日より少なくとも一月前までに"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:3/sent:1", "expected": [{"field": "within", "raw": "同項の規定による催告を受けた日から二月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:5/sent:1", "expected": [{"field": "within", "raw": "同項の期間の満了の日から二月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:6/sent:1", "expected": [{"field": "within", "raw": "代金の支払又は提供の日から一年を超えない範囲内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:7/sent:1", "expected": [{"field": "within", "raw": "建替え決議の日から二年以内"}, {"field": "within", "raw": "この期間の満了の日から六月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:8/sent:1", "expected": [{"field": "within", "raw": "建物の取壊しの工事の着手を妨げる理由がなくなつた日から六月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:63/para:8/sent:2", "expected": []}
+{"sentence": "337AC0000000069/main/chap:1/sec:10/art:64_2/para:2/sent:1", "expected": [{"field": "elapsed", "raw": "その請求があつた日から六月を経過すること"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:5/art:34/para:4/sent:1", "expected": [{"field": "within", "raw": "二週間以内"}, {"field": "within", "raw": "その請求の日から四週間以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:5/art:35/para:1/sent:1", "expected": [{"field": "before", "raw": "会日より少なくとも一週間前に"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:8/art:48_2/para:1/sent:1", "expected": [{"field": "calendar_day", "raw": "一月"}, {"field": "calendar_day", "raw": "三月"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:8/art:49/para:6/sent:1", "expected": [{"field": "duration_value", "raw": "二年"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:8/art:49/para:6/sent:2", "expected": [{"field": "within", "raw": "三年以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:8/art:55_7/para:1/sent:1", "expected": [{"field": "within", "raw": "その就職の日から二月以内"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:8/art:55_7/para:1/sent:2", "expected": [{"field": "compare", "raw": "二月を下ることができない"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:9/art:59/para:3/sent:1", "expected": [{"field": "elapsed", "raw": "その判決が確定した日から六月を経過したとき"}]}
+{"sentence": "337AC0000000069/main/chap:2/art:69/para:4/sent:1", "expected": [{"field": "before", "raw": "当該集会の会日より少なくとも二月前に"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:1/art:72/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "その滅失の日から起算して五年を経過する日"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:1/art:75/para:4/sent:1", "expected": [{"field": "before", "raw": "当該敷地共有者等集会の会日より少なくとも二月前に"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:1/art:75/para:6/sent:1", "expected": [{"field": "before", "raw": "当該敷地共有者等集会の会日より少なくとも一月前までに"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:1/art:77/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "その滅失の日から起算して一月を経過する日"}, {"field": "elapsed", "raw": "当該滅失の日から起算して五年を経過する日"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:1/art:77/para:2/sent:1", "expected": [{"field": "elapsed", "raw": "その取壊しによる滅失の日から起算して五年を経過する日"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:2/art:78/para:1/sent:1", "expected": [{"field": "elapsed", "raw": "その滅失の日から起算して五年を経過する日"}]}
+{"sentence": "337AC0000000069/main/chap:3/sec:2/art:81/para:4/sent:1", "expected": [{"field": "before", "raw": "当該団地建物所有者等集会の会日より少なくとも二月前に"}]}
+{"sentence": "337AC0000000069/main/chap:4/art:86/para:2/sent:2", "expected": [{"field": "compare", "raw": "一月を下つてはならない"}]}
+{"sentence": "337AC0000000069/main/chap:4/art:87/para:2/sent:2", "expected": [{"field": "compare", "raw": "一月を下つてはならない"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/item:1/sent:1", "expected": [{"field": "penalty_target", "raw": "第三十三条第一項本文又は第四十七条第十二項において読み替えて適用される第三十三条第一項本文"}, {"field": "penalty_act", "raw": "規約、議事録又は第四十五条第四項の書面若しくは電磁的記録の保管をしなかつた"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/item:2/sent:1", "expected": [{"field": "penalty_target", "raw": "第三十三条第二項"}, {"field": "penalty_act", "raw": "正当な理由がないのに、前号に規定する書類又は電磁的記録に記録された情報の内容を法務省令で定める方法により表示したものの閲覧を拒んだ"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/item:3/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十二条第一項から第四項まで"}, {"field": "penalty_act", "raw": "議事録を作成せず、又は議事録に記載し、若しくは記録すべき事項を記載せず、若しくは記録せず、若しくは虚偽の記載若しくは記録をした"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/item:4/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十三条"}, {"field": "penalty_act", "raw": "報告をせず、又は虚偽の報告をした"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/item:6/sent:1", "expected": [{"field": "penalty_target", "raw": "第四十八条の二第一項"}, {"field": "penalty_act", "raw": "財産目録を作成せず、又は財産目録に不正の記載若しくは記録をした"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:91/para:1/sent:1", "expected": [{"field": "sanction", "raw": "二十万円以下の過料"}]}
+{"sentence": "337AC0000000069/main/chap:5/art:92/para:1/sent:1", "expected": [{"field": "sanction", "raw": "十万円以下の過料"}]}
+{"sentence": "337AC0000000069/main/chap:1/sec:1/art:1/para:1/sent:1", "expected": []}
+{"sentence": "337AC0000000069/main/chap:1/sec:5/art:38/para:1/sent:1", "expected": []}
