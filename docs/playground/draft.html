@@ -49,7 +49,7 @@
     <label for="future">施行日までに施行される未施行の改正（任意）。選ぶと、改め文はその版に当たるものとして検査し、上の発射台は「起草時の版」になる（先行改正との競合: 空振り・別の項・参照のずれ・可換性）</label>
     <select id="future"></select>
     <button id="run">検査する</button>
-    <button id="z3" class="secondary">Z3 で確かめる（ブラウザ内の z3。初回に 33MB 読む）</button>
+    <span class="hint">Rust/Lean の検査に続けて Z3（ブラウザ内の z3-solver。初回に 33MB 読む）も必ず走る</span>
     <span class="status" id="status"></span>
   </section>
   <section class="right">
@@ -205,9 +205,11 @@ async function loadZ3() {
   return z3;
 }
 let lastInput = null;
+// 「検査する」の一部として必ず走る。結果は報告の先頭に、Z3 が落ちたら判定も落とす
 async function runZ3() {
-  if (!lastInput) { $('status').textContent = '先に「検査する」'; return; }
+  if (!lastInput) return;
   $('status').textContent = 'Z3 を読み込み中…';
+  $('report').insertAdjacentHTML('afterbegin', '<p id="z3wait" class="status">Z3 を読み込んで解いている…（初回は 33MB）</p>');
   try {
     const solver = await loadZ3();
     $('status').textContent = 'Z3 で解いている…';
@@ -226,10 +228,17 @@ async function runZ3() {
     const ms = performance.now() - t0;
     const h = `<details open id="z3out"><summary>Z3 の結果（${scripts.length} 問、${ms.toFixed(0)} ms、ブラウザ内の z3-solver ${scripts.length ? '' : '— 型のある条件が無いので問いが無い'}）</summary><table class="cands"><tr><th>種類</th><th>問い</th><th>答え</th><th></th></tr>${rows}</table></details>`;
     const old = $('z3out'); if (old) old.remove();
+    const wait = $('z3wait'); if (wait) wait.remove();
     $('report').insertAdjacentHTML('afterbegin', h);
+    // Z3 で落ちた問いがあれば、全体の判定も FAIL に
+    if (rows.includes('class="fail"')) {
+      const v = $('report').querySelector('p.verdict');
+      if (v) { v.classList.remove('pass'); v.classList.add('fail'); v.firstChild.textContent = 'FAIL '; v.insertAdjacentHTML('beforeend', '<span class="status">・Z3 で矛盾</span>'); }
+    }
   } catch (e) {
+    const wait = $('z3wait'); if (wait) wait.remove();
     const msg = e && (e.message || e.stack) ? (e.message || e.stack) : (typeof e === 'object' ? JSON.stringify(e) : String(e));
-    $('report').insertAdjacentHTML('afterbegin', `<p class="verdict fail">Z3 エラー</p><pre>${esc(msg)}</pre>`);
+    $('report').insertAdjacentHTML('afterbegin', `<p class="verdict fail">Z3 が走らなかった</p><pre>${esc(msg)}</pre>`);
   }
   $('status').textContent = '';
 }
@@ -258,8 +267,11 @@ async function run() {
     $('report').innerHTML = renderReport(r, performance.now() - t0, { extra, baseXml });
   } catch (e) {
     $('report').innerHTML = `<p class="verdict fail">エラー</p><pre>${String(e)}</pre>`;
+    $('status').textContent = '';
+    return;
   }
-  $('status').textContent = '';
+  // Z3 も必ず
+  await runZ3();
 }
 
 (async () => {
@@ -270,7 +282,6 @@ async function run() {
   $('basefile').onchange = async (e) => { const f = e.target.files[0]; if (f) setBase(await f.text()); };
   $('filter').oninput = showOutline;
   $('run').onclick = run;
-  $('z3').onclick = runZ3;
   const today = new Date();
   const iso = d => d.toISOString().slice(0, 10);
   $('promulgated').value = iso(today);
