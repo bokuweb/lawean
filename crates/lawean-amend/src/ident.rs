@@ -835,9 +835,14 @@ impl Binder<'_> {
                     crate::apply::append_suppl_articles(&mut self.doc, text)?;
                 }
                 // 本則の末尾に章: 本則の最後の項の後ろに新しい章の全部の項を並べる
-                Op::AppendContainers { text } => {
+                Op::AppendContainers { path, text } => {
                     let mut new = crate::apply::parse_containers(text)?;
-                    let mut anchor = last_para_id_in(&self.doc.main_provision)
+                    let slot: &[Provision] = if path.is_empty() {
+                        &self.doc.main_provision
+                    } else {
+                        &crate::apply::container_mut(&mut self.doc, path)?.children
+                    };
+                    let mut anchor = last_para_id_in(slot)
                         .ok_or_else(|| ApplyError::BadContent("本則に項が無い".into()))?;
                     fn walk(b: &mut Binder<'_>, ps: &mut [Provision], anchor: &mut String) {
                         for p in ps {
@@ -871,9 +876,60 @@ impl Binder<'_> {
                         walk(self, &mut inner, &mut anchor);
                         c.children = inner;
                     }
-                    self.doc
-                        .main_provision
-                        .extend(new.into_iter().map(Provision::Container));
+                    let slot = if path.is_empty() {
+                        &mut self.doc.main_provision
+                    } else {
+                        &mut crate::apply::container_mut(&mut self.doc, path)?.children
+                    };
+                    slot.extend(new.into_iter().map(Provision::Container));
+                }
+                // 条を前に置く = 直前の項の後ろに新しい項を並べる（先頭の条の前なら、その前の項）
+                Op::InsertArticleBefore {
+                    before,
+                    text,
+                    suppl,
+                } => {
+                    if *suppl {
+                        return Err(ApplyError::BadContent(
+                            "附則の条の前への挿入は未対応".into(),
+                        ));
+                    }
+                    let first = paragraphs(article_mut(&mut self.doc, before)?)
+                        .first()
+                        .map(|p| id_of(p))
+                        .ok_or_else(|| ApplyError::BadContent("項の無い条の前に加える".into()))?;
+                    let all = from_document(&self.doc);
+                    let idx = all.nodes.iter().position(|n| n.id == first).unwrap_or(0);
+                    if idx == 0 {
+                        return Err(ApplyError::BadContent("先頭の前には加えられない".into()));
+                    }
+                    let mut anchor = all.nodes[idx - 1].id.clone();
+                    let mut arts = Vec::new();
+                    for mut a in crate::apply::parse_articles(text)? {
+                        let mut children = Vec::new();
+                        for c in std::mem::take(&mut a.children) {
+                            let ArticleChild::Paragraph(p) = c else {
+                                children.push(c);
+                                continue;
+                            };
+                            let (id, p) = self.new_para(&a.num, p);
+                            self.ops.push(IdentOp::InsertAfter {
+                                anchor: anchor.clone(),
+                                new_id: id.clone(),
+                                art: a.num.to_num_string(),
+                                text: para_text(&p),
+                            });
+                            anchor = id;
+                            children.push(ArticleChild::Paragraph(p));
+                        }
+                        a.children = children;
+                        arts.push(a);
+                    }
+                    crate::apply::insert_articles_before(
+                        &mut self.doc.main_provision,
+                        before,
+                        arts,
+                    )?;
                 }
                 // 附則の条は id の世界（本則）に無い。文書の側だけ
                 Op::InsertArticleAfter { after, text, suppl } if *suppl => {

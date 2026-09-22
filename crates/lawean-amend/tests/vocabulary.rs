@@ -117,7 +117,9 @@ fn append_to_suppl_and_main_and_listed_delete() {
         "{:?}",
         u.instructions[0].ops
     );
-    assert!(matches!(&u.instructions[1].ops[0], Op::AppendContainers { text } if text.len() == 2));
+    assert!(
+        matches!(&u.instructions[1].ops[0], Op::AppendContainers { text, .. } if text.len() == 2)
+    );
     assert!(
         matches!(&u.instructions[2].ops[0], Op::AppendSupplArticles { text } if text.len() == 3)
     );
@@ -178,5 +180,95 @@ fn append_to_suppl_and_main_and_listed_delete() {
             .iter()
             .map(|i| i.ops.clone())
             .collect::<Vec<_>>()
+    );
+}
+
+/// 令5-53・令3-37 の形: 「第一章第五節中第十七条の前に次の三条を加える」「第二編第二章に次の一節を加える」
+/// 「第七条から第九条までを次のように改める」「第四章第四節を削る」「第百八十五条（見出しを含む。）中」
+/// 「第九条の見出し中「A」の下に「B」を加え」— 借地借家法（第一章 総則、第二章 借地 第一節…）に当てる
+#[test]
+fn batch_a_forms_on_shakuchi_shakka() {
+    let base = revision("403AC0000000090_20220518_503AC0000000037");
+    let t = "第一条　借地借家法（平成三年法律第九十号）の一部を次のように改正する。
+　　第二章第一節中第三条の前に次の一条を加える。
+　第二条の二　甲は、乙とする。
+　　第一章に次の一節を加える。
+　　　　第三節　雑則
+　第二条の三　丙は、丁とする。
+　　第四条（見出しを含む。）中「更新」を「更改」に改める。
+　　第五条の見出し中「契約」の下に「等」を加え、同条の見出し中「借地」を削る。";
+    let units = parse_units(t).unwrap();
+    let u = &units[0];
+    assert!(
+        matches!(&u.instructions[0].ops[0], Op::InsertArticleBefore { before, .. } if before.to_num_string() == "3")
+    );
+    assert!(
+        matches!(&u.instructions[1].ops[0], Op::AppendContainers { path, .. } if path.len() == 1)
+    );
+    assert!(matches!(
+        &u.instructions[2].ops[0],
+        Op::ReplaceCaption { .. }
+    ));
+    assert!(matches!(&u.instructions[2].ops[1], Op::Replace { .. }));
+    let got = apply_unit(&base, u, "test").unwrap();
+    let snap = snapshot_main(&got);
+    assert!(snap["2_2"][0].1.contains("甲は、乙とする"));
+    assert!(snap["2_3"][0].1.contains("丙は、丁とする"));
+    // 第4条の見出しと本文の「更新」→「更改」、第5条の見出し
+    let cap = |n: &str| -> String {
+        fn find<'a>(ps: &'a [Provision], n: &str) -> Option<&'a Article> {
+            ps.iter().find_map(|p| match p {
+                Provision::Article(a) if a.num.to_num_string() == n => Some(a),
+                Provision::Container(c) => find(&c.children, n),
+                _ => None,
+            })
+        }
+        find(&got.main_provision, n)
+            .and_then(|a| a.caption.as_ref())
+            .map(|c| inline_text(c))
+            .unwrap_or_default()
+    };
+    assert_eq!(cap("4"), "（借地権の更改後の期間）");
+    assert!(snap["4"][0].1.contains("更改"), "{:?}", snap["4"]);
+    assert_eq!(cap("5"), "（契約等の更新請求等）");
+    // 第2条の2 は第二章第一節の第3条の前、第2条の3 は第一章の新しい第三節の中
+    fn path_of(ps: &[Provision], n: &str, acc: &mut Vec<String>) -> bool {
+        for p in ps {
+            match p {
+                Provision::Article(a) if a.num.to_num_string() == n => return true,
+                Provision::Container(c) => {
+                    acc.push(c.title.as_ref().map(|t| inline_text(t)).unwrap_or_default());
+                    if path_of(&c.children, n, acc) {
+                        return true;
+                    }
+                    acc.pop();
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    let mut p = vec![];
+    assert!(path_of(&got.main_provision, "2_2", &mut p));
+    assert_eq!(p, vec!["第二章　借地", "第一節　借地権の存続期間等"]);
+    let mut p = vec![];
+    assert!(path_of(&got.main_provision, "2_3", &mut p));
+    assert_eq!(p, vec!["第一章　総則", "第三節　雑則"]);
+    // id の世界でも同じ本文。往復
+    let b = ident::bind(&base, u, "t").unwrap();
+    assert_eq!(snapshot_main(&b.doc), snap);
+    let text = lawean_render::amend::render_unit(u);
+    let again = parse_units(&text).unwrap();
+    assert_eq!(
+        again[0]
+            .instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        u.instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        "{text}"
     );
 }

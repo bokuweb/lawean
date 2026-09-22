@@ -115,7 +115,12 @@ def main():
         k = args.index("--article")
         article = args[k + 1]
         del args[k : k + 2]
-    raw = open(args[0], "rb").read().decode("shift_jis", errors="replace")
+    data = open(args[0], "rb").read()
+    # meta は Shift_JIS と言っていても UTF-8 のページがある。UTF-8 として読めればそれ
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raw = data.decode("shift_jis", errors="replace")
     p = P()
     p.feed(raw)
     lines = [html.unescape(l) for l in p.lines]

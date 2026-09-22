@@ -194,15 +194,48 @@ fn segment(op: &Op, last: bool) -> String {
             ),
             end("加え", "加える")
         ),
-        Op::AppendContainers { text } => format!(
-            "本則に次の{}章を{}",
+        Op::AppendContainers { path, text } => {
+            // 加える容器の種類は最初の行から（「第二章の二　…」→ 章）
+            let kind = text
+                .iter()
+                .find_map(|l| {
+                    l.trim_start_matches('\u{3000}')
+                        .split_once('\u{3000}')
+                        .map(|(t, _)| t.chars().last().unwrap_or('章'))
+                })
+                .unwrap_or('章');
+            format!(
+                "{}に次の{}{kind}を{}",
+                if path.is_empty() {
+                    "本則".to_string()
+                } else {
+                    path.iter()
+                        .map(|(k, n)| cont_label(*k, n))
+                        .collect::<String>()
+                },
+                to_kanji(
+                    text.iter()
+                        .filter(|l| {
+                            l.trim_start_matches('\u{3000}').starts_with('第')
+                                && l.split_once('\u{3000}')
+                                    .is_some_and(|(t, _)| t.ends_with(kind))
+                        })
+                        .count() as u32
+                ),
+                end("加え", "加える")
+            )
+        }
+        Op::InsertArticleBefore {
+            before,
+            text,
+            suppl,
+        } => format!(
+            "{}{}の前に次の{}条を{}",
+            if *suppl { "附則" } else { "" },
+            article_label(before),
             to_kanji(
                 text.iter()
-                    .filter(|l| {
-                        l.trim_start_matches('\u{3000}').starts_with('第')
-                            && l.split_once('\u{3000}')
-                                .is_some_and(|(t, _)| t.ends_with('章'))
-                    })
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
                     .count() as u32
             ),
             end("加え", "加える")
@@ -462,6 +495,11 @@ fn segment(op: &Op, last: bool) -> String {
                 format!("「{to}」に{}", end("改め", "改める"))
             }
         ),
+        Op::ReplaceCaption { article, from, to } if to.is_empty() => format!(
+            "{}の見出し中「{from}」を{}",
+            article_label(article),
+            end("削り", "削る")
+        ),
         Op::ReplaceCaption { article, from, to } => format!(
             "{}の見出し中「{from}」を「{to}」に{}",
             article_label(article),
@@ -517,6 +555,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertSubitemAfter { text, .. }
         | Op::AppendSupplArticles { text, .. }
         | Op::AppendContainers { text, .. }
+        | Op::InsertArticleBefore { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }

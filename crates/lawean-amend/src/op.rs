@@ -66,8 +66,17 @@ pub enum Op {
     },
     /// 「附則に次の二条を加える」「附則に次の見出し及び二条を加える」+ 条の行: 原始附則の末尾に条を足す（文書の側だけ）
     AppendSupplArticles { text: Vec<String> },
-    /// 「本則に次の一章を加える」+ 章の行: 本則の末尾に章を足す
-    AppendContainers { text: Vec<String> },
+    /// 「本則に次の一章を加える」「第二編第二章に次の一節を加える」+ 章・節の行: 本則（`path` が空）または容器の末尾に容器を足す
+    AppendContainers {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        text: Vec<String>,
+    },
+    /// 「第一章第五節中第十七条の前に次の三条を加える」+ 条の行
+    InsertArticleBefore {
+        before: ArticleNum,
+        text: Vec<String>,
+        suppl: bool,
+    },
     /// 「同項後段を削る」「同項ただし書を削る」
     DeleteSentencePart { at: Loc, part: SentencePart },
     /// 「第一章第八節の節名中「A」を「B」に改める」「第N章の章名中…」。`path` は外側から (章/節/款/目, 番号)
@@ -283,6 +292,7 @@ impl Op {
             | Op::RenumberParagraph { article, .. }
             | Op::ShiftParagraphs { article, .. } => Some(article),
             Op::InsertArticleAfter { after, .. } => Some(after),
+            Op::InsertArticleBefore { before, .. } => Some(before),
             Op::RenumberArticle { from, .. } => Some(from),
             Op::ShiftArticles { .. } => None,
             Op::ReplaceCaption { article, .. }
@@ -356,6 +366,7 @@ impl Op {
                 | Op::InsertSubitemAfter { .. }
                 | Op::AppendSupplArticles { .. }
                 | Op::AppendContainers { .. }
+                | Op::InsertArticleBefore { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -385,6 +396,7 @@ impl Op {
             | Op::InsertSubitemAfter { text, .. }
             | Op::AppendSupplArticles { text, .. }
             | Op::AppendContainers { text, .. }
+            | Op::InsertArticleBefore { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }

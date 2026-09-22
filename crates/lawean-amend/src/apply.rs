@@ -155,10 +155,29 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let new = parse_containers(text)?;
                 insert_containers_after(doc, path, new)?;
             }
-            Op::AppendContainers { text } => {
+            Op::AppendContainers { path, text } => {
                 let new = parse_containers(text)?;
-                doc.main_provision
-                    .extend(new.into_iter().map(Provision::Container));
+                let slot = if path.is_empty() {
+                    &mut doc.main_provision
+                } else {
+                    &mut container_mut(doc, path)?.children
+                };
+                slot.extend(new.into_iter().map(Provision::Container));
+            }
+            Op::InsertArticleBefore {
+                before,
+                text,
+                suppl,
+            } => {
+                if *suppl {
+                    return Err(ApplyError::BadContent(
+                        "附則の条の前への挿入は未対応".into(),
+                    ));
+                }
+                article_mut(doc, before)?;
+                // 前に置く = 直前の条の後ろに置く。先頭ならその列の先頭に
+                let arts = parse_articles(text)?;
+                insert_articles_before(&mut doc.main_provision, before, arts)?;
             }
             Op::AppendSupplArticles { text } => append_suppl_articles(doc, text)?,
             Op::InsertContainersBefore { path, text } => {
@@ -450,6 +469,41 @@ fn find_article<'a>(ps: &'a mut [Provision], num: &ArticleNum) -> Option<&'a mut
         }
     }
     None
+}
+
+/// 条 `before` を含む列を見つけ、その直前に条を並べる
+pub(crate) fn insert_articles_before(
+    ps: &mut Vec<Provision>,
+    before: &ArticleNum,
+    arts: Vec<Article>,
+) -> Result<(), ApplyError> {
+    fn go(ps: &mut Vec<Provision>, before: &ArticleNum, arts: &mut Option<Vec<Article>>) {
+        if let Some(i) = ps
+            .iter()
+            .position(|p| matches!(p, Provision::Article(x) if &x.num == before))
+        {
+            if let Some(v) = arts.take() {
+                for (k, a) in v.into_iter().enumerate() {
+                    ps.insert(i + k, Provision::Article(a));
+                }
+            }
+            return;
+        }
+        for p in ps.iter_mut() {
+            if let Provision::Container(c) = p {
+                go(&mut c.children, before, arts);
+                if arts.is_none() {
+                    return;
+                }
+            }
+        }
+    }
+    let mut slot = Some(arts);
+    go(ps, before, &mut slot);
+    if slot.is_some() {
+        return Err(ApplyError::ArticleNotFound(before.to_num_string()));
+    }
+    Ok(())
 }
 
 /// 条 `after` を含む列（本則直下か章・節の中）を見つけ、その直後に条を挿入する。見つかれば true

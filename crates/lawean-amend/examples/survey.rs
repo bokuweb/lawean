@@ -28,6 +28,21 @@ fn main() {
             if !b[0].contains("の一部を次のように改正する") {
                 continue;
             }
+            // 末尾の次の条の見出し「（…）」・章の見出しは次の条のもの
+            let mut b = b.clone();
+            while b.len() > 1
+                && b.last().is_some_and(|l| {
+                    let t = l.trim_start_matches('\u{3000}');
+                    (t.starts_with('（') && t.ends_with('）'))
+                        || t.is_empty()
+                        || (t.starts_with('第')
+                            && !t.contains('（')
+                            && t.split_once('\u{3000}')
+                                .is_some_and(|(h, _)| h.ends_with(['編', '章', '節'])))
+                })
+            {
+                b.pop();
+            }
             match lawean_amend::parse_units(&b.join("\n")) {
                 Ok(_) => ok += 1,
                 Err(e) => {
