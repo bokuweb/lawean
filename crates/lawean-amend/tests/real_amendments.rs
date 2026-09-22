@@ -1035,3 +1035,92 @@ fn reiwa5_act53_art219_jinji_sosho_two_stages_reproduce_egov_revisions() {
     .unwrap();
     assert_same_main(&s2, &revision("415AC0000000109_20280613_505AC0000000053"));
 }
+
+/// 令和4年法律第48号 第4条（民事訴訟費用等に関する法律、2026-05-21）。**別表の行の操作**の実例:
+/// 「別表第一の七の項中「A」を「B」に改める」「別表第一の八の項を次のように改める」+ 行、
+/// 「別表第一中九の項及び一〇の項を削り、同表の一一の項中…、同項を同表の九の項とし、同表の一一の二の項中ハを削り、ニをハとし…」、
+/// 「同表の一七の項イ(イ)中…」（行の中の細目）、「同表を別表第三とし、別表第一の次に次の一表を加える」+ 題と行
+#[test]
+fn reiwa4_act48_art4_minso_hiyo_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/504AC0000000048_art4.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let base = revision("346AC0000000040_20260401_506AC0000000033");
+    // 先行改正（令和6年法律第33号、2026-04-01）が既に済ませている 2 つの追加は、そのまま当てると字句が重複する
+    // （`lawean-check` の Base が「加える字句が既に入っている」と言う。docs/13）。それを除けば e-Gov と一致する
+    let done = [
+        ("正本", "若しくは記録事項証明書"),
+        ("第百五十六条第二項", "若しくは第三項"),
+    ];
+    let already = |op: &Op| {
+        matches!(op, Op::InsertAfterPhrase { anchor, text, .. }
+            if done.iter().any(|(a, t)| anchor == a && text == t))
+    };
+    assert_eq!(
+        units[0]
+            .instructions
+            .iter()
+            .flat_map(|i| i.ops.iter())
+            .filter(|o| already(o))
+            .count(),
+        2
+    );
+    let u = AmendUnit {
+        article_of_amending_law: units[0].article_of_amending_law.clone(),
+        target_title: units[0].target_title.clone(),
+        instructions: units[0]
+            .instructions
+            .iter()
+            .map(|i| Instruction {
+                text: i.text.clone(),
+                ops: i.ops.iter().filter(|o| !already(o)).cloned().collect(),
+            })
+            .filter(|i| !i.ops.is_empty())
+            .collect(),
+    };
+    let got = apply_unit(&base, &u, "test").unwrap();
+    let want = revision("346AC0000000040_20260521_504AC0000000048");
+    assert_same_main(&got, &want);
+    // 別表: 題と行（上欄）が e-Gov と同じ
+    let appdx = |d: &LegalDocument| -> Vec<(String, Vec<String>)> {
+        d.appendices
+            .iter()
+            .map(|ap| {
+                let title = ap
+                    .children
+                    .iter()
+                    .find_map(|c| match c {
+                        lawean_source::xml::Node::Element(x) if x.name.ends_with("Title") => {
+                            Some(x.text().split_whitespace().collect::<String>())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                fn rows(e: &lawean_source::xml::Element, out: &mut Vec<String>) {
+                    if e.name == "TableRow" {
+                        let key = e
+                            .children
+                            .iter()
+                            .find_map(|c| match c {
+                                lawean_source::xml::Node::Element(x) if x.name == "TableColumn" => {
+                                    Some(x.text().split_whitespace().collect::<String>())
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        out.push(key.chars().take(12).collect());
+                        return;
+                    }
+                    for c in &e.children {
+                        if let lawean_source::xml::Node::Element(x) = c {
+                            rows(x, out);
+                        }
+                    }
+                }
+                let mut v = vec![];
+                rows(ap, &mut v);
+                (title, v)
+            })
+            .collect()
+    };
+    assert_eq!(appdx(&got), appdx(&want));
+}

@@ -160,6 +160,47 @@ pub enum Op {
     ReplaceAppdxRow {
         table: String,
         row: String,
+        /// 行の中の細目（「同表の一六の項イ中」の「イ」）。あればその文だけ
+        sub: Option<String>,
+        from: String,
+        to: String,
+    },
+    /// 「別表第一の八の項を次のように改める」+ 行の内容: 別表の行（rowspan で続く行も含む）の差し替え
+    ReplaceAppdxRowWhole {
+        table: String,
+        row: String,
+        text: Vec<String>,
+    },
+    /// 「別表第一中九の項及び一〇の項を削り」「別表第一建築士法（…）の項を削り」
+    DeleteAppdxRows { table: String, rows: Vec<String> },
+    /// 「同項を同表の九の項とし」「同表中一二の項を一一の項とし」: 別表の行の番号（上欄）の付け替え
+    RenumberAppdxRow {
+        table: String,
+        from: String,
+        to: String,
+    },
+    /// 「四十四の三の項の次に次のように加える」+ 行の内容
+    InsertAppdxRowsAfter {
+        table: String,
+        after: String,
+        text: Vec<String>,
+    },
+    /// 「附則の次に次の別表を加える」+ 別表の行（題は「別表第二（第三条関係）」の行）
+    AppendAppdx { text: Vec<String> },
+    /// 「同表を別表第三とし」: 別表の題の付け替え
+    RenameAppdx { from: String, to: String },
+    /// 「別表第一の次に次の一表を加える」+ 題と行
+    InsertAppdxAfter { after: String, text: Vec<String> },
+    /// 「同表の一一の二の項中ハを削り」: 別表の行の中の細目（イロハ）の削除
+    DeleteAppdxRowSub {
+        table: String,
+        row: String,
+        sub: String,
+    },
+    /// 「ニをハとし」: 別表の行の中の細目の記号の付け替え
+    RenumberAppdxRowSub {
+        table: String,
+        row: String,
         from: String,
         to: String,
     },
@@ -297,6 +338,15 @@ impl Op {
             | Op::DeleteContainers { .. }
             | Op::ReplaceContainers { .. }
             | Op::ReplaceAppdxRow { .. }
+            | Op::ReplaceAppdxRowWhole { .. }
+            | Op::DeleteAppdxRows { .. }
+            | Op::RenumberAppdxRow { .. }
+            | Op::InsertAppdxRowsAfter { .. }
+            | Op::AppendAppdx { .. }
+            | Op::RenameAppdx { .. }
+            | Op::InsertAppdxAfter { .. }
+            | Op::DeleteAppdxRowSub { .. }
+            | Op::RenumberAppdxRowSub { .. }
             | Op::DeleteAppdx { .. } => None,
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
@@ -391,6 +441,10 @@ impl Op {
                 | Op::AppendContainers { .. }
                 | Op::InsertArticleBefore { .. }
                 | Op::AppendTable { .. }
+                | Op::ReplaceAppdxRowWhole { .. }
+                | Op::InsertAppdxRowsAfter { .. }
+                | Op::AppendAppdx { .. }
+                | Op::InsertAppdxAfter { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -423,6 +477,10 @@ impl Op {
             | Op::AppendContainers { text, .. }
             | Op::InsertArticleBefore { text, .. }
             | Op::AppendTable { text, .. }
+            | Op::ReplaceAppdxRowWhole { text, .. }
+            | Op::InsertAppdxRowsAfter { text, .. }
+            | Op::AppendAppdx { text, .. }
+            | Op::InsertAppdxAfter { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }

@@ -242,9 +242,10 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::ReplaceAppdxRow {
                 table,
                 row,
+                sub,
                 from,
                 to,
-            } => replace_appdx_row(doc, table, row, from, to, &mut appdx_rows)?,
+            } => replace_appdx_row(doc, table, row, sub.as_deref(), from, to, &mut appdx_rows)?,
             Op::ReplaceCaption { article, from, to } => {
                 let art = article_mut(doc, article)?;
                 let cur = art
@@ -371,6 +372,27 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                     }));
             }
             Op::DeleteAppdx { tables } => delete_appendices(doc, tables)?,
+            Op::ReplaceAppdxRowWhole { table, row, text } => {
+                replace_appdx_row_whole(doc, table, row, text)?
+            }
+            Op::DeleteAppdxRows { table, rows } => delete_appdx_rows(doc, table, rows)?,
+            Op::RenumberAppdxRow { table, from, to } => renumber_appdx_row(doc, table, from, to)?,
+            Op::InsertAppdxRowsAfter { table, after, text } => {
+                insert_appdx_rows_after(doc, table, after, text)?
+            }
+            Op::AppendAppdx { text } => append_appdx(doc, text, None)?,
+            Op::InsertAppdxAfter { after, text } => append_appdx(doc, text, Some(after))?,
+            Op::RenameAppdx { from, to } => rename_appdx(doc, from, to)?,
+            Op::DeleteAppdxRowSub { table, row, sub } => {
+                delete_appdx_row_sub(doc, table, row, sub)?
+            }
+            Op::RenumberAppdxRowSub {
+                table,
+                row,
+                from,
+                to,
+            } => renumber_appdx_row_sub(doc, table, row, from, to)?,
+
             Op::ReplaceItemSet {
                 at, items, text, ..
             } => {
@@ -473,7 +495,35 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
 
 // ---------------------------------------------------------------- 位置の解決
 
-pub(crate) fn loc_name(l: &Loc) -> String {
+/// 位置の本文（条・項・号・細目。位置が無ければ空）。「加える字句が既に入っているか」の判定など
+pub fn loc_text(doc: &LegalDocument, at: &Loc) -> String {
+    fn find<'a>(ps: &'a [Provision], n: &ArticleNum) -> Option<&'a Article> {
+        ps.iter().find_map(|p| match p {
+            Provision::Article(a) if &a.num == n => Some(a),
+            Provision::Container(c) => find(&c.children, n),
+            _ => None,
+        })
+    }
+    let Some(art) = find(&doc.main_provision, &at.article) else {
+        return String::new();
+    };
+    let paras = paragraphs(art);
+    let idx = match at.paragraph {
+        Some(ParaRef::Num(n)) => paras
+            .iter()
+            .position(|p| p.num == n.to_string())
+            .or(Some(n as usize - 1)),
+        None => None,
+    };
+    paras
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| idx.is_none_or(|j| j == *i))
+        .map(|(_, p)| para_text(p))
+        .collect()
+}
+
+pub fn loc_name(l: &Loc) -> String {
     let mut s = match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("第{}条第{n}項", l.article.to_num_string()),
         None => format!("第{}条", l.article.to_num_string()),
@@ -1975,30 +2025,18 @@ pub(crate) fn replace_containers(
 }
 
 /// 別表の行の字句を改める。表は `AppdxTableTitle` が `table`（「別表第二」）で始まるもの、
-/// 行は最初の欄の本文（空白を除く）が `row` で始まる `TableRow`。行の中の全部の文で置き換える
+/// 行は上欄が `row` の `TableRow`（`rowspan` や上欄の空欄で続く行も同じ項）。`sub` があればその細目の文だけ。
+/// 同じ文（改め文の 1 文）の中では行を一度だけ引く（最初の置換で上欄が変わっても、後の置換は同じ行）
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn replace_appdx_row(
     doc: &mut LegalDocument,
     table: &str,
     row: &str,
+    sub: Option<&str>,
     from: &str,
     to: &str,
     rows: &mut BTreeMap<(String, String), usize>,
 ) -> Result<(), ApplyError> {
-    fn text_of(e: &Element) -> String {
-        strip_ws(&e.text())
-    }
-    /// 表の中の TableRow を文書順に集める
-    fn all_rows<'a>(e: &'a mut Element, out: &mut Vec<&'a mut Element>) {
-        if e.name == "TableRow" {
-            out.push(e);
-            return;
-        }
-        for c in &mut e.children {
-            if let Node::Element(x) = c {
-                all_rows(x, out);
-            }
-        }
-    }
     fn replace_in(e: &mut Element, from: &str, to: &str) -> usize {
         let mut n = 0;
         for c in &mut e.children {
@@ -2013,52 +2051,572 @@ pub(crate) fn replace_appdx_row(
         }
         n
     }
-    let key = strip_ws(row);
-    for ap in doc.appendices.iter_mut() {
-        let title = ap
+    // 細目（「イ」「イ(イ)」）の見出し: 衆議院の本文は半角括弧、e-Gov は全角
+    let sub_key = sub.map(|k| match k.find(['(', '（']) {
+        Some(i) => format!(
+            "（{}）",
+            k[i..]
+                .trim_start_matches(['(', '（'])
+                .trim_end_matches([')', '）'])
+        ),
+        None => k.to_string(),
+    });
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let key = (table.to_string(), strip_ws(row));
+    let (at, len) = match rows.get(&key) {
+        Some(i) => {
+            let len = row_group_len(body, *i);
+            (*i, len)
+        }
+        None => {
+            let g = row_group(body, row)
+                .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+            rows.insert(key, g.0);
+            g
+        }
+    };
+    let mut n = 0;
+    for c in body[at..at + len].iter_mut() {
+        let Node::Element(r) = c else { continue };
+        match &sub_key {
+            None => n += replace_in(r, from, to),
+            Some(k) => {
+                fn walk(e: &mut Element, k: &str, from: &str, to: &str, n: &mut usize) {
+                    if e.name == "Sentence" {
+                        if strip_ws(&e.text()).starts_with(k) {
+                            let mut m = 0;
+                            for c in &mut e.children {
+                                match c {
+                                    Node::Text(t) => {
+                                        let (nt, x) = replace_protected(t, from, to, &[]);
+                                        m += x;
+                                        *t = nt;
+                                    }
+                                    Node::Element(y) => {
+                                        let mut inner = 0;
+                                        walk_all(y, from, to, &mut inner);
+                                        m += inner;
+                                    }
+                                }
+                            }
+                            *n += m;
+                        }
+                        return;
+                    }
+                    for c in &mut e.children {
+                        if let Node::Element(x) = c {
+                            walk(x, k, from, to, n);
+                        }
+                    }
+                }
+                fn walk_all(e: &mut Element, from: &str, to: &str, n: &mut usize) {
+                    for c in &mut e.children {
+                        match c {
+                            Node::Text(t) => {
+                                let (nt, k) = replace_protected(t, from, to, &[]);
+                                *n += k;
+                                *t = nt;
+                            }
+                            Node::Element(x) => walk_all(x, from, to, n),
+                        }
+                    }
+                }
+                walk(r, k, from, to, &mut n);
+            }
+        }
+    }
+    if n == 0 {
+        return Err(ApplyError::PhraseNotFound {
+            at: format!("{table}{row}の項{}", sub.unwrap_or("")),
+            phrase: from.to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// `at` の行から始まる項の行数（`rowspan`、無ければ上欄が空の続き）
+fn row_group_len(body: &[Node], at: usize) -> usize {
+    let rows: Vec<(usize, &Element)> = body
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c {
+            Node::Element(x) if x.name == "TableRow" => Some((i, x)),
+            _ => None,
+        })
+        .collect();
+    let Some(hit) = rows.iter().position(|(i, _)| *i == at) else {
+        return 1;
+    };
+    let mut span = rows[hit]
+        .1
+        .children
+        .iter()
+        .find_map(|c| match c {
+            Node::Element(x) if x.name == "TableColumn" => Some(
+                x.attrs
+                    .iter()
+                    .find(|(k, _)| k == "rowspan")
+                    .and_then(|(_, v)| v.parse::<usize>().ok())
+                    .unwrap_or(1),
+            ),
+            _ => None,
+        })
+        .unwrap_or(1);
+    if span == 1 {
+        while hit + span < rows.len() && row_key(rows[hit + span].1).is_empty() {
+            span += 1;
+        }
+    }
+    let end = rows
+        .get(hit + span - 1)
+        .map(|(i, _)| *i)
+        .unwrap_or(rows[rows.len() - 1].0);
+    end - at + 1
+}
+
+// ---------------------------------------------------------------- 別表の行
+
+/// 別表（`AppdxTable`）を題で引く。「別表第一」は題が「別表第一（第三条関係）」でも当たる
+pub(crate) fn appdx_mut<'a>(
+    doc: &'a mut LegalDocument,
+    table: &str,
+) -> Result<&'a mut Element, ApplyError> {
+    doc.appendices
+        .iter_mut()
+        .find(|ap| {
+            let title = ap
+                .children
+                .iter()
+                .find_map(|c| match c {
+                    Node::Element(x) if x.name.ends_with("Title") => Some(strip_ws(&x.text())),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            title == table
+                || title.starts_with(&format!("{table}（"))
+                || title.starts_with(&format!("{table}\u{3000}"))
+        })
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
+}
+
+/// `TableRow` を持つ列（`Table` の children）を返す
+fn table_body_mut(e: &mut Element) -> Option<&mut Vec<Node>> {
+    if e.children
+        .iter()
+        .any(|c| matches!(c, Node::Element(x) if x.name == "TableRow"))
+    {
+        return Some(&mut e.children);
+    }
+    for c in &mut e.children {
+        if let Node::Element(x) = c {
+            if let Some(v) = table_body_mut(x) {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn row_key(r: &Element) -> String {
+    r.children
+        .iter()
+        .find_map(|c| match c {
+            Node::Element(x) if x.name == "TableColumn" => Some(strip_ws(&x.text())),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// 上欄が `key` の行（`rowspan` で続く行も含む）の位置と長さ。番号は完全一致を先に、無ければ頭の一致
+fn row_group(body: &[Node], key: &str) -> Option<(usize, usize)> {
+    let rows: Vec<(usize, &Element)> = body
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c {
+            Node::Element(x) if x.name == "TableRow" => Some((i, x)),
+            _ => None,
+        })
+        .collect();
+    let key = strip_ws(key);
+    let hit = rows
+        .iter()
+        .position(|(_, r)| row_key(r) == key)
+        .or_else(|| rows.iter().position(|(_, r)| row_key(r).starts_with(&key)))?;
+    // 最初の欄の rowspan がこの行の数
+    let span = rows[hit]
+        .1
+        .children
+        .iter()
+        .find_map(|c| match c {
+            Node::Element(x) if x.name == "TableColumn" => Some(
+                x.attrs
+                    .iter()
+                    .find(|(k, _)| k == "rowspan")
+                    .and_then(|(_, v)| v.parse::<usize>().ok())
+                    .unwrap_or(1),
+            ),
+            _ => None,
+        })
+        .unwrap_or(1);
+    // rowspan が無ければ、上欄が空の続きの行までがこの項（e-Gov は欄を省く形と rowspan の形の両方がある）
+    let mut span = span;
+    if span == 1 {
+        while hit + span < rows.len() && row_key(rows[hit + span].1).is_empty() {
+            span += 1;
+        }
+    }
+    let start = rows[hit].0;
+    let end = rows
+        .get(hit + span - 1)
+        .map(|(i, _)| *i)
+        .unwrap_or(rows[rows.len() - 1].0);
+    Some((start, end - start + 1))
+}
+
+/// 行の内容（「八」「再審の訴えの提起」「四千円」…）から `TableRow` を組む。`cols` 欄ずつ 1 行に
+/// （余りは 1 行にまとめる。別表の最後の「この表の各項の…」のような欄をまたぐ行）
+fn appdx_rows_of(text: &[String], cols: usize) -> Vec<Node> {
+    fn column(t: &str) -> Node {
+        Node::Element(Element {
+            name: "TableColumn".into(),
+            attrs: vec![],
+            children: vec![Node::Element(Element {
+                name: "Sentence".into(),
+                attrs: vec![("Num".into(), "1".into())],
+                children: if t.is_empty() {
+                    vec![]
+                } else {
+                    vec![Node::Text(t.to_string())]
+                },
+            })],
+        })
+    }
+    let cols = cols.max(1);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let n = cols.min(text.len() - i);
+        out.push(Node::Element(Element {
+            name: "TableRow".into(),
+            attrs: vec![],
+            children: text[i..i + n].iter().map(|c| column(c.trim())).collect(),
+        }));
+        i += n;
+    }
+    out
+}
+
+/// その行（`at`）の欄の数
+fn row_cols(body: &[Node], at: usize) -> usize {
+    match body.get(at) {
+        Some(Node::Element(r)) => r
             .children
             .iter()
-            .find_map(|c| match c {
-                Node::Element(x) if x.name.ends_with("Title") => Some(text_of(x)),
-                _ => None,
-            })
-            .unwrap_or_default();
-        if !title.starts_with(table) {
+            .filter(|c| matches!(c, Node::Element(x) if x.name == "TableColumn"))
+            .count(),
+        _ => 3,
+    }
+}
+
+/// 「別表第一の八の項を次のように改める」: 行（rowspan で続く行も含む）を差し替える
+pub(crate) fn replace_appdx_row_whole(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, row)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+    let cols = row_cols(body, at);
+    let new = appdx_rows_of(text, cols);
+    body.splice(at..at + len, new);
+    Ok(())
+}
+
+/// 「別表第一中九の項及び一〇の項を削り」
+pub(crate) fn delete_appdx_rows(
+    doc: &mut LegalDocument,
+    table: &str,
+    rows: &[String],
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    for row in rows {
+        let (at, len) = row_group(body, row)
+            .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+        body.drain(at..at + len);
+    }
+    Ok(())
+}
+
+/// 「同項を同表の九の項とし」: 上欄の番号を付け替える
+pub(crate) fn renumber_appdx_row(
+    doc: &mut LegalDocument,
+    table: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, _) = row_group(body, from)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{from}」の項が無い")))?;
+    let Node::Element(r) = &mut body[at] else {
+        return Err(ApplyError::BadContent("行が無い".into()));
+    };
+    let col = r
+        .children
+        .iter_mut()
+        .find_map(|c| match c {
+            Node::Element(x) if x.name == "TableColumn" => Some(x),
+            _ => None,
+        })
+        .ok_or_else(|| ApplyError::BadContent("上欄が無い".into()))?;
+    set_column_text(col, to);
+    Ok(())
+}
+
+/// 欄の文を差し替える（`Sentence` の中身だけ）
+fn set_column_text(col: &mut Element, text: &str) {
+    for c in &mut col.children {
+        if let Node::Element(x) = c {
+            if x.name == "Sentence" {
+                x.children = vec![Node::Text(text.to_string())];
+                return;
+            }
+        }
+    }
+    col.children = vec![Node::Element(Element {
+        name: "Sentence".into(),
+        attrs: vec![("Num".into(), "1".into())],
+        children: vec![Node::Text(text.to_string())],
+    })];
+}
+
+/// 「四十四の三の項の次に次のように加える」
+pub(crate) fn insert_appdx_rows_after(
+    doc: &mut LegalDocument,
+    table: &str,
+    after: &str,
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, after)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{after}」の項が無い")))?;
+    let cols = row_cols(body, at);
+    let new = appdx_rows_of(text, cols);
+    body.splice(at + len..at + len, new);
+    Ok(())
+}
+
+/// 「同表を別表第三とし」: 別表の題の「別表第二」の部分を付け替える
+pub(crate) fn rename_appdx(
+    doc: &mut LegalDocument,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, from)?;
+    let title = ap
+        .children
+        .iter_mut()
+        .find_map(|c| match c {
+            Node::Element(x) if x.name.ends_with("Title") => Some(x),
+            _ => None,
+        })
+        .ok_or_else(|| ApplyError::BadContent(format!("{from}に題が無い")))?;
+    let cur = strip_ws(&title.text());
+    let rest = cur.strip_prefix(from).unwrap_or("");
+    title.children = vec![Node::Text(format!("{to}{rest}"))];
+    Ok(())
+}
+
+/// 「附則の次に次の別表を加える」「別表第一の次に次の一表を加える」+ 「別表第二（第三条関係）」と行の内容: 別表を足す。
+/// `after` があればその別表の次に、無ければ末尾に
+pub(crate) fn append_appdx(
+    doc: &mut LegalDocument,
+    text: &[String],
+    after: Option<&str>,
+) -> Result<(), ApplyError> {
+    let Some((title, cells)) = text.split_first() else {
+        return Err(ApplyError::BadContent("別表の内容が無い".into()));
+    };
+    // 題は「別表第二（第三条、第四条関係）」: e-Gov は題（`AppdxTableTitle`）と関係条（`RelatedArticleNum`）に分ける
+    let title = title.trim();
+    let (name, related) = match title.find('（') {
+        Some(i) => (&title[..i], Some(&title[i..])),
+        None => (title, None),
+    };
+    let mut children = vec![Node::Element(Element {
+        name: "AppdxTableTitle".into(),
+        attrs: vec![("WritingMode".into(), "vertical".into())],
+        children: vec![Node::Text(name.to_string())],
+    })];
+    if let Some(r) = related {
+        children.push(Node::Element(Element {
+            name: "RelatedArticleNum".into(),
+            attrs: vec![],
+            children: vec![Node::Text(r.to_string())],
+        }));
+    }
+    children.push(Node::Element(Element {
+        name: "TableStruct".into(),
+        attrs: vec![],
+        children: vec![Node::Element(Element {
+            name: "Table".into(),
+            attrs: vec![("WritingMode".into(), "vertical".into())],
+            children: appdx_rows_of(cells, 3),
+        })],
+    }));
+    let ap = Element {
+        name: "AppdxTable".into(),
+        attrs: vec![],
+        children,
+    };
+    // 並び（`body_order`）の枠も。`after` の別表の次に入れるなら、後ろの枠の番号をずらす
+    let at = match after {
+        None => doc.appendices.len(),
+        Some(t) => {
+            let title_of = |ap: &Element| {
+                ap.children
+                    .iter()
+                    .find_map(|c| match c {
+                        Node::Element(x) if x.name.ends_with("Title") => Some(strip_ws(&x.text())),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            };
+            doc.appendices
+                .iter()
+                .position(|ap| {
+                    let ti = title_of(ap);
+                    ti == t
+                        || ti.starts_with(&format!("{t}（"))
+                        || ti.starts_with(&format!("{t}\u{3000}"))
+                })
+                .map(|i| i + 1)
+                .ok_or_else(|| ApplyError::BadContent(format!("{t}が無い")))?
+        }
+    };
+    doc.appendices.insert(at, ap);
+    for s in &mut doc.body_order {
+        if let BodySlot::Appendix(i) = s {
+            if *i >= at {
+                *i += 1;
+            }
+        }
+    }
+    let pos = doc
+        .body_order
+        .iter()
+        .position(|s| matches!(s, BodySlot::Appendix(i) if *i == at + 1))
+        .unwrap_or(doc.body_order.len());
+    doc.body_order.insert(pos, BodySlot::Appendix(at));
+    Ok(())
+}
+
+/// 別表の行の中の細目（「イ　…」「ロ　…」の文）を引く
+fn appdx_row_sentences<'a>(
+    doc: &'a mut LegalDocument,
+    table: &str,
+    row: &str,
+) -> Result<Vec<&'a mut Element>, ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, row)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+    let mut out = Vec::new();
+    for c in body[at..at + len].iter_mut() {
+        if let Node::Element(r) = c {
+            fn walk<'a>(e: &'a mut Element, out: &mut Vec<&'a mut Element>) {
+                if e.name == "Sentence" {
+                    out.push(e);
+                    return;
+                }
+                for c in &mut e.children {
+                    if let Node::Element(x) = c {
+                        walk(x, out);
+                    }
+                }
+            }
+            walk(r, &mut out);
+        }
+    }
+    Ok(out)
+}
+
+/// 「同表の一一の二の項中ハを削り」
+pub(crate) fn delete_appdx_row_sub(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    sub: &str,
+) -> Result<(), ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, row)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+    let mut n = 0;
+    for c in body[at..at + len].iter_mut() {
+        if let Node::Element(r) = c {
+            fn walk(e: &mut Element, sub: &str, n: &mut usize) {
+                let before = e.children.len();
+                e.children.retain(|c| {
+                    !matches!(c, Node::Element(x) if x.name == "Sentence"
+                        && strip_ws(&x.text()).starts_with(sub))
+                });
+                *n += before - e.children.len();
+                for c in &mut e.children {
+                    if let Node::Element(x) = c {
+                        walk(x, sub, n);
+                    }
+                }
+            }
+            walk(r, sub, &mut n);
+        }
+    }
+    if n == 0 {
+        return Err(ApplyError::BadContent(format!(
+            "{table}「{row}」の項に{sub}が無い"
+        )));
+    }
+    Ok(())
+}
+
+/// 「ニをハとし」: 別表の行の中の細目の記号を付け替える
+pub(crate) fn renumber_appdx_row_sub(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
+    let ss = appdx_row_sentences(doc, table, row)?;
+    for s in ss {
+        if !strip_ws(&s.text()).starts_with(from) {
             continue;
         }
-        let mut all: Vec<&mut Element> = Vec::new();
-        all_rows(ap, &mut all);
-        let idx = match rows.get(&(table.to_string(), key.clone())) {
-            Some(i) => *i,
-            None => {
-                let i = all
-                    .iter()
-                    .position(|r| {
-                        r.children
-                            .iter()
-                            .find_map(|c| match c {
-                                Node::Element(x) if x.name == "TableColumn" => Some(text_of(x)),
-                                _ => None,
-                            })
-                            .is_some_and(|t| t.starts_with(&key))
-                    })
-                    .ok_or_else(|| {
-                        ApplyError::BadContent(format!("{table}に「{row}」の項が無い"))
-                    })?;
-                rows.insert((table.to_string(), key.clone()), i);
-                i
+        for c in &mut s.children {
+            if let Node::Text(t) = c {
+                if let Some(rest) = t.trim_start().strip_prefix(from) {
+                    *t = format!("{to}{rest}");
+                    return Ok(());
+                }
             }
-        };
-        let r = &mut *all[idx];
-        if replace_in(r, from, to) == 0 {
-            return Err(ApplyError::PhraseNotFound {
-                at: format!("{table}{row}の項"),
-                phrase: from.to_string(),
-            });
         }
-        return Ok(());
     }
-    Err(ApplyError::BadContent(format!("{table}が無い")))
+    Err(ApplyError::BadContent(format!(
+        "{table}「{row}」の項に{from}が無い"
+    )))
 }
 
 /// 「別表第一及び別表第二を削る」: 別表を（本文の並び `body_order` の枠ごと）消す

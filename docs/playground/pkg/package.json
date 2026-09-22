@@ -3,7 +3,7 @@
   "type": "module",
   "description": "lawean-check for the browser playground (wasm-bindgen)",
   "version": "0.1.0",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/bokuweb/lawean"
