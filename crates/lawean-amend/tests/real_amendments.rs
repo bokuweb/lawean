@@ -362,7 +362,7 @@ fn reiwa5_act53_art125_reproduces_egov_revision() {
     let ops: Vec<&Op> = unit.instructions.iter().flat_map(|i| &i.ops).collect();
     assert!(ops
         .iter()
-        .any(|o| matches!(o, Op::RenumberArticle { from, to }
+        .any(|o| matches!(o, Op::RenumberArticle { from, to, .. }
         if from.to_num_string() == "61" && to.to_num_string() == "64")));
     assert!(ops.iter().any(|o| matches!(
         o,
@@ -382,7 +382,7 @@ fn reiwa5_act53_art125_reproduces_egov_revision() {
         |o| matches!(o, Op::ReplaceSentencePart { part: SentencePart::Back, text, .. }
         if text.len() > 1 && text[0].starts_with("この場合において、次の表"))
     ));
-    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text }
+    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text, .. }
         if after.to_num_string() == "46" && text.iter().filter(|l| l.starts_with("第四十")).count() == 2)));
 
     let got = apply_unit(
@@ -877,4 +877,88 @@ fn reiwa3_act44_art4_chusho_gyogyo_yushi_reproduces_egov_revision() {
     )
     .unwrap();
     assert_same_main(&got, &revision("327AC0000000346_20220401_503AC0000000044"));
+}
+
+/// 令和3年法律第49号 第13条（地域における医療及び介護の総合的な確保の促進に関する法律）。2 段の施行:
+/// 附則第一条の二を触る改正規定（「附則第一条の二第二項中…改め、同条を附則第一条の三とし、附則第一条の次に次の一条を加える」）は
+/// 第四号（2022-02-01）、残り（目次・第4条第2項第2号のイロハ・第二章の二の追加・第35条）は第二号（2021-05-28）。
+/// 附則の条の繰り下げと附則への条の挿入は文書の側だけ（id の世界は本則）
+#[test]
+fn reiwa3_act49_art13_chiiki_iryo_kaigo_two_stages_reproduce_egov_revisions() {
+    let u = parse_units(&fixture("amendments/503AC0000000049_art13.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs(
+        "地域における医療及び介護の総合的な確保の促進に関する法律附則第一条の二第二項の改正規定",
+    )
+    .unwrap();
+    assert_eq!(locs.len(), 1);
+    assert!(locs[0].suppl, "{locs:?}");
+    let (suppl_part, rest) = u.split_by_locs(&locs);
+    assert_eq!(suppl_part.instructions.len(), 1);
+    assert!(suppl_part.instructions[0]
+        .text
+        .starts_with("附則第一条の二第二項中"));
+    // 第二号: 2021-05-28
+    let s1 = apply_unit(
+        &revision("401AC0000000064_20210401_502AC0000000052"),
+        &rest,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("401AC0000000064_20210528_503AC0000000049"));
+    // 第四号: 2022-02-01（附則の条。本則は変わらず、附則第一条の二が第一条の三になり、新しい第一条の二が入る）。
+    // ただし起草時（2021-05-28 の版）の附則第一条の二第二項「…及び附則第一条の二第一項各号」は、先に施行された
+    // 令2-52 第7条（令3-49 附則第25条で改められたもの、2022-01-01）で「附則第一条の二第一項の規定により行う同項各号」に
+    // 変わっている。書いたままの改め文は空振りする（先行改正との競合の実例）
+    let stale = apply_unit(
+        &revision("401AC0000000064_20220101_503AC0000000066"),
+        &suppl_part,
+        "test",
+    );
+    assert!(
+        matches!(&stale, Err(ApplyError::PhraseNotFound { phrase, .. }) if phrase == "附則第一条の二第一項各号"),
+        "{stale:?}"
+    );
+    // 令3-49 附則第26条の調整規定（施行順がこの場合には「附則第一条の二第一項各号」とあるのは「附則第一条の二第一項」と…）を
+    // 当てた改め文なら e-Gov の 2022-02-01 版になる
+    let adjusted = parse_units(&fixture(
+        "amendments/503AC0000000049_art13_suppl_adjusted.txt",
+    ))
+    .unwrap()
+    .remove(0);
+    let s2 = apply_unit(
+        &revision("401AC0000000064_20220101_503AC0000000066"),
+        &adjusted,
+        "test",
+    )
+    .unwrap();
+    let exp = revision("401AC0000000064_20220201_503AC0000000049");
+    assert_same_main(&s2, &exp);
+    let suppl_arts = |d: &LegalDocument| -> Vec<(String, String)> {
+        d.suppl_provisions[0]
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                SupplChild::Provision(Provision::Article(a)) => Some((
+                    a.num.to_num_string(),
+                    a.children
+                        .iter()
+                        .filter_map(|ch| match ch {
+                            ArticleChild::Paragraph(p) => Some(
+                                p.sentences
+                                    .iter()
+                                    .map(|s| s.plain_text())
+                                    .collect::<String>(),
+                            ),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(""),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(suppl_arts(&s2), suppl_arts(&exp));
 }

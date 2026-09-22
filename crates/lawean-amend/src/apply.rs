@@ -160,7 +160,10 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 insert_containers_at(doc, path, new, false)?;
             }
             Op::RenumberContainer { path, to } => renumber_container(doc, path, to)?,
-            Op::InsertArticleAfter { after, text } => {
+            Op::InsertArticleAfter { after, text, suppl } if *suppl => {
+                insert_suppl_articles_after(doc, after, text)?;
+            }
+            Op::InsertArticleAfter { after, text, .. } => {
                 article_mut(doc, after)?;
                 let mut anchor = after.clone();
                 for a in parse_articles(text)? {
@@ -171,7 +174,12 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                     anchor = num;
                 }
             }
-            Op::RenumberArticle { from, to } => renumber_article(doc, from, to)?,
+            Op::RenumberArticle { from, to, suppl } if *suppl => {
+                let art = suppl_article_mut(doc, from)?;
+                art.num = to.clone();
+                art.title = Some(vec![Inline::Text(article_label(to))]);
+            }
+            Op::RenumberArticle { from, to, .. } => renumber_article(doc, from, to)?,
             Op::ShiftArticles { from, to, by } => shift_articles(doc, *from, *to, *by)?,
             Op::ReplaceContainerTitle { path, from, to } => {
                 replace_container_title(doc, path, from, to)?;
@@ -501,6 +509,36 @@ pub(crate) fn article_mut<'a>(
 }
 
 /// 原始附則（AmendLawNum の無い附則）の条
+/// 「附則第一条の次に次の一条を加える」: 原始附則の条の後ろに条を挿す
+pub(crate) fn insert_suppl_articles_after(
+    doc: &mut LegalDocument,
+    after: &ArticleNum,
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let sp = doc
+        .suppl_provisions
+        .iter_mut()
+        .find(|s| s.amend_law_num.is_none())
+        .ok_or_else(|| ApplyError::ArticleNotFound(format!("附則{}", after.to_num_string())))?;
+    let mut anchor = after.clone();
+    for a in parse_articles(text)? {
+        let num = a.num.clone();
+        let i = sp
+            .children
+            .iter()
+            .position(
+                |c| matches!(c, SupplChild::Provision(Provision::Article(x)) if x.num == anchor),
+            )
+            .ok_or_else(|| {
+                ApplyError::ArticleNotFound(format!("附則{}", anchor.to_num_string()))
+            })?;
+        sp.children
+            .insert(i + 1, SupplChild::Provision(Provision::Article(a)));
+        anchor = num;
+    }
+    Ok(())
+}
+
 pub(crate) fn suppl_article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,

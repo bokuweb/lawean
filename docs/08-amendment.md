@@ -90,6 +90,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | ハからホまでをニからヘまでとし | `ShiftSubitems { at, from, to, by }` |
 | 同号イの次に次のように加える + 「ロ　本文」 | `InsertSubitemAfter { at, after, text }`。番号は記号の順に付け直す |
 | 第七十六条の二（見出しを含む。）及び第七十七条中「A」を「B」に改める | 見出し（`ReplaceCaption`）と本文の両方 |
+| 同条を附則第一条の三とし / 附則第一条の次に次の一条を加える | `RenumberArticle { suppl: true }` / `InsertArticleAfter { suppl: true }`: 原始附則の条は id の世界（本則）に無いので文書の側だけ（令3-49 第13条） |
 | 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |

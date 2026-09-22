@@ -92,6 +92,8 @@ pub enum Op {
     InsertArticleAfter {
         after: ArticleNum,
         text: Vec<String>,
+        /// 「附則第一条の次に次の一条を加える」: 原始附則の条（文書の側だけ）
+        suppl: bool,
     },
     /// 「第N条第M項（各号列記以外の部分）に後段として次のように加える」— 項の文の末尾に文を足す
     AppendSentence { at: Loc, text: Vec<String> },
@@ -206,7 +208,12 @@ pub enum Op {
     /// 「第N条[第M項]を削る」
     Delete { at: Loc },
     /// 「第N条を第M条とする」「同条を第M条とし」— 条ずれ。本文は触らない
-    RenumberArticle { from: ArticleNum, to: ArticleNum },
+    RenumberArticle {
+        from: ArticleNum,
+        to: ArticleNum,
+        /// 「同条を附則第一条の三とし」: 原始附則の条
+        suppl: bool,
+    },
     /// 「第N条から第M条までをK条ずつ繰り下げ」— 範囲の条（枝番も含む）の基数を K 動かす
     ShiftArticles { from: u32, to: u32, by: i32 },
     /// 「第N条の見出し中「A」を「B」に改め」

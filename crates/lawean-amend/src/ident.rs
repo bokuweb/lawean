@@ -831,7 +831,16 @@ impl Binder<'_> {
                 Op::RenumberContainer { path, to } => {
                     crate::apply::renumber_container(&mut self.doc, path, to)?;
                 }
-                Op::InsertArticleAfter { after, text } => {
+                // 附則の条は id の世界（本則）に無い。文書の側だけ
+                Op::InsertArticleAfter { after, text, suppl } if *suppl => {
+                    crate::apply::insert_suppl_articles_after(&mut self.doc, after, text)?;
+                }
+                Op::RenumberArticle { from, to, suppl } if *suppl => {
+                    let art = crate::apply::suppl_article_mut(&mut self.doc, from)?;
+                    art.num = to.clone();
+                    art.title = Some(vec![Inline::Text(crate::apply::article_label(to))]);
+                }
+                Op::InsertArticleAfter { after, text, .. } => {
                     // 条の挿入 = 直前の条の最後の項の後ろに新しい項を並べる（「次の二条」なら順に）
                     let mut anchor = paragraphs(article_mut(&mut self.doc, after)?)
                         .last()
@@ -863,7 +872,7 @@ impl Binder<'_> {
                         prev_art = num;
                     }
                 }
-                Op::RenumberArticle { from, to } => {
+                Op::RenumberArticle { from, to, .. } => {
                     // 条ずれ = その条の全項の art を付け替える。id は変わらない
                     let ids: Vec<String> = paragraphs(article_mut(&mut self.doc, from)?)
                         .iter()

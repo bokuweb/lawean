@@ -314,7 +314,7 @@ pub fn article_mapping(doc: &LegalDocument, unit: &AmendUnit) -> BTreeMap<Articl
     for ins in &unit.instructions {
         for op in &ins.ops {
             match op {
-                Op::RenumberArticle { from, to } => {
+                Op::RenumberArticle { from, to, suppl } if !suppl => {
                     map.insert(from.clone(), to.clone());
                 }
                 Op::ShiftArticles { from, to, by } => {

@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 
 const N: &str = "[一二三四五六七八九十百千]+";
 /// 施行期日の句: 「公布の日」「令和三年九月一日」「公布の日から起算して一年を超えない範囲内において政令で定める日」
-const ENF: &str = r"(?P<base>公布の日|(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?P<m>{N})月(?P<d>{N})日)(?P<until>までの間において政令で定める日)?(?:から起算して(?:(?P<yy>{N})年(?P<mm>{N})月|(?P<n>{N})(?P<u>年|月|日))(?P<how>を経過した日|を経過する日|(?:を超えない|をこえない)範囲内(?:において|で)(?:、各規定につき、)?政令で定める日))?";
+const ENF: &str = r"(?P<base>公布の日|(?P<era>明治|大正|昭和|平成|令和)(?P<y>{N}|元)年(?P<m>{N})月(?P<d>{N})日)(?P<until>までの間において政令で定める日|(?P<later>又はこの法律の公布の日のいずれか遅い日))?(?:から起算して(?:(?P<yy>{N})年(?P<mm>{N})月|(?P<n>{N})(?P<u>年|月|日))(?P<how>を経過した日|を経過する日|(?:を超えない|をこえない)範囲内(?:において|で)(?:、各規定につき、)?政令で定める日))?";
 /// 他法令の施行日に依る施行期日: 「民法改正法の施行の日から施行する」「刑法等一部改正法施行日から施行する」
 const ENF_OTHER: &str =
     r"(?P<law>[^、。「」（）]{2,40}?)(?:（[^）]*）)?(?:の施行の日|施行日|の施行日)";
@@ -138,6 +138,8 @@ pub enum Enforcement {
     ByCabinetOrderWithin(Dur),
     /// 「令和五年二月一日までの間において政令で定める日から施行する」— 上限が暦日
     ByCabinetOrderUntil { era: String, y: u32, m: u32, d: u32 },
+    /// 「令和三年四月一日又はこの法律の公布の日のいずれか遅い日から施行する」— 暦日と公布日の遅い方
+    LaterOfDateOrPromulgation { era: String, y: u32, m: u32, d: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +313,16 @@ fn enforcement_of(c: &regex::Captures) -> Enforcement {
         }
         (Some(d), Some(_)) => Enforcement::ByCabinetOrderWithin(d),
         _ => match c.name("era") {
+            Some(era) if c.name("later").is_some() => Enforcement::LaterOfDateOrPromulgation {
+                era: era.as_str().into(),
+                y: if &c["y"] == "元" {
+                    1
+                } else {
+                    kanji_to_u32(&c["y"]).unwrap_or(0)
+                },
+                m: kanji_to_u32(&c["m"]).unwrap_or(0),
+                d: kanji_to_u32(&c["d"]).unwrap_or(0),
+            },
             Some(era) if c.name("until").is_some() => Enforcement::ByCabinetOrderUntil {
                 era: era.as_str().into(),
                 y: if &c["y"] == "元" {
@@ -883,6 +895,14 @@ impl TimeExpr {
                             Some(yy) => c
                                 .value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)
                                 .role("その日までの間において政令で定める日"),
+                            None => c.confidence(Confidence::Low),
+                        }
+                    }
+                    self::Enforcement::LaterOfDateOrPromulgation { era, y, m, d } => {
+                        match era_year(era, *y) {
+                            Some(yy) => c
+                                .value(ValueKind::Date, format!("{yy:04}-{m:02}-{d:02}"), None)
+                                .role("その日又は公布の日のいずれか遅い日"),
                             None => c.confidence(Confidence::Low),
                         }
                     }

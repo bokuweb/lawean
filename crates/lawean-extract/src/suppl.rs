@@ -455,6 +455,11 @@ pub fn admissible(p: Date, e: &Enforcement) -> Option<(Date, Date)> {
         Enforcement::Promulgation => (p, p),
         Enforcement::OtherLaw(_) => return None,
         Enforcement::ByCabinetOrderUntil { era, y, m, d } => (p, (era_year(era, *y)?, *m, *d)),
+        Enforcement::LaterOfDateOrPromulgation { era, y, m, d } => {
+            let t = (era_year(era, *y)?, *m, *d);
+            let t = if t > p { t } else { p };
+            (t, t)
+        }
         Enforcement::Date { era, y, m, d } => {
             let t = (era_year(era, *y)?, *m, *d);
             (t, t)

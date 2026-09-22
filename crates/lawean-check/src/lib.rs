@@ -212,7 +212,7 @@ fn op_line(op: &IdentOp) -> String {
 /// この施行日に施行される部分だけを当てる。附則か施行日が無ければそのまま
 fn stage_for_day(input: &Input<'_>) -> Vec<(String, AmendUnit)> {
     use lawean_extract::calendar::parse;
-    use lawean_extract::suppl::{admissible, spec_for_law_id, spec_from_text};
+    use lawean_extract::suppl::{spec_for_law_id, spec_from_text};
     let Some(day) = input.enforced.and_then(parse) else {
         return input.units.clone();
     };
@@ -239,15 +239,12 @@ fn stage_for_day(input: &Input<'_>) -> Vec<(String, AmendUnit)> {
             if parts.len() <= 1 {
                 return (label.clone(), unit.clone());
             }
+            let sel = stage::select_for_day(&parts, p, day);
             let on_day: Vec<&stage::Part> = parts
                 .iter()
-                .filter(|pt| {
-                    pt.clause
-                        .enforcement
-                        .as_ref()
-                        .and_then(|e| admissible(p, e))
-                        .is_some_and(|(lo, hi)| lo <= day && day <= hi)
-                })
+                .zip(&sel)
+                .filter(|(_, s)| **s == stage::Selection::Apply)
+                .map(|(pt, _)| pt)
                 .collect();
             if on_day.is_empty() {
                 return (label.clone(), unit.clone());
@@ -1256,7 +1253,8 @@ fn check_enforcement_with(
         let last = i + 1 == n;
         let mut any_on_day = false;
         let mut lines: Vec<String> = Vec::new();
-        for part in &parts {
+        let sel = stage::select_for_day(&parts, p, day);
+        for (part, selection) in parts.iter().zip(sel) {
             let (clause, scope) = (&part.clause, part.scope.as_deref());
             let what = if split {
                 let m = part.unit.instructions.len();
@@ -1299,15 +1297,19 @@ fn check_enforcement_with(
             any_on_day |= on_day;
             let verdict = if split {
                 // 分けた部分: この施行日に当たる部分と、前後の日に施行する部分（当てない）
-                if on_day {
-                    format!("施行日 {} は範囲内（この施行日に当てる）", fmt(day))
-                } else if hi < day {
-                    format!(
+                match selection {
+                    stage::Selection::Apply => {
+                        format!("施行日 {} は範囲内（この施行日に当てる）", fmt(day))
+                    }
+                    stage::Selection::CabinetOrderElsewhere => format!(
+                        "政令で定める日の区間に施行日 {} を含むが、この日に確定した別の部分があるので当てない（別の政令の日）",
+                        fmt(day)
+                    ),
+                    stage::Selection::AlreadyEnforced => format!(
                         "施行日 {} より前に施行済み（この施行日には当てない）",
                         fmt(day)
-                    )
-                } else {
-                    format!("施行日 {} より後に施行（この施行日には当てない）", fmt(day))
+                    ),
+                    _ => format!("施行日 {} より後に施行（この施行日には当てない）", fmt(day)),
                 }
             } else if last {
                 if on_day {

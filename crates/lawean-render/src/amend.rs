@@ -351,8 +351,9 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
-        Op::InsertArticleAfter { after, text } => format!(
-            "{}の次に次の{}条を{}",
+        Op::InsertArticleAfter { after, text, suppl } => format!(
+            "{}{}の次に次の{}条を{}",
+            if *suppl { "附則" } else { "" },
             article_label(after),
             to_kanji(
                 text.iter()
@@ -403,9 +404,11 @@ fn segment(op: &Op, last: bool) -> String {
             }
         ),
         Op::Delete { at } => format!("{}を{}", loc_label(at), end("削り", "削る")),
-        Op::RenumberArticle { from, to } => format!(
-            "{}を{}と{}",
+        Op::RenumberArticle { from, to, suppl } => format!(
+            "{}{}を{}{}と{}",
+            if *suppl { "附則" } else { "" },
             article_label(from),
+            if *suppl { "附則" } else { "" },
             article_label(to),
             end("し", "する")
         ),
