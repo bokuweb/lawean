@@ -158,6 +158,8 @@ pub struct Input<'a> {
     pub base_draft: Option<&'a LegalDocument>,
     /// 他法令の起草時の版（`space` と同じ法令 ID で）
     pub space_draft: Option<&'a LawSpace>,
+    /// 附則の「X法の施行の日」の X の施行日（法令名, YYYY-MM-DD）。整備法の号が兄弟の改正法の施行日を引くとき
+    pub other_law_dates: &'a [(String, String)],
 }
 
 fn check(kind: Kind, status: Status, message: impl Into<String>, details: Vec<String>) -> Check {
@@ -228,6 +230,7 @@ fn stage_for_day(input: &Input<'_>) -> Vec<(String, AmendUnit)> {
     let Some(spec) = spec else {
         return input.units.clone();
     };
+    let spec = resolve_spec(spec, input.other_law_dates);
     let Some(p) = spec.promulgated else {
         return input.units.clone();
     };
@@ -267,6 +270,28 @@ fn stage_for_day(input: &Input<'_>) -> Vec<(String, AmendUnit)> {
             (label.clone(), u)
         })
         .collect()
+}
+
+/// 附則の「X法の施行の日」を与えられた施行日で暦日にする
+fn resolve_spec(
+    mut spec: lawean_extract::suppl::EnforcementSpec,
+    dates: &[(String, String)],
+) -> lawean_extract::suppl::EnforcementSpec {
+    use lawean_extract::suppl::resolve_other_law;
+    if dates.is_empty() {
+        return spec;
+    }
+    if let Some(m) = &mut spec.main {
+        if let Some(e) = &m.enforcement {
+            m.enforcement = Some(resolve_other_law(e, dates));
+        }
+    }
+    for it in &mut spec.items {
+        if let Some(e) = &it.clause.enforcement {
+            it.clause.enforcement = Some(resolve_other_law(e, dates));
+        }
+    }
+    spec
 }
 
 pub fn run(input: &Input<'_>) -> Report {
@@ -820,11 +845,16 @@ pub fn run(input: &Input<'_>) -> Report {
     checks.push(match (input.suppl, input.expected, input.enforced) {
         (Some(suppl), _, Some(day)) => {
             let p = input.promulgated.and_then(lawean_extract::calendar::parse);
-            let spec = lawean_extract::suppl::spec_from_text(suppl, p);
-            check_enforcement_with(&spec, "起草中の附則", day, &input.units, true)
+            let spec = resolve_spec(
+                lawean_extract::suppl::spec_from_text(suppl, p),
+                input.other_law_dates,
+            );
             // 分ける前の単位で（部分ごとの施行日を報告する）
+            check_enforcement_with(&spec, "起草中の附則", day, &input.units, true)
         }
-        (None, Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
+        (None, Some(exp), Some(day)) => {
+            check_enforcement(exp, day, &input.units, input.other_law_dates)
+        }
         (None, None, Some(_)) => check(
             Kind::Enforcement,
             Status::Skip,
@@ -1179,7 +1209,12 @@ fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
 
 /// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
 /// 単位が複数なら、最後の単位の区間に施行日が入り、それより前の単位はその日までに施行できる（下限 ≤ 施行日）こと
-fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit)]) -> Check {
+fn check_enforcement(
+    exp: &LegalDocument,
+    day: &str,
+    units: &[(String, AmendUnit)],
+    other_law_dates: &[(String, String)],
+) -> Check {
     use lawean_extract::suppl::spec_for_law_id;
     // 改正法の法令 ID は改正後リビジョンの id（403AC0000000090_20230220_504AC0000000048）の末尾
     let amend_id = exp
@@ -1195,6 +1230,7 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
             vec![],
         );
     };
+    let spec = resolve_spec(spec, other_law_dates);
     check_enforcement_with(
         &spec,
         "改正後リビジョンに載る改正法の附則",
@@ -1531,6 +1567,8 @@ pub struct TextInput<'a> {
     pub base_draft_xml: Option<&'a str>,
     /// 他法令の起草時の版
     pub other_laws_draft: &'a [String],
+    /// 附則の「X法の施行の日」の X の施行日（法令名, YYYY-MM-DD）
+    pub other_law_dates: &'a [(String, String)],
 }
 
 pub fn run_text_input(t: &TextInput<'_>) -> Report {
@@ -1545,6 +1583,7 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
         promulgated,
         base_draft_xml,
         other_laws_draft,
+        other_law_dates,
     } = *t;
     let base = match parse_law_xml(base_xml) {
         Ok(d) => d,
@@ -1654,6 +1693,7 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
         promulgated,
         base_draft: base_draft.as_ref(),
         space_draft: space_draft.as_ref(),
+        other_law_dates,
     });
     report.checks.insert(
         0,

@@ -343,9 +343,9 @@ pub fn parse_scope_locs(scope: &str) -> Result<Vec<Loc>, ParseError> {
         .flat_map(|x| x.split('、'))
     {
         let tok = tok.trim();
-        let Some(tok) = tok.strip_suffix("の改正規定") else {
+        if !tok.ends_with("改正規定") {
             continue;
-        };
+        }
         // 法令名（「医師法」「同法」）を落とす: 最初の「第」「同条」から
         let start = tok
             .find("附則第")
@@ -355,10 +355,23 @@ pub fn parse_scope_locs(scope: &str) -> Result<Vec<Loc>, ParseError> {
             .min()
             .unwrap_or(tok.len());
         let tok = &tok[start..];
+        // 「第九条の改正規定」のほか「第九条に一項を加える改正規定」「第百二十一条の次に一条を加える改正規定」
+        // 「第二十四条の四の七及び第二十四条の四の八を削る改正規定」: 頭の位置だけを取る
+        static HEAD: OnceLock<Regex> = OnceLock::new();
+        let head = HEAD.get_or_init(|| {
+            re(r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?|同条(?:第{N}項)?)")
+        });
+        let tok = match tok.strip_suffix("の改正規定") {
+            Some(t) => t.to_string(),
+            None => match head.captures(tok) {
+                Some(c) => c["loc"].to_string(),
+                None => continue,
+            },
+        };
         if tok.is_empty() {
             continue;
         }
-        out.extend(expand_locs(tok, &mut ante)?);
+        out.extend(expand_locs(&tok, &mut ante)?);
     }
     Ok(out)
 }

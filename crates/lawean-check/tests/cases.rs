@@ -28,6 +28,9 @@ struct Case {
     suppl: Option<String>,
     #[serde(default)]
     promulgated: Option<String>,
+    /// 附則の「X法の施行の日」の X の施行日
+    #[serde(default)]
+    other_law_dates: std::collections::BTreeMap<String, String>,
     expect: Expect,
 }
 
@@ -48,6 +51,11 @@ fn run_case(c: &Case) -> Report {
         enforced: c.enforced.as_deref(),
         suppl: c.suppl.as_deref(),
         promulgated: c.promulgated.as_deref(),
+        other_law_dates: &c
+            .other_law_dates
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<_>>(),
         base_draft_xml: c.base_draft.as_deref().map(fixture).as_deref(),
         other_laws_draft: &others_draft,
     })
@@ -385,6 +393,7 @@ fn r5_63_art7_is_not_confused_with_suppl_art7() {
             other_laws_draft: vec![],
             suppl: c.suppl.clone(),
             promulgated: c.promulgated.clone(),
+            other_law_dates: Default::default(),
             expect: Expect {
                 ok: true,
                 fail: vec![],

@@ -30,6 +30,15 @@ pub fn check(input_json: &str) -> String {
                 .collect()
         })
         .unwrap_or_default();
+    // 附則の「X法の施行の日」の X の施行日: {"other_law_dates": {"民事訴訟法等の一部を改正する法律": "2026-05-21"}}
+    let other_law_dates: Vec<(String, String)> = v["other_law_dates"]
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, x)| x.as_str().map(|d| (k.clone(), d.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
     let report = lawean_check::run_text_input(&lawean_check::TextInput {
         base_xml: s("base").unwrap_or(""),
         amendment: s("amendment").unwrap_or(""),
@@ -41,6 +50,7 @@ pub fn check(input_json: &str) -> String {
         promulgated: s("promulgated"),
         base_draft_xml: s("base_draft"),
         other_laws_draft: &others_draft,
+        other_law_dates: &other_law_dates,
     });
     serde_json::to_string(&report).unwrap()
 }

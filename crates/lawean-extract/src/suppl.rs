@@ -65,6 +65,8 @@ pub fn era_year(era: &str, y: u32) -> Option<i32> {
         "昭和" | "Showa" => 1926,
         "平成" | "Heisei" => 1989,
         "令和" | "Reiwa" => 2019,
+        // 西暦のまま（他法令の施行日を YYYY-MM-DD で与えたとき）
+        "西暦" => 1,
         _ => return None,
     };
     Some(base + y as i32 - 1)
@@ -442,6 +444,27 @@ pub fn spec_for_law_id(doc: &LegalDocument, amend_law_id: &str) -> Option<Enforc
                 .is_some_and(|d| d.era == era && d.year == year && d.num == num)
         })
         .map(|sp| spec_of(sp, None))
+}
+
+/// 「X法の施行の日」を、与えられた他法令の施行日（法令名 → 日）で暦日に解く。無ければそのまま
+pub fn resolve_other_law(e: &Enforcement, dates: &[(String, String)]) -> Enforcement {
+    if let Enforcement::OtherLaw(name) = e {
+        let key = name.trim_end_matches("の施行の日");
+        if let Some((_, d)) = dates
+            .iter()
+            .find(|(n, _)| n == key || n.trim_end_matches("の施行の日") == key)
+        {
+            if let Some((y, m, day)) = calendar::parse(d) {
+                return Enforcement::Date {
+                    era: "西暦".into(),
+                    y: y as u32,
+                    m,
+                    d: day,
+                };
+            }
+        }
+    }
+    e.clone()
 }
 
 /// 施行日の許容区間 [lo, hi]（両端を含む）。公布日 `p` から暦（民法第143条）で

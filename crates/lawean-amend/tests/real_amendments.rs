@@ -990,3 +990,48 @@ fn reiwa5_act53_art227_chusai_reproduces_egov_unenforced_revision() {
     .unwrap();
     assert_same_main(&got, &revision("415AC0000000138_20280613_505AC0000000053"));
 }
+
+/// 同 第219条（人事訴訟法）の 2 段: 附則第一条第三号「第二百十九条中人事訴訟法第九条に一項を加える改正規定及び同法第三十三条に二項を
+/// 加える改正規定」は「民事訴訟法等の一部を改正する法律の施行の日」（令4-48 = 2026-05-21）、残りは本文（2028-06-13）。
+/// 間に令8-46（2026-06-24）が入る。「〜に一項を加える改正規定」の頭の位置で分ける
+#[test]
+fn reiwa5_act53_art219_jinji_sosho_two_stages_reproduce_egov_revisions() {
+    let u = parse_units(&fixture("amendments/505AC0000000053_art219.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs(
+        "人事訴訟法第九条に一項を加える改正規定及び同法第三十三条に二項を加える改正規定",
+    )
+    .unwrap();
+    assert_eq!(
+        locs.iter()
+            .map(|l| l.article.to_num_string())
+            .collect::<Vec<_>>(),
+        ["9", "33"]
+    );
+    let (first, rest) = u.split_by_locs(&locs);
+    assert_eq!(
+        first.instructions.len(),
+        2,
+        "{:?}",
+        first
+            .instructions
+            .iter()
+            .map(|i| &i.text)
+            .collect::<Vec<_>>()
+    );
+    let s1 = apply_unit(
+        &revision("415AC0000000109_20260521_504AC0000000048"),
+        &first,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("415AC0000000109_20260521_505AC0000000053"));
+    let s2 = apply_unit(
+        &revision("415AC0000000109_20260624_508AC0000000046"),
+        &rest,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s2, &revision("415AC0000000109_20280613_505AC0000000053"));
+}

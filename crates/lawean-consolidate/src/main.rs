@@ -1,5 +1,6 @@
 //! CLI: `lawean-consolidate <発射台.xml> <改め文.txt> [--out 改正後.xml] [--expected 改正後.xml] [--enforced YYYY-MM-DD]
-//!                          [--law 他法令.xml]... [--base-draft 起草時の発射台.xml] [--suppl 附則.txt --promulgated YYYY-MM-DD] [--json]`
+//!                          [--law 他法令.xml]... [--base-draft 起草時の発射台.xml] [--suppl 附則.txt --promulgated YYYY-MM-DD]
+//!                          [--other-law-date 法令名=YYYY-MM-DD]... [--json]`
 //! 発射台の XML は e-Gov 法令 API（`law_data`）の応答でも、裸の `<Law>` でもよい
 
 use lawean_consolidate::*;
@@ -15,6 +16,7 @@ fn main() {
     let (mut out, mut expected, mut enforced, mut base_draft, mut json) =
         (None, None, None, None, false);
     let (mut suppl, mut promulgated) = (None, None);
+    let mut other_law_dates: Vec<(String, String)> = Vec::new();
     let mut laws = Vec::new();
     let mut pos = Vec::new();
     let mut it = args.iter();
@@ -26,6 +28,11 @@ fn main() {
             "--base-draft" => base_draft = it.next().map(|p| read(p)),
             "--suppl" => suppl = it.next().map(|p| read(p)),
             "--promulgated" => promulgated = it.next().cloned(),
+            "--other-law-date" => {
+                let v = it.next().expect("--other-law-date 法令名=YYYY-MM-DD");
+                let (n, d) = v.split_once('=').expect("法令名=YYYY-MM-DD");
+                other_law_dates.push((n.to_string(), d.to_string()));
+            }
             "--law" => laws.push(read(it.next().expect("--law <xml>"))),
             "--json" => json = true,
             p => pos.push(p.to_string()),
@@ -46,6 +53,7 @@ fn main() {
         base_draft_xml: base_draft.as_deref(),
         suppl: suppl.as_deref(),
         promulgated: promulgated.as_deref(),
+        other_law_dates: &other_law_dates,
         ..Default::default()
     });
     if json {
