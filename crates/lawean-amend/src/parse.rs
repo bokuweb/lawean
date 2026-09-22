@@ -266,6 +266,8 @@ struct Ante {
     locs: Vec<Loc>,
     /// 直前の位置が附則の条
     suppl: bool,
+    /// 直前の位置が別表の行（表, 行の上欄）
+    appdx: Option<(String, String)>,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
@@ -371,6 +373,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     // 位置を新しく言えば文の限定と列挙は解ける
     ante.part = part;
     ante.locs.clear();
+    ante.appdx = None;
     Ok(Loc {
         article,
         paragraph,
@@ -430,6 +433,53 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         rest = r2;
     }
     let a = phrases[0].clone();
+    // 別表の行: 「別表第二X法（…）の項中「A」を「B」に、「C」を「D」に改め、「E」の下に「F」を加える」
+    static APPDX: OnceLock<Regex> = OnceLock::new();
+    let appdx_re = APPDX.get_or_init(|| re(r"^(?P<table>別表(?:第{N})?)(?P<row>.+?)の項$"));
+    let appdx: Option<(String, String)> = match loc_part {
+        Some(l) => appdx_re
+            .captures(l)
+            .map(|c| (c["table"].to_string(), c["row"].to_string())),
+        None if ante.article.is_none() && !ante.toc => ante.appdx.clone(),
+        None => None,
+    };
+    if let Some((table, row)) = appdx {
+        ante.appdx = Some((table.clone(), row.clone()));
+        ante.article = None;
+        let mk = |from: String, to: String| Op::ReplaceAppdxRow {
+            table: table.clone(),
+            row: row.clone(),
+            from,
+            to,
+        };
+        if let Some(r) = rest.strip_prefix("を") {
+            if r == "削り" || r == "削る" {
+                return Ok(Some(PhraseOps(
+                    phrases.into_iter().map(|f| mk(f, String::new())).collect(),
+                )));
+            }
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "に" | "に改め" | "に改める") {
+                    return Ok(Some(PhraseOps(
+                        phrases.into_iter().map(|f| mk(f, b.clone())).collect(),
+                    )));
+                }
+            }
+        }
+        if let Some(r) = rest.strip_prefix("の下に") {
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "を" | "を加え" | "を加える") {
+                    return Ok(Some(PhraseOps(
+                        phrases
+                            .into_iter()
+                            .map(|f| mk(f.clone(), format!("{f}{b}")))
+                            .collect(),
+                    )));
+                }
+            }
+        }
+        return Ok(None);
+    }
     // 目次の字句: 「目次中「A」を削り」「目次中「A」を「B」に、「C」を「D」に改め」
     if loc_part == Some("目次") || (loc_part.is_none() && ante.toc) {
         ante.toc = true;
@@ -750,6 +800,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         part: None,
         locs: Vec::new(),
         suppl: false,
+        appdx: None,
     };
     let mut ops = Vec::new();
     let segs: Vec<String> = split_segments(line);
@@ -786,6 +837,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         part: ante.part,
                         locs: ante.locs.clone(),
                         suppl: ante.suppl,
+                        appdx: ante.appdx.clone(),
                     };
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）

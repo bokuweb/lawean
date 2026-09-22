@@ -591,6 +591,7 @@ impl Binder<'_> {
     fn instruction(&mut self, ins: &Instruction) -> Result<(), ApplyError> {
         let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
         let mut inserted: Vec<String> = Vec::new();
+        let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
         for op in &ins.ops {
             match op {
                 Op::ReplaceToc { from, to } => {
@@ -1015,6 +1016,20 @@ impl Binder<'_> {
                         prev = Some(num);
                     }
                 }
+                // 別表の行は本則ではない。文書の側だけ
+                Op::ReplaceAppdxRow {
+                    table,
+                    row,
+                    from,
+                    to,
+                } => crate::apply::replace_appdx_row(
+                    &mut self.doc,
+                    table,
+                    row,
+                    from,
+                    to,
+                    &mut appdx_rows,
+                )?,
                 Op::ReplaceContainers { paths, text } => {
                     // 章の差し替え = 新しい章の全部の項を最初の章の直前の項の後ろに並べ、旧章の項を全部削る
                     let mut new = crate::apply::parse_containers(text)?;
