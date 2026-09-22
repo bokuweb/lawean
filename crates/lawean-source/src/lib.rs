@@ -7,7 +7,7 @@ pub mod ir;
 pub mod parse;
 pub mod xml;
 
-pub use egov::parse_response;
+pub use egov::{parse_law_xml, parse_response};
 pub use emit::emit_law;
 pub use ir::*;
 pub use parse::{parse_law, ParseOptions};

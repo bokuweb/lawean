@@ -25,7 +25,7 @@
 
 use lawean_amend::ident::{self, IdentOp, IdentRevision};
 use lawean_amend::{article_label, hane_candidates, parse_units, AmendUnit};
-use lawean_source::{parse_response, ArticleNum, LegalDocument};
+use lawean_source::{parse_law_xml, ArticleNum, LegalDocument};
 use lawean_space::{impact, locate, ImpactKind, LawSpace};
 
 pub mod stale;
@@ -96,6 +96,7 @@ pub struct Report {
 }
 
 /// Lean の `applyUnit`（リンクされていれば）か Rust の写し
+#[cfg(feature = "lean")]
 fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision> {
     match lawean_leanrt::apply_unit(rev, ops) {
         Ok(r) => r,
@@ -103,12 +104,23 @@ fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision>
     }
 }
 
+#[cfg(not(feature = "lean"))]
+fn apply_verified(rev: &IdentRevision, ops: &[IdentOp]) -> Option<IdentRevision> {
+    ident::apply_unit(rev, ops)
+}
+
+#[cfg(feature = "lean")]
 fn engine_name() -> &'static str {
     if lawean_leanrt::available() {
         "lean"
     } else {
         "rust"
     }
+}
+
+#[cfg(not(feature = "lean"))]
+fn engine_name() -> &'static str {
+    "rust"
 }
 
 impl Report {
@@ -1392,14 +1404,21 @@ fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {
 /// 改め文を発射台に当てた改正後の文書（Rust の写しで。SMT の生成など、本文の再パースが要る用途）。
 /// 当たらない単位があればそこで止めて、そこまでの文書を返す
 pub fn consolidated_document(base_xml: &str, amendment: &str) -> Result<LegalDocument, String> {
-    let base = parse_response(base_xml).map_err(|e| e.to_string())?;
+    let base = parse_law_xml(base_xml).map_err(|e| e.to_string())?;
     let units = parse_units(amendment).map_err(|e| e.to_string())?;
+    let title = base
+        .title
+        .as_ref()
+        .map(|t| lawean_source::inline_text(&t.text))
+        .unwrap_or_default();
     let mut doc = base;
     for u in &units {
-        match lawean_amend::apply_unit(&doc, u, "after") {
-            Ok(d) => doc = d,
-            Err(_) => break,
+        // 別の法令を改正する単位は飛ばす（1 つの改め文で複数法令）
+        if !title.is_empty() && u.target_title != title {
+            continue;
         }
+        doc = lawean_amend::apply_unit(&doc, u, "after")
+            .map_err(|e| format!("{}: {e}", u.article_of_amending_law))?;
     }
     Ok(doc)
 }
@@ -1459,7 +1478,7 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
         base_draft_xml,
         other_laws_draft,
     } = *t;
-    let base = match parse_response(base_xml) {
+    let base = match parse_law_xml(base_xml) {
         Ok(d) => d,
         Err(e) => {
             return Report {
@@ -1499,13 +1518,13 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
             }
         }
     };
-    let expected = expected_xml.and_then(|x| parse_response(x).ok());
+    let expected = expected_xml.and_then(|x| parse_law_xml(x).ok());
     let mut space = None;
     if !other_laws.is_empty() {
         let mut s = LawSpace::new();
         s.add(base.clone());
         for x in other_laws {
-            if let Ok(d) = parse_response(x) {
+            if let Ok(d) = parse_law_xml(x) {
                 // 発射台と同じ法令の別の版が他法令に混じっても、発射台を上書きしない
                 if d.law_id == base.law_id {
                     continue;
@@ -1544,12 +1563,12 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
             )),
         }
     }
-    let base_draft = base_draft_xml.and_then(|x| parse_response(x).ok());
+    let base_draft = base_draft_xml.and_then(|x| parse_law_xml(x).ok());
     let mut space_draft = None;
     if !other_laws_draft.is_empty() {
         let mut s = LawSpace::new();
         for x in other_laws_draft {
-            if let Ok(d) = parse_response(x) {
+            if let Ok(d) = parse_law_xml(x) {
                 s.add(d);
             }
         }

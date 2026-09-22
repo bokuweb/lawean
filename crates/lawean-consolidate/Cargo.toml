@@ -1,0 +1,23 @@
+[package]
+name = "lawean-consolidate"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "改め文の溶け込みと検査: e-Gov の法令 XML と改め文（改正法の本文）から、改正後の法令 XML と検査の報告を返す。他のプロジェクトから使う入口"
+
+[dependencies]
+lawean-source = { path = "../lawean-source" }
+lawean-amend = { path = "../lawean-amend" }
+lawean-check = { path = "../lawean-check", default-features = false }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+default = []
+# 証明した Lean の applyUnit で溶け込みを計算する（lean があれば。無ければ Rust の写しに落ちる）
+lean = ["lawean-check/lean"]
+
+[[bin]]
+name = "lawean-consolidate"
+path = "src/main.rs"

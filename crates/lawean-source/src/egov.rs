@@ -46,3 +46,20 @@ pub fn parse_response(xml: &str) -> Result<LegalDocument, EgovError> {
     let (law, opts) = law_element(&root)?;
     Ok(parse_law(law, opts)?)
 }
+
+/// e-Gov の `law_data` の応答でも、裸の `<Law>` 要素（`emit_law` の出力）でも読む。
+/// 裸の `Law` には法令 ID が無いので `law_id` で補う（無ければ None）
+pub fn parse_law_xml(xml: &str) -> Result<LegalDocument, EgovError> {
+    let root = Element::parse(xml)?;
+    if root.name == "Law" {
+        return Ok(parse_law(
+            &root,
+            ParseOptions {
+                law_id: None,
+                version_id: None,
+            },
+        )?);
+    }
+    let (law, opts) = law_element(&root)?;
+    Ok(parse_law(law, opts)?)
+}
