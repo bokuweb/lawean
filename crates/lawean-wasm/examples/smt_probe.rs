@@ -1,5 +1,6 @@
-//! smt_scripts の出力を手元の z3 で走らせて答え合わせ: cargo run -p lawean-wasm --example smt_probe
+//! smt_scripts の出力を手元の z3 で走らせて答え合わせ: cargo run -p lawean-wasm --example smt_probe [--dump]
 fn main() {
+    let dump = std::env::args().any(|a| a == "--dump");
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures");
     let base = std::fs::read_to_string(format!(
         "{root}/revisions/403AC0000000090_20210519_503AC0000000037.xml"
@@ -12,7 +13,13 @@ fn main() {
     let out: serde_json::Value =
         serde_json::from_str(&lawean_wasm::smt_scripts(&input.to_string())).unwrap();
     for o in out.as_array().unwrap() {
-        let v = lawean_verify::run_z3(o["script"].as_str().unwrap()).unwrap();
+        let script = o["script"].as_str().unwrap();
+        if dump {
+            for (i, l) in script.lines().enumerate() {
+                println!("{:3} {l}", i + 1);
+            }
+        }
+        let v = lawean_verify::run_z3(script).unwrap();
         let a = match v {
             lawean_verify::Verdict::Proved => "unsat".to_string(),
             lawean_verify::Verdict::Counterexample(_) => "sat".to_string(),
