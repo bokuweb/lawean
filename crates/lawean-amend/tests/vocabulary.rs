@@ -272,3 +272,97 @@ fn batch_a_forms_on_shakuchi_shakka() {
         "{text}"
     );
 }
+
+/// 令5-53 の形: 条の中の読替え表の行「第六十四条の表第百三十三条第一項の項中「A」を「B」に改め」、
+/// 「同項に次の表を加える」（欄の行）、「別表を削る」。借地借家法（2028 版、第64条に読替え表）と宅建業法（別表）に当てる
+#[test]
+fn table_rows_append_table_and_delete_appdx() {
+    let base = revision("403AC0000000090_20280613_505AC0000000053");
+    let t = "第一条　借地借家法（平成三年法律第九十号）の一部を次のように改正する。
+　　第六十四条の表第百三十三条第一項の項中「当事者」を「関係人」に改め、同条の表第百三十三条第三項の項中「借地借家法第四十一条の事件の記録」を削る。
+　　第三条に次の表を加える。
+第一条
+甲
+乙
+第二条
+丙
+丁";
+    let units = parse_units(t).unwrap();
+    let u = &units[0];
+    assert_eq!(
+        u.instructions[0].ops.len(),
+        2,
+        "{:?}",
+        u.instructions[0].ops
+    );
+    assert!(
+        matches!(&u.instructions[0].ops[0], Op::ReplaceTableRow { row, from, to, .. } if row == "第百三十三条第一項" && from == "当事者" && to == "関係人")
+    );
+    assert!(matches!(&u.instructions[1].ops[0], Op::AppendTable { .. }));
+    let got = apply_unit(&base, u, "test").unwrap();
+    // 表の中身（Raw の TableStruct）
+    let tables = |d: &LegalDocument, n: &str| -> String {
+        fn find<'a>(ps: &'a [Provision], n: &str) -> Option<&'a Article> {
+            ps.iter().find_map(|p| match p {
+                Provision::Article(a) if a.num.to_num_string() == n => Some(a),
+                Provision::Container(c) => find(&c.children, n),
+                _ => None,
+            })
+        }
+        find(&d.main_provision, n)
+            .unwrap()
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                ArticleChild::Paragraph(p) => Some(p),
+                _ => None,
+            })
+            .flat_map(|p| p.children.iter())
+            .filter_map(|c| match c {
+                ParagraphChild::Raw(e) if e.name == "TableStruct" => Some(e.text()),
+                _ => None,
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect()
+    };
+    let t64 = tables(&got, "64");
+    // 第百三十三条第一項の項の「当事者」→「関係人」、第百三十三条第三項の項の下欄「借地借家法第四十一条の事件の記録」が消えた
+    assert!(
+        t64.starts_with("第百三十三条第一項関係人関係人又は"),
+        "{t64}"
+    );
+    assert!(
+        !t64.contains("以下この章において同じ。）借地借家法第四十一条の事件の記録"),
+        "{t64}"
+    );
+    assert_eq!(tables(&got, "3"), "第一条甲乙第二条丙丁");
+    let b = ident::bind(&base, u, "t").unwrap();
+    assert_eq!(tables(&b.doc, "64"), t64);
+    assert_eq!(tables(&b.doc, "3"), "第一条甲乙第二条丙丁");
+    let text = lawean_render::amend::render_unit(u);
+    let again = parse_units(&text).unwrap();
+    assert_eq!(
+        again[0]
+            .instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        u.instructions
+            .iter()
+            .map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        "{text}"
+    );
+
+    let takken = revision("327AC1000000176_20240401_505AC0000000079");
+    assert!(!takken.appendices.is_empty());
+    let t = "第一条　宅地建物取引業法（昭和二十七年法律第百七十六号）の一部を次のように改正する。
+　　別表を削る。";
+    let u = parse_units(t).unwrap().remove(0);
+    assert!(
+        matches!(&u.instructions[0].ops[0], Op::DeleteAppdx { tables } if tables == &["別表".to_string()])
+    );
+    let got = apply_unit(&takken, &u, "test").unwrap();
+    assert!(got.appendices.is_empty());
+}

@@ -77,6 +77,17 @@ pub enum Op {
         text: Vec<String>,
         suppl: bool,
     },
+    /// 「第三十八条の表第七十条第二項の項中「A」を「B」に改め」: 条・項の中の表（読替え表）の行（上欄が `row`）の字句
+    ReplaceTableRow {
+        at: Loc,
+        row: String,
+        from: String,
+        to: String,
+    },
+    /// 「同項に次の表を加える」+ 欄の行: 項の末尾に表を足す（欄は「第」で始まる行から行を組む）
+    AppendTable { at: Loc, text: Vec<String> },
+    /// 「別表第一及び別表第二を削る」
+    DeleteAppdx { tables: Vec<String> },
     /// 「同項後段を削る」「同項ただし書を削る」
     DeleteSentencePart { at: Loc, part: SentencePart },
     /// 「第一章第八節の節名中「A」を「B」に改める」「第N章の章名中…」。`path` は外側から (章/節/款/目, 番号)
@@ -280,7 +291,8 @@ impl Op {
             | Op::DeleteContainerTitle { .. }
             | Op::DeleteContainers { .. }
             | Op::ReplaceContainers { .. }
-            | Op::ReplaceAppdxRow { .. } => None,
+            | Op::ReplaceAppdxRow { .. }
+            | Op::DeleteAppdx { .. } => None,
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
@@ -310,6 +322,8 @@ impl Op {
             | Op::AppendItem { at, .. }
             | Op::ReplaceItems { at, .. }
             | Op::ReplaceItemSet { at, .. }
+            | Op::ReplaceTableRow { at, .. }
+            | Op::AppendTable { at, .. }
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. } => Some(&at.article),
@@ -334,6 +348,8 @@ impl Op {
             | Op::AppendItem { at, .. }
             | Op::ReplaceItems { at, .. }
             | Op::ReplaceItemSet { at, .. }
+            | Op::ReplaceTableRow { at, .. }
+            | Op::AppendTable { at, .. }
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. } => match at.paragraph {
@@ -367,6 +383,7 @@ impl Op {
                 | Op::AppendSupplArticles { .. }
                 | Op::AppendContainers { .. }
                 | Op::InsertArticleBefore { .. }
+                | Op::AppendTable { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -397,6 +414,7 @@ impl Op {
             | Op::AppendSupplArticles { text, .. }
             | Op::AppendContainers { text, .. }
             | Op::InsertArticleBefore { text, .. }
+            | Op::AppendTable { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }

@@ -100,6 +100,9 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 第四章第四節を削る | `DeleteContainers`（1 つの容器） |
 | 第百八十五条（見出しを含む。）中「A」を「B」に改める | 見出し（`ReplaceCaption`）と本文の両方（1 つの位置でも） |
 | 第九条の見出し中「A」の下に「B」を加え / 同条の見出し中「A」を削り | `ReplaceCaption`（追加は A→AB、削除は A→空） |
+| 第三十八条の表第七十条第二項の項中「A」を「B」に改め / 同条の表Xの項中「A」を削り | `ReplaceTableRow { at, row, from, to }`: 条・項の中の読替え表の、上欄が row の行（位置の列挙も） |
+| 同項に次の表を加える + 欄の行 | `AppendTable { at, text }`（欄は「第」で始まる行から行を組む） |
+| 別表第一及び別表第二を削る | `DeleteAppdx { tables }` |
 | 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |

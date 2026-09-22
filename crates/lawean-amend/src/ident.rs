@@ -931,6 +931,10 @@ impl Binder<'_> {
                         arts,
                     )?;
                 }
+                // 別表は id の世界に無い
+                Op::DeleteAppdx { tables } => {
+                    crate::apply::delete_appendices(&mut self.doc, tables)?;
+                }
                 // 附則の条は id の世界（本則）に無い。文書の側だけ
                 Op::InsertArticleAfter { after, text, suppl } if *suppl => {
                     crate::apply::insert_suppl_articles_after(&mut self.doc, after, text)?;
@@ -1314,6 +1318,8 @@ impl Binder<'_> {
                 | Op::AppendItem { at, .. }
                 | Op::ReplaceItems { at, .. }
                 | Op::ReplaceItemSet { at, .. }
+                | Op::ReplaceTableRow { at, .. }
+                | Op::AppendTable { at, .. }
                 | Op::RenumberSubitem { at, .. }
                 | Op::ShiftSubitems { at, .. }
                 | Op::InsertSubitemAfter { at, .. } => {
@@ -1347,6 +1353,18 @@ impl Binder<'_> {
                         }
                         Op::ReplaceItemSet { items, text, .. } => {
                             crate::apply::replace_item_set(p, items, text)?
+                        }
+                        Op::ReplaceTableRow { row, from, to, .. } => {
+                            crate::apply::replace_table_row(p, row, from, to, &inserted)?
+                        }
+                        Op::AppendTable { text, .. } => {
+                            let table = crate::apply::build_table(text);
+                            p.children
+                                .push(ParagraphChild::Raw(lawean_source::xml::Element {
+                                    name: "TableStruct".into(),
+                                    attrs: vec![],
+                                    children: vec![lawean_source::xml::Node::Element(table)],
+                                }));
                         }
                         Op::RenumberSubitem { from, to, .. } => crate::apply::renumber_subitem(
                             p,

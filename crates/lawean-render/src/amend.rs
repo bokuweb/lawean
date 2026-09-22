@@ -348,6 +348,20 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::ReplaceTableRow { at, row, from, to } if to.is_empty() => format!(
+            "{}の表{row}の項中「{from}」を{}",
+            loc_label(at),
+            end("削り", "削る")
+        ),
+        Op::ReplaceTableRow { at, row, from, to } => format!(
+            "{}の表{row}の項中「{from}」を「{to}」に{}",
+            loc_label(at),
+            end("改め", "改める")
+        ),
+        Op::AppendTable { at, .. } => {
+            format!("{}に次の表を{}", loc_label(at), end("加え", "加える"))
+        }
+        Op::DeleteAppdx { tables } => format!("{}を{}", tables.join("及び"), end("削り", "削る")),
         Op::RenumberSubitem { at, from, to } => {
             format!("{}{from}を{to}と{}", loc_label(at), end("し", "する"))
         }
@@ -556,6 +570,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::AppendSupplArticles { text, .. }
         | Op::AppendContainers { text, .. }
         | Op::InsertArticleBefore { text, .. }
+        | Op::AppendTable { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }

@@ -634,6 +634,34 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         return Ok(None);
     }
     // 位置を省いた続きは、直前の位置の列挙（「第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改める」）全部に当てる
+    // 条・項の中の表の行: 「第三十八条の表第七十条第二項の項中「A」を「B」に改め」（別表は上で）
+    static TROW: OnceLock<Regex> = OnceLock::new();
+    let trow = TROW.get_or_init(|| re(r"^(?P<loc>.+?)の表(?P<row>.+?)の項$"));
+    if let Some(c) = loc_part.and_then(|l| trow.captures(l)) {
+        let at = loc(&c["loc"], ante)?;
+        let row = c["row"].to_string();
+        let mk = |from: String, to: String| Op::ReplaceTableRow {
+            at: at.clone(),
+            row: row.clone(),
+            from,
+            to,
+        };
+        if let Some(r) = rest.strip_prefix("を") {
+            if r == "削り" || r == "削る" {
+                return Ok(Some(PhraseOps(
+                    phrases.into_iter().map(|f| mk(f, String::new())).collect(),
+                )));
+            }
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "に" | "に改め" | "に改める") {
+                    return Ok(Some(PhraseOps(
+                        phrases.into_iter().map(|f| mk(f, b.clone())).collect(),
+                    )));
+                }
+            }
+        }
+        return Ok(None);
+    }
     // 「第百八十五条（見出しを含む。）中「A」を「B」に改める」: 見出しも
     let (loc_part, with_caption) = match loc_part {
         Some(l) => match l.strip_suffix("（見出しを含む。）") {
@@ -932,6 +960,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}条を加え(?:る)?$"),
             ("append_suppl_arts", r"^附則に次の(?:見出し及び)?{N}条を加え(?:る)?$"),
+            ("append_table", r"^(?P<loc>.+?)に次の表を加え(?:る)?$"),
+            ("delete_appdx", r"^(?P<list>別表(?:第{N})?(?:(?:及び|、)別表(?:第{N})?)*)を削(?:り|る)$"),
             ("append_containers", r"^(?P<path>本則|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             ("insert_arts_before", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の{N}条を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
@@ -1048,6 +1078,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             {
                 // 「第五十四条の見出し並びに同条第一項及び第二項中」: 見出しは見出しの置換に
                 let mut rest_tokens: Vec<String> = Vec::new();
+                static TROW_LIST: OnceLock<Regex> = OnceLock::new();
+                let trow_list = TROW_LIST.get_or_init(|| re(r"^(?P<loc>.+?)の表(?P<row>.+?)の項$"));
                 // 「A」の下に「B」を加える は、字句の側では「A」を「AB」に改めるのと同じ
                 let (from, to) = if *name == "replace" {
                     (g("a"), g("b"))
@@ -1061,6 +1093,15 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 {
                     if tok == "目次" {
                         ops.push(Op::ReplaceToc {
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    } else if let Some(c) = trow_list.captures(tok) {
+                        // 「第三十八条の表第七十条第二項の項及び第五十一条第六項の表第七十条第二項の項中」
+                        let l = loc(&c["loc"], &mut ante)?;
+                        ops.push(Op::ReplaceTableRow {
+                            at: l,
+                            row: c["row"].to_string(),
                             from: from.clone(),
                             to: to.clone(),
                         });
@@ -1361,6 +1402,17 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     text: Vec::new(),
                 },
                 "append_suppl_arts" => Op::AppendSupplArticles { text: Vec::new() },
+                "append_table" => Op::AppendTable {
+                    at: loc(&g("loc"), &mut ante)?,
+                    text: Vec::new(),
+                },
+                "delete_appdx" => Op::DeleteAppdx {
+                    tables: g("list")
+                        .split("及び")
+                        .flat_map(|x| x.split('、'))
+                        .map(str::to_string)
+                        .collect(),
+                },
                 "append_containers" => Op::AppendContainers {
                     path: if g("path") == "本則" {
                         Vec::new()

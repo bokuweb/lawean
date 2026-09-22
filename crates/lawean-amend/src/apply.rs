@@ -341,6 +341,24 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                 insert_items_after(p, None, text)?;
             }
+            Op::ReplaceTableRow { at, row, from, to } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                replace_table_row(paragraph_mut(art, idx), row, from, to, &inserted)?;
+            }
+            Op::AppendTable { at, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let table = build_table(text);
+                paragraph_mut(art, idx)
+                    .children
+                    .push(ParagraphChild::Raw(Element {
+                        name: "TableStruct".into(),
+                        attrs: vec![],
+                        children: vec![Node::Element(table)],
+                    }));
+            }
+            Op::DeleteAppdx { tables } => delete_appendices(doc, tables)?,
             Op::ReplaceItemSet {
                 at, items, text, ..
             } => {
@@ -1927,6 +1945,104 @@ pub(crate) fn replace_appdx_row(
         return Ok(());
     }
     Err(ApplyError::BadContent(format!("{table}が無い")))
+}
+
+/// 「別表第一及び別表第二を削る」: 別表を（本文の並び `body_order` の枠ごと）消す
+pub(crate) fn delete_appendices(
+    doc: &mut LegalDocument,
+    tables: &[String],
+) -> Result<(), ApplyError> {
+    for t in tables {
+        let idx = doc
+            .appendices
+            .iter()
+            .position(|ap| {
+                let title = ap
+                    .children
+                    .iter()
+                    .find_map(|c| match c {
+                        Node::Element(x) if x.name.ends_with("Title") => Some(strip_ws(&x.text())),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                title == *t
+                    || title.starts_with(&format!("{t}（"))
+                    || title.starts_with(&format!("{t}\u{3000}"))
+            })
+            .ok_or_else(|| ApplyError::BadContent(format!("{t}が無い")))?;
+        doc.appendices.remove(idx);
+        doc.body_order
+            .retain(|s| !matches!(s, BodySlot::Appendix(i) if *i == idx));
+        for s in &mut doc.body_order {
+            if let BodySlot::Appendix(i) = s {
+                if *i > idx {
+                    *i -= 1;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 項の中の表（読替え表）の、上欄が `row` の行の字句を置き換える
+pub(crate) fn replace_table_row(
+    p: &mut Paragraph,
+    row: &str,
+    from: &str,
+    to: &str,
+    protect: &[String],
+) -> Result<(), ApplyError> {
+    fn all_rows<'a>(e: &'a mut Element, out: &mut Vec<&'a mut Element>) {
+        if e.name == "TableRow" {
+            out.push(e);
+            return;
+        }
+        for c in &mut e.children {
+            if let Node::Element(x) = c {
+                all_rows(x, out);
+            }
+        }
+    }
+    fn replace_in(e: &mut Element, from: &str, to: &str, protect: &[String]) -> usize {
+        let mut n = 0;
+        for c in &mut e.children {
+            match c {
+                Node::Text(t) => {
+                    let (nt, k) = replace_protected(t, from, to, protect);
+                    n += k;
+                    *t = nt;
+                }
+                Node::Element(x) => n += replace_in(x, from, to, protect),
+            }
+        }
+        n
+    }
+    let key = strip_ws(row);
+    let mut all: Vec<&mut Element> = Vec::new();
+    for c in &mut p.children {
+        if let ParagraphChild::Raw(e) = c {
+            all_rows(e, &mut all);
+        }
+    }
+    let hit = all.into_iter().find(|r| {
+        r.children
+            .iter()
+            .find_map(|c| match c {
+                Node::Element(x) if x.name == "TableColumn" => Some(strip_ws(&x.text())),
+                _ => None,
+            })
+            .is_some_and(|t| t == key)
+    });
+    let Some(r) = hit else {
+        return Err(ApplyError::BadContent(format!("表に「{row}」の項が無い")));
+    };
+    if replace_in(r, from, to, protect) == 0 {
+        return Err(ApplyError::PhraseNotFound {
+            at: format!("表{row}の項"),
+            phrase: from.to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// 「第三章の章名を削る」: 題名を消す。番号は残す（続く「第三章第二節から第五節までを削る」が指す）。
