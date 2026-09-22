@@ -366,6 +366,12 @@ fn segment(op: &Op, last: bool) -> String {
             to_kanji(count_items(text)),
             end("加え", "加える")
         ),
+        Op::InsertItemFirst { at, text } => format!(
+            "{}に第一号として次の{}号を{}",
+            loc_label(at),
+            to_kanji(count_items(text)),
+            end("加え", "加える")
+        ),
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
@@ -623,6 +629,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertItemAfter { text, .. }
         | Op::InsertItemBefore { text, .. }
         | Op::AppendItem { text, .. }
+        | Op::InsertItemFirst { text, .. }
         | Op::ReplaceItems { text, .. }
         | Op::ReplaceItemSet { text, .. }
         | Op::InsertSubitemAfter { text, .. }
