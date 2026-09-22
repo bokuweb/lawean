@@ -54,10 +54,16 @@ fn count_items(text: &[String]) -> u32 {
         .max(1) as u32
 }
 
-fn path_label(path: &[(lawean_source::ContainerKind, u32)]) -> String {
-    path.iter()
-        .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
-        .collect()
+/// 「第二章の二」（番号は「2_2」）
+fn cont_label(k: lawean_source::ContainerKind, n: &str) -> String {
+    let mut parts = n.split('_').filter_map(|x| x.parse::<u32>().ok());
+    let head = parts.next().map(to_kanji).unwrap_or_default();
+    let tail: String = parts.map(|b| format!("の{}", to_kanji(b))).collect();
+    format!("第{head}{}{tail}", kind_label(k))
+}
+
+fn path_label(path: &[(lawean_source::ContainerKind, String)]) -> String {
+    path.iter().map(|(k, n)| cont_label(*k, n)).collect()
 }
 
 fn kind_label(k: lawean_source::ContainerKind) -> &'static str {
@@ -102,6 +108,9 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        Op::ReplaceToc { from, to } if to.is_empty() => {
+            format!("目次中「{from}」を{}", end("削り", "削る"))
+        }
         Op::ReplaceToc { from, to } => {
             format!("目次中「{from}」を「{to}」に{}", end("改め", "改める"))
         }
@@ -161,14 +170,14 @@ fn segment(op: &Op, last: bool) -> String {
         Op::RenumberContainer { path, to } => format!(
             "{}を第{}{}と{}",
             path_label(path),
-            to_kanji(*to),
+            item_kanji(to),
             path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章"),
             end("し", "する")
         ),
         Op::AppendArticle { path, text } => format!(
             "{}に次の{}条を{}",
             path.iter()
-                .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
+                .map(|(k, n)| cont_label(*k, n))
                 .collect::<String>(),
             to_kanji(
                 text.iter()
@@ -198,6 +207,15 @@ fn segment(op: &Op, last: bool) -> String {
             to_kanji(*to),
             kind_label(*kind),
             end("削り", "削る")
+        ),
+        Op::ReplaceContainers { paths, .. } => format!(
+            "{}を次のように{}",
+            paths
+                .iter()
+                .map(|p| path_label(p))
+                .collect::<Vec<_>>()
+                .join("及び"),
+            end("改め", "改める")
         ),
         Op::ReplaceArticles { articles, .. } => format!(
             "{}を次のように{}",
@@ -232,6 +250,13 @@ fn segment(op: &Op, last: bool) -> String {
             } else {
                 end("上げ", "上げる")
             }
+        ),
+        Op::InsertItemBefore { at, before, text } => format!(
+            "{}第{}号の前に次の{}号を{}",
+            loc_label(at),
+            item_kanji(before),
+            to_kanji(count_items(text)),
+            end("加え", "加える")
         ),
         Op::InsertItemAfter { at, after, text } => format!(
             "{}第{}号の次に次の{}号を{}",
@@ -333,12 +358,16 @@ fn segment(op: &Op, last: bool) -> String {
             }
         ),
         Op::ReplaceContainerTitle { path, from, to } => format!(
-            "{}の{}名中「{from}」を「{to}」に{}",
+            "{}の{}名中「{from}」を{}",
             path.iter()
-                .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
+                .map(|(k, n)| cont_label(*k, n))
                 .collect::<String>(),
             path.last().map(|(k, _)| kind_label(*k)).unwrap_or(""),
-            end("改め", "改める")
+            if to.is_empty() {
+                end("削り", "削る").to_string()
+            } else {
+                format!("「{to}」に{}", end("改め", "改める"))
+            }
         ),
         Op::ReplaceCaption { article, from, to } => format!(
             "{}の見出し中「{from}」を「{to}」に{}",
@@ -378,11 +407,13 @@ fn content_of(op: &Op) -> &[String] {
         | Op::ReplaceParagraph { text, .. }
         | Op::ReplaceItem { text, .. }
         | Op::InsertItemAfter { text, .. }
+        | Op::InsertItemBefore { text, .. }
         | Op::AppendItem { text, .. }
         | Op::ReplaceItems { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetContainerTitle { text, .. }
         | Op::ReplaceArticles { text, .. }
+        | Op::ReplaceContainers { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text,
         _ => &[],
     }
@@ -393,7 +424,8 @@ pub fn render_instruction(ins: &Instruction) -> String {
     let n = ins.ops.len();
     let mut s = String::from("\u{3000}\u{3000}");
     let phrase_loc = |op: &Op| match op {
-        Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(at.clone()),
+        Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(loc_label(at)),
+        Op::ReplaceToc { .. } => Some("目次".to_string()),
         _ => None,
     };
     for (i, op) in ins.ops.iter().enumerate() {

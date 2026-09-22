@@ -23,7 +23,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
 | [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を再現。可換性（`applyUnit_comm`）で順序は消えるが正しさは出ない → **参照を id で持つ**（`Refs.lean` / `lawean-amend::body`）と描き直しが e-Gov の本文と一致する（Lean で実データ） | 実装 |
-| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 20 件（通る）と、失敗例 15 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
+| [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 22 件（通る）と、失敗例 15 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
 | [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。実例のケース集と、[発射台を選んで改正法を書いて検査する](docs/playground/draft.html) 画面（Z3 もブラウザ内）。公開: https://bokuweb.github.io/lawean/ | — |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
@@ -42,7 +42,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [lawean-nlp](crates/lawean-nlp) | 層 1.5: 文の主体・客体・行為を GiNZA の係り受け（jewel、Python 不要）から候補で出す。括弧書きを落として解析し位置を戻す、主題の引き継ぎ、号の断片。モデル無しなら層 1 だけで動く |
 | [lawean-extract](crates/lawean-extract) | 層 1 の規則ベース抽出（[ADR-0008](docs/adr/0008-extraction-strategy.md)）。文末の効果種別（20 種）、条件節、「〜の規定にかかわらず」→ overrides、「契約の条件にかかわらず」→ Contract、譲歩、参照を文ごとに認識し、条件の中身が `Unknown` の骨組み Rule を作る。借地借家法の平叙文 211 のうち 97% を分類。**時間表現**（期間・時点・施行期日）も規則で取り（借地借家法 100%、公職選挙法 87%、民法 89%）、附則第一条から施行日の許容区間を暦で出す（`suppl`）。罰則の三つ組（`penalty`）。出力は**原文根拠付きの候補**（`candidate`、elsa の契約と同じ項目）で、規則作成に使っていない法令での適合率・再現率を `fixtures/gold` で測る（[11](docs/11-layer2.md) §4） |
 | [lawean-llm](crates/lawean-llm) | 層 2 の Claude 版（[docs/06](docs/06-llm-extraction.md)）。**中核からは外した**（[ADR-0009](docs/adr/0009-layer2-decisions-via-grande.md): 判定は grande で行う）。残余・レビュー補助用に残す。実 API は未実行 |
-| [lawean-amend](crates/lawean-amend) | **改正**（[docs/08](docs/08-amendment.md)）。改め文パーサ（閉じた語彙 34 種。条ずれ・章節の挿入と繰り下げ・見出しと節名・項と文の差し替えを含む）、Source IR への apply、発射台・順序・ハネ（項と条）・連番の検査。実際の改正 20 件（11 法令。2025 年の区分所有法大改正 396 項と建替え円滑化法 766 項を含む）で e-Gov の改正後リビジョンと一致。`ident`: 番号ベースの `Op` を発射台の stable_id に束縛して identity patch にする（繰り下げは消え、字句置換は本文全体の `replace` に、全部改正は `delete` + `insertAfter`）。Lean の `Ident.applyUnit` の写しで前検査 |
+| [lawean-amend](crates/lawean-amend) | **改正**（[docs/08](docs/08-amendment.md)）。改め文パーサ（閉じた語彙 37 種。条ずれ・章節の挿入と繰り下げ・見出しと節名・項と文の差し替えを含む）、Source IR への apply、発射台・順序・ハネ（項と条）・連番の検査。実際の改正 22 件（13 法令。令和7年法律第47号の区分所有法・建替え円滑化法・被災マンション法・管理適正化法の 4 法令分を含む）で e-Gov の改正後リビジョンと一致。`ident`: 番号ベースの `Op` を発射台の stable_id に束縛して identity patch にする（繰り下げは消え、字句置換は本文全体の `replace` に、全部改正は `delete` + `insertAfter`）。Lean の `Ident.applyUnit` の写しで前検査 |
 | [lean/](lean/) | patch 代数（`Revision` / `Op` / `applyOp`）とメタ定理。触る条が違う 2 操作の可換性 `applyOp_comm` を証明。**identity patch**（[ADR-0013](docs/adr/0013-identity-patches.md)）: 対象を stable_id で指し、独立な 2 改正単位の可換性 `applyUnit_comm`、衝突は値、依存は半順序（`scheduleOk`）。**`Consolidate.lean`**: 実データ（`Data/`）を `Ident.applyUnit` に通し、e-Gov の改正後リビジョンとの一致・依存・独立・衝突を `native_decide` で検査 |
 | [lawean-lean](crates/lawean-lean) | **Lean への出力**（[ADR-0011](docs/adr/0011-lean-as-reference-for-consolidation.md)、[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）。e-Gov のリビジョンを `def rev_… : Revision`、発射台に束縛した改め文を `def unit_… : AmendUnit`、Semantic IR を層化して `def sem_… : Model` として `lean/Lawean/Data/` に出す。番号 → stable_id の束縛は `lawean-amend::ident::bind` |
 | [lawean-space](crates/lawean-space) | **他法令への波及**（[docs/09](docs/09-cross-law-impact.md)）。法令空間、法令をまたぐ参照の解決、改正による条・項の移動と本文変化の追跡、参照切れ・ずれ・意味変化・時期不整合の報告、上書きの循環検出。テスト計画 1〜5 が実データ + 自作改正案で通る |
@@ -89,7 +89,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
 13. ~~identity patch~~（[ADR-0013](docs/adr/0013-identity-patches.md)）: 割り込み（未確定施行日・整備法）で発射台がずれても同じ項に当たるよう、改正単位を stable_id で書く。独立なら可換を Lean で証明。Rust の束縛 `ident::bind` も実データ 3 件で通る
 14. **法令の意味を Lean に**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)、[docs/10](docs/10-lean-semantics.md)）← いまここ。~~M1: `Sem.lean` の評価器と第3条~~ → ~~M2: 手書き 8 条と 07 の 6 性質を Lean で~~（層化が IR のバグを 1 件検出）→ ~~M3: 改正 × 意味の frame 定理を令3-37 で~~（5 性質を再証明なしで移送）→ M4: Lean → C（Rust の写しを消す）
 15. **層 2**（[docs/11](docs/11-layer2.md)）: 形態素解析 + 格助詞で候補 → grande で判定。docs/10 の M1〜M3 と並行、M5 で合流
-16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 20 件が通り、失敗例 15 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
+16. ~~検証ケースと playground~~（[docs/12](docs/12-cases.md)）: 実際の改正 22 件が通り、失敗例 15 件が指定した検査だけで落ちる。`lawean-check` + WASM playground
     - ~~ハネの手当てを生成する~~（ADR-0012）: Rust が正しい置換を生成して改め文と突き合わせ、足りなければ改め文の形で提案。Lean `Refs.lean` で「描画が変わるのは参照先の番号が動いたときだけ」（完全性）を証明、令3-37 の実データで生成 = 実際の置換
     - ~~他法令への波及を Lean に~~（docs/09）: `Space.lean` の法令空間と `impact` の分類（健全性・完全性）。施行令の参照のずれと高齢者居住安定確保法の参照切れを実データで
     - ~~M4: Lean → C → Rust / WASM~~（[ADR-0017](docs/adr/0017-lean-to-c-is-the-runtime.md)）: `lawean-leanrt` が証明した `applyUnit` / `checkUnit` を C 経由で呼び `lawean-check` の本線に。playground もブラウザ内で Lean の WASM（Emscripten）が溶け込みを計算する。Rust の写しは代役

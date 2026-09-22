@@ -207,6 +207,20 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
             let (a, b) = (c["a"].to_string(), c["b"].to_string());
             let la = loc(&a, ante)?;
             let lb = loc(&b, ante)?;
+            // 「第一号から第四号まで」: 号の範囲（同じ項の中）
+            if let (Some(ia), Some(ib)) = (&la.item, &lb.item) {
+                let (p, q) = (
+                    ia.parse::<u32>().unwrap_or(0),
+                    ib.parse::<u32>().unwrap_or(0),
+                );
+                for n in p..=q {
+                    out.push(Loc {
+                        item: Some(n.to_string()),
+                        ..la.clone()
+                    });
+                }
+                continue;
+            }
             match (la.paragraph.clone(), lb.paragraph.clone()) {
                 (Some(ParaRef::Num(p)), Some(ParaRef::Num(q))) => {
                     for n in p..=q {
@@ -243,7 +257,7 @@ struct Ante {
     /// 直前の位置が目次（「目次中「A」を「B」に、「C」を「D」に改める」の続き）
     toc: bool,
     /// 直前の章（「第一章中第六節を第八節とし、第五節の次に次の二節を加える」の「第五節」の外側）
-    container: Vec<(lawean_source::ContainerKind, u32)>,
+    container: Vec<(lawean_source::ContainerKind, String)>,
     /// 直前の位置の文（「同項ただし書中「A」を「B」に、「C」を「D」に改め」の続きはただし書の中）
     part: Option<SentencePart>,
     /// 直前の位置の列挙（「第九十四条第一項及び第三項中」）。位置を省いた続きはこの全部に当てる
@@ -409,8 +423,35 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         rest = r2;
     }
     let a = phrases[0].clone();
+    // 目次の字句: 「目次中「A」を削り」「目次中「A」を「B」に、「C」を「D」に改め」
     if loc_part == Some("目次") || (loc_part.is_none() && ante.toc) {
-        // 目次は正規表現の規則に任せる（続きの「「A」を「B」に」も）
+        ante.toc = true;
+        if let Some(r) = rest.strip_prefix("を") {
+            if r == "削り" || r == "削る" {
+                return Ok(Some(PhraseOps(
+                    phrases
+                        .into_iter()
+                        .map(|from| Op::ReplaceToc {
+                            from,
+                            to: String::new(),
+                        })
+                        .collect(),
+                )));
+            }
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "に" | "に改め" | "に改める") {
+                    return Ok(Some(PhraseOps(
+                        phrases
+                            .into_iter()
+                            .map(|from| Op::ReplaceToc {
+                                from,
+                                to: b.clone(),
+                            })
+                            .collect(),
+                    )));
+                }
+            }
+        }
         return Ok(None);
     }
     // 位置を省いた続きは、直前の位置の列挙（「第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改める」）全部に当てる
@@ -568,9 +609,9 @@ fn parse_phrase_op_loose(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>
 }
 
 /// 「第一章第八節」→ [(章, 1), (節, 8)]
-fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, u32)> {
+fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, String)> {
     static P: OnceLock<Regex> = OnceLock::new();
-    let pr = P.get_or_init(|| re(r"第({N})(編|章|節|款|目)"));
+    let pr = P.get_or_init(|| re(r"第({N})(編|章|節|款|目)((?:の{N})*)"));
     pr.captures_iter(s)
         .map(|c| {
             let kind = match &c[2] {
@@ -580,9 +621,19 @@ fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, u32)> {
                 "款" => lawean_source::ContainerKind::Subsection,
                 _ => lawean_source::ContainerKind::Division,
             };
-            (kind, kanji_to_u32(&c[1]).unwrap_or(0))
+            (kind, container_num(&c[1], &c[3]))
         })
         .collect()
+}
+
+/// 「二」「の二」→「2_2」（第二章の二）
+fn container_num(n: &str, branch: &str) -> String {
+    let mut s = kanji_to_u32(n).unwrap_or(0).to_string();
+    for b in branch.split('の').filter(|x| !x.is_empty()) {
+        s.push('_');
+        s.push_str(&kanji_to_u32(b).unwrap_or(0).to_string());
+    }
+    s
 }
 
 /// 「第一章中第八節」の「第一章」を先行詞に取り、「第六節」だけの位置には直前の章を補う
@@ -590,7 +641,7 @@ fn container_path_with_ante(
     pre: &str,
     path: &str,
     ante: &mut Ante,
-) -> Vec<(lawean_source::ContainerKind, u32)> {
+) -> Vec<(lawean_source::ContainerKind, String)> {
     fn depth(k: lawean_source::ContainerKind) -> u8 {
         use lawean_source::ContainerKind::*;
         match k {
@@ -641,7 +692,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("toc", r"^目次中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しは「中」の規則より先に（「第四十二条の見出し中「A」を「B」に改め」）
             ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
-            ("container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目))+)の(?:編|章|節|款|目)名中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名中「(?P<a>.+?)」を(?:「(?P<b>.+?)」に(?:改め(?:る)?)?|削(?:り|る))$"),
             ("caption_set", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出しを「(?P<a>.+?)」に(?:改め(?:る)?)?$"),
             // 「改める」「加える」が付かない形は、同じ文の中で「、」で連なる列挙の途中（「A」を「B」に、「C」を「D」に改める）
             ("replace", r"^(?P<loc>.+?)中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
@@ -652,7 +703,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             // 号ずれ（項の中）。「第N項中第A号を第B号とし」「第A号を同条第B号とし」「同号の次に次のK号を加える」
             ("renumber_item", r"^(?P<loc>.+?中|同条|同項|第{N}条(?:の{N})*(?:第{N}項)?)?(?:第(?P<p>{N})号(?P<pb>(?:の{N})*)|(?P<same>同号))を(?:同条|同項)?第(?P<q>{N})号(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_items", r"^(?P<loc>.+?中|同条|同項|第{N}条(?:の{N})*(?:第{N}項)?)?第(?P<p>{N})号から第(?P<q>{N})号までを(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
-            ("insert_item_after", r"^(?P<loc>.+?)の次に次の{N}号を加え(?:る)?$"),
+            ("insert_item_after", r"^(?P<loc>.+?)の(?P<side>次|前)に次の{N}号を加え(?:る)?$"),
             ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号)を加え(?:る)?$"),
             // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
             ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
@@ -662,20 +713,20 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
-            ("renumber_art", r"^(?:(?:第{N}(?:編|章|節|款|目))+中)?(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_art", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
-            ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目))+)に次の{N}条を加え(?:る)?$"),
+            ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}条を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
-            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
+            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
-            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)と(?:し|する)$"),
+            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
-            ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目))+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
+            ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
-            ("insert_arts_after", r"^(?:(?:第{N}(?:編|章|節|款|目))+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
+            ("insert_arts_after", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
             ("append_sentence", r"^(?P<loc>.+?)に(?:後段として次のように|次のただし書を)加え(?:る)?$"),
         ]
         .iter()
@@ -912,10 +963,18 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         .item
                         .clone()
                         .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?;
-                    Op::InsertItemAfter {
-                        at: Loc { item: None, ..l },
-                        after,
-                        text: Vec::new(),
+                    if g("side") == "前" {
+                        Op::InsertItemBefore {
+                            at: Loc { item: None, ..l },
+                            before: after,
+                            text: Vec::new(),
+                        }
+                    } else {
+                        Op::InsertItemAfter {
+                            at: Loc { item: None, ..l },
+                            after,
+                            text: Vec::new(),
+                        }
                     }
                 }
                 "append_item" | "append_subitems" => Op::AppendItem {
@@ -1038,11 +1097,12 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     let path = container_path_with_ante(&g("pre"), &g("path"), &mut ante);
                     // 「同節」は番号を変えた後の節
                     let mut after = path.clone();
+                    let to = container_num(&g("q"), &g("qb"));
                     if let Some(last) = after.last_mut() {
-                        last.1 = num("q");
+                        last.1 = to.clone();
                     }
                     ante.container = after;
-                    Op::RenumberContainer { path, to: num("q") }
+                    Op::RenumberContainer { path, to }
                 }
                 "replace_whole" => {
                     // 「第九条第二項及び第三項を次のように改める」: 位置の列挙は最初の項に付け、内容の番号で各項に当てる
@@ -1072,6 +1132,18 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     } else if let Some(base) = l.strip_suffix("各号") {
                         Op::ReplaceItems {
                             at: loc(base, &mut ante)?,
+                            text: Vec::new(),
+                        }
+                    } else if l.ends_with(['章', '節', '款', '編', '目']) && l.starts_with('第')
+                    {
+                        // 「第四章及び第五章を次のように改める」
+                        let paths = l
+                            .split("及び")
+                            .flat_map(|x| x.split('、'))
+                            .map(container_path)
+                            .collect();
+                        Op::ReplaceContainers {
+                            paths,
                             text: Vec::new(),
                         }
                     } else if l.contains("及び") && !l.contains('項') && l.ends_with('条') {
@@ -1121,7 +1193,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         .iter()
                         .any(|t| t.ends_with('名') || crange.is_match(t) || t.contains("まで"));
                     if structural {
-                        let mut last_container: Vec<(lawean_source::ContainerKind, u32)> =
+                        let mut last_container: Vec<(lawean_source::ContainerKind, String)> =
                             Vec::new();
                         for t in tokens {
                             if let Some(base) = t
@@ -1248,7 +1320,7 @@ mod tests {
         assert_eq!(
             parse_instruction("第四章に次の一条を加える。").unwrap(),
             [Op::AppendArticle {
-                path: vec![(lawean_source::ContainerKind::Chapter, 4)],
+                path: vec![(lawean_source::ContainerKind::Chapter, "4".to_string())],
                 text: vec![]
             }]
         );

@@ -475,3 +475,37 @@ fn appending_a_paragraph_to_a_single_paragraph_article_advises_refinement() {
         .iter()
         .any(|c| c.text == "前条" && c.fix.as_deref() == Some("前条第一項") && c.handled));
 }
+
+/// 令和7年法律第47号 第2条: 被災区分所有建物の再建等に関する特別措置法（大部分を削り、区分所有法の新しい章に委ねる）。
+/// テストを先に書く（test first）: 通るまで改め文の語彙を足す
+#[test]
+fn reiwa7_act47_art2_hisai_mansion_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/507AC0000000047_art2.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("407AC0000000043_20250530_507AC0000000047"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("407AC0000000043_20260401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}
+
+/// 同 第4条（第2号施行日 2025-11-28）→ 第5条（2026-04-01）: マンションの管理の適正化の推進に関する法律。
+/// 発射台は令4-68 施行後の 2025-06-01 版。2 段で当てて、各段が e-Gov の版と一致する
+#[test]
+fn reiwa7_act47_art4_then_art5_kanri_tekiseika_reproduce_egov_revisions() {
+    let u4 = parse_units(&fixture("amendments/507AC0000000047_art4.txt")).unwrap();
+    let u5 = parse_units(&fixture("amendments/507AC0000000047_art5.txt")).unwrap();
+    let mid = apply_unit(
+        &revision("412AC1000000149_20250601_504AC0000000068"),
+        &u4[0],
+        "stage2",
+    )
+    .unwrap();
+    assert_same_main(&mid, &revision("412AC1000000149_20251128_507AC0000000047"));
+    let got = apply_unit(&mid, &u5[0], "main").unwrap();
+    assert_same_main(&got, &revision("412AC1000000149_20260401_507AC0000000047"));
+    assert!(lawean_amend::numbering::check_document(&got).is_empty());
+}

@@ -55,32 +55,32 @@ pub enum Op {
     },
     /// 「第N章に次の一条を加える」「第一章第八節に次の七条を加える」。`path` は外側から (章/節/款/目, 番号)
     AppendArticle {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         text: Vec<String>,
     },
     /// 「同項後段を削る」「同項ただし書を削る」
     DeleteSentencePart { at: Loc, part: SentencePart },
     /// 「第一章第八節の節名中「A」を「B」に改める」「第N章の章名中…」。`path` は外側から (章/節/款/目, 番号)
     ReplaceContainerTitle {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         from: String,
         to: String,
     },
     /// 「第N章の次に次の一章を加える」「第一章中第五節の次に次の二節を加える」+ 内容
     /// （「第M章　題名」「第一節　…」「（見出し）」「第K条　本文」…）。`path` は外側から (章/節/款/目, 番号)
     InsertContainersAfter {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         text: Vec<String>,
     },
     /// 「同節の前に次の一節を加える」+ 内容
     InsertContainersBefore {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         text: Vec<String>,
     },
-    /// 「第N章を第M章とする」「第一章中第八節を第十節とする」
+    /// 「第N章を第M章とする」「第一章中第八節を第十節とする」。番号は「2」「2_2」（第二章の二）
     RenumberContainer {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
-        to: u32,
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        to: String,
     },
     /// 「第N条の次に次の一条を加える」
     InsertArticleAfter {
@@ -102,11 +102,11 @@ pub enum Op {
     SetTitle { text: Vec<String> },
     /// 「第三章の章名を削る」: 題名の無くなった章は前の章に併合される（中の条は前の章の末尾に）
     DeleteContainerTitle {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
     },
     /// 「第三章第二節から第五節までを削る」
     DeleteContainers {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         kind: lawean_source::ContainerKind,
         from: u32,
         to: u32,
@@ -116,9 +116,14 @@ pub enum Op {
         articles: Vec<ArticleNum>,
         text: Vec<String>,
     },
+    /// 「第四章及び第五章を次のように改める」+ 章の内容
+    ReplaceContainers {
+        paths: Vec<Vec<(lawean_source::ContainerKind, String)>>,
+        text: Vec<String>,
+    },
     /// 「第二章の章名を次のように改める」+「第二章　題名」の行
     SetContainerTitle {
-        path: Vec<(lawean_source::ContainerKind, u32)>,
+        path: Vec<(lawean_source::ContainerKind, String)>,
         text: Vec<String>,
     },
     /// 「同項中第二十一号を第三十七号とし」「第四号を同条第七号とし」（`at` は条・項）。号の番号は「3」「3_2」
@@ -134,6 +139,12 @@ pub enum Op {
     InsertItemAfter {
         at: Loc,
         after: String,
+        text: Vec<String>,
+    },
+    /// 「同号の前に次の一号を加える」
+    InsertItemBefore {
+        at: Loc,
+        before: String,
         text: Vec<String>,
     },
     /// 「同項に次の一号を加える」
@@ -201,7 +212,8 @@ impl Op {
             | Op::SetTitle { .. }
             | Op::SetContainerTitle { .. }
             | Op::DeleteContainerTitle { .. }
-            | Op::DeleteContainers { .. } => None,
+            | Op::DeleteContainers { .. }
+            | Op::ReplaceContainers { .. } => None,
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
@@ -223,6 +235,7 @@ impl Op {
             | Op::RenumberItem { at, .. }
             | Op::ShiftItems { at, .. }
             | Op::InsertItemAfter { at, .. }
+            | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
             | Op::ReplaceItems { at, .. } => Some(&at.article),
         }
@@ -243,11 +256,13 @@ impl Op {
                 | Op::ReplaceParagraph { .. }
                 | Op::ReplaceItem { .. }
                 | Op::InsertItemAfter { .. }
+                | Op::InsertItemBefore { .. }
                 | Op::AppendItem { .. }
                 | Op::ReplaceItems { .. }
                 | Op::SetTitle { .. }
                 | Op::SetContainerTitle { .. }
                 | Op::ReplaceArticles { .. }
+                | Op::ReplaceContainers { .. }
                 | Op::ReplaceSentencePart { .. }
         )
     }
@@ -265,11 +280,13 @@ impl Op {
             | Op::ReplaceParagraph { text, .. }
             | Op::ReplaceItem { text, .. }
             | Op::InsertItemAfter { text, .. }
+            | Op::InsertItemBefore { text, .. }
             | Op::AppendItem { text, .. }
             | Op::ReplaceItems { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetContainerTitle { text, .. }
             | Op::ReplaceArticles { text, .. }
+            | Op::ReplaceContainers { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             _ => {}
         }

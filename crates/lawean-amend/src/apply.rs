@@ -155,7 +155,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let new = parse_containers(text)?;
                 insert_containers_at(doc, path, new, false)?;
             }
-            Op::RenumberContainer { path, to } => renumber_container(doc, path, *to)?,
+            Op::RenumberContainer { path, to } => renumber_container(doc, path, to)?,
             Op::InsertArticleAfter { after, text } => {
                 article_mut(doc, after)?;
                 let mut anchor = after.clone();
@@ -184,19 +184,11 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 to,
             } => delete_containers(doc, path, *kind, *from, *to)?,
             Op::ReplaceArticles { articles, text } => {
-                let a = parse_article(text)?;
-                let first = articles
-                    .first()
-                    .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
-                // 最初の条の位置に「削除」の条（範囲の番号）を置き、残りを取り除く
-                let art = article_mut(doc, first)?;
-                art.caption = a.caption;
-                art.title = a.title;
-                art.num = a.num;
-                art.children = a.children;
-                for n in &articles[1..] {
-                    remove_article(&mut doc.main_provision, n);
-                }
+                replace_articles(doc, articles, text)?;
+            }
+            Op::ReplaceContainers { paths, text } => {
+                let new = parse_containers(text)?;
+                replace_containers(doc, paths, new)?;
             }
             Op::ReplaceCaption { article, from, to } => {
                 let art = article_mut(doc, article)?;
@@ -281,6 +273,11 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                 insert_items_after(paragraph_mut(art, idx), Some(after), text)?;
+            }
+            Op::InsertItemBefore { at, before, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                insert_items_before(paragraph_mut(art, idx), before, text)?;
             }
             Op::AppendItem { at, text } => {
                 let art = article_mut(doc, &at.article)?;
@@ -448,11 +445,11 @@ pub(crate) fn article_mut<'a>(
 /// 「第一章第八節」のように外側から辿った容器
 pub(crate) fn container_mut<'a>(
     doc: &'a mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
 ) -> Result<&'a mut Container, ApplyError> {
     fn find<'a>(
         ps: &'a mut [Provision],
-        path: &[(ContainerKind, u32)],
+        path: &[(ContainerKind, String)],
     ) -> Option<&'a mut Container> {
         // 題名を消した（併合待ちの）容器と番号が重なることがあるので、題名のある方を先に探す
         if find_with(ps, path, true).is_some() {
@@ -462,14 +459,14 @@ pub(crate) fn container_mut<'a>(
     }
     fn find_with<'a>(
         ps: &'a mut [Provision],
-        path: &[(ContainerKind, u32)],
+        path: &[(ContainerKind, String)],
         titled_only: bool,
     ) -> Option<&'a mut Container> {
         let (kind, n) = path.first()?;
         for p in ps {
             if let Provision::Container(c) = p {
                 if c.kind == *kind
-                    && c.num.as_deref() == Some(&n.to_string())
+                    && c.num.as_deref() == Some(n.as_str())
                     && (!titled_only || c.title.is_some())
                 {
                     return if path.len() == 1 {
@@ -490,12 +487,25 @@ pub(crate) fn container_mut<'a>(
         .ok_or_else(|| ApplyError::BadContent(format!("{}が無い", container_label(path))))
 }
 
-pub(crate) fn container_label(path: &[(ContainerKind, u32)]) -> String {
+/// 「2_2」→「二章の二」の「二」「の二」
+fn container_num_label(n: &str) -> (String, String) {
+    let mut parts = n.split('_').filter_map(|x| x.parse::<u32>().ok());
+    let head = parts
+        .next()
+        .map(lawean_resolve::numeral::to_kanji)
+        .unwrap_or_else(|| n.to_string());
+    let tail: String = parts
+        .map(|b| format!("の{}", lawean_resolve::numeral::to_kanji(b)))
+        .collect();
+    (head, tail)
+}
+
+pub(crate) fn container_label(path: &[(ContainerKind, String)]) -> String {
     path.iter()
         .map(|(k, n)| {
+            let (head, tail) = container_num_label(n);
             format!(
-                "第{}{}",
-                lawean_resolve::numeral::to_kanji(*n),
+                "第{head}{}{tail}",
                 match k {
                     ContainerKind::Part => "編",
                     ContainerKind::Chapter => "章",
@@ -511,7 +521,7 @@ pub(crate) fn container_label(path: &[(ContainerKind, u32)]) -> String {
 /// 容器の題名の字句を改める
 pub(crate) fn replace_container_title(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
     from: &str,
     to: &str,
 ) -> Result<(), ApplyError> {
@@ -639,7 +649,22 @@ fn replace_protected(t: &str, from: &str, to: &str, protect: &[String]) -> (Stri
             guarded.push((i, i + p.len()));
         }
     }
-    let hits: Vec<usize> = t.match_indices(from).map(|(i, _)| i).collect();
+    // 「第五条の二」は「第五条の二十二」の頭には当たらない（数の途中で切らない）
+    let ends_with_numeral = from
+        .chars()
+        .last()
+        .is_some_and(|c| "一二三四五六七八九十百千".contains(c));
+    let hits: Vec<usize> = t
+        .match_indices(from)
+        .map(|(i, _)| i)
+        .filter(|i| {
+            !ends_with_numeral
+                || !t[i + from.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| "一二三四五六七八九十百千".contains(c))
+        })
+        .collect();
     let outside: Vec<usize> = hits
         .iter()
         .copied()
@@ -748,8 +773,9 @@ pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Resu
         for c in &mut e.children {
             match c {
                 Node::Text(t) => {
-                    n += t.matches(from).count();
-                    *t = t.replace(from, to);
+                    let (nt, c) = replace_protected(t, from, to, &[]);
+                    n += c;
+                    *t = nt;
                 }
                 Node::Element(x) => n += go(x, from, to),
             }
@@ -769,7 +795,7 @@ pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Resu
             if f.is_empty() || !flat.contains(&f) {
                 return Err(ApplyError::TocPhraseNotFound(from.into()));
             }
-            let new = flat.replace(&f, &t);
+            let (new, _) = replace_protected(&flat, &f, &t, &[]);
             doc.toc = Some(Element {
                 name: "TOC".into(),
                 attrs: vec![],
@@ -1129,6 +1155,26 @@ pub(crate) fn append_subitems(
     Ok(())
 }
 
+/// 「同号の前に次の一号を加える」
+pub(crate) fn insert_items_before(
+    p: &mut Paragraph,
+    before: &str,
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    let pos = p
+        .children
+        .iter()
+        .position(|c| matches!(c, ParagraphChild::Item(i) if i.num.as_deref() == Some(before)))
+        .ok_or_else(|| ApplyError::BadContent(format!("第{before}号が無い")))?;
+    let n_before = p.children.len();
+    insert_items_after(p, None, lines)?;
+    let added: Vec<ParagraphChild> = p.children.drain(n_before..).collect();
+    for (k, c) in added.into_iter().enumerate() {
+        p.children.insert(pos + k, c);
+    }
+    Ok(())
+}
+
 /// 「同項第N号を削る」
 pub(crate) fn delete_item(p: &mut Paragraph, num: &str) -> Result<(), ApplyError> {
     let pos = p
@@ -1308,16 +1354,25 @@ pub(crate) fn parse_article(lines: &[String]) -> Result<Article, ApplyError> {
 fn container_line(l: &str) -> Option<(ContainerKind, String, String)> {
     let (t, title) = l.split_once('\u{3000}')?;
     let t = t.strip_prefix('第')?;
-    let kind = match t.chars().last()? {
+    // 「二章の二」: 種類の字で番号と枝番に分ける
+    let (kind_pos, kind_ch) = t.char_indices().find(|(_, c)| "編章節款目".contains(*c))?;
+    let kind = match kind_ch {
         '編' => ContainerKind::Part,
         '章' => ContainerKind::Chapter,
         '節' => ContainerKind::Section,
         '款' => ContainerKind::Subsection,
-        '目' => ContainerKind::Division,
-        _ => return None,
+        _ => ContainerKind::Division,
     };
-    let n = kanji_to_u32(&t[..t.len() - t.chars().last()?.len_utf8()])?;
-    Some((kind, n.to_string(), title.to_string()))
+    let n = kanji_to_u32(&t[..kind_pos])?;
+    let mut num = n.to_string();
+    let rest = &t[kind_pos + kind_ch.len_utf8()..];
+    if !rest.is_empty() {
+        for b in rest.split('の').filter(|x| !x.is_empty()) {
+            num.push('_');
+            num.push_str(&kanji_to_u32(b)?.to_string());
+        }
+    }
+    Some((kind, num, title.to_string()))
 }
 
 fn container_depth(k: ContainerKind) -> u8 {
@@ -1330,11 +1385,84 @@ fn container_depth(k: ContainerKind) -> u8 {
     }
 }
 
+/// 「第二条及び第三条を次のように改める」+ 条文（条ごと。「第百二条及び第百三条　削除」なら範囲の番号の 1 条）:
+/// 最初の条の位置に新しい条を並べ、残りの旧条を取り除く
+pub(crate) fn replace_articles(
+    doc: &mut LegalDocument,
+    articles: &[ArticleNum],
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let new = parse_articles(text)?;
+    let first = articles
+        .first()
+        .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
+    // 旧条は先に取り除く（最初の条だけ、その位置に新しい条を置く）
+    for n in &articles[1..] {
+        remove_article(&mut doc.main_provision, n);
+    }
+    let mut anchor = first.clone();
+    let mut first_done = false;
+    for a in new {
+        if !first_done {
+            let art = article_mut(doc, first)?;
+            art.caption = a.caption;
+            art.title = a.title;
+            art.num = a.num.clone();
+            art.children = a.children;
+            anchor = a.num;
+            first_done = true;
+        } else {
+            let num = a.num.clone();
+            if !insert_article_after(&mut doc.main_provision, &anchor, a) {
+                return Err(ApplyError::ArticleNotFound(anchor.to_num_string()));
+            }
+            anchor = num;
+        }
+    }
+    Ok(())
+}
+
+/// 「第四章及び第五章を次のように改める」+ 章の内容: 最初の章の位置に新しい章を並べ、旧章を取り除く
+pub(crate) fn replace_containers(
+    doc: &mut LegalDocument,
+    paths: &[Vec<(ContainerKind, String)>],
+    new: Vec<Container>,
+) -> Result<(), ApplyError> {
+    let first = paths
+        .first()
+        .ok_or_else(|| ApplyError::BadContent("章が無い".into()))?;
+    insert_containers_at(doc, first, new, false)?;
+    for path in paths {
+        let (kind, n) = path
+            .last()
+            .cloned()
+            .ok_or_else(|| ApplyError::BadContent("空の位置".into()))?;
+        // 番号が同じ新しい章と区別するため、古い方（後ろにある方）を取り除く
+        let list: &mut Vec<Provision> = if path.len() == 1 {
+            &mut doc.main_provision
+        } else {
+            &mut container_mut(doc, &path[..path.len() - 1])?.children
+        };
+        let positions: Vec<usize> = list
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| matches!(p, Provision::Container(c) if c.kind == kind && c.num.as_deref() == Some(n.as_str())))
+            .map(|(i, _)| i)
+            .collect();
+        if let Some(&last) = positions.last() {
+            if positions.len() > 1 {
+                list.remove(last);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 「第三章の章名を削る」: 題名を消す。番号は残す（続く「第三章第二節から第五節までを削る」が指す）。
 /// 単位の最後に `collapse_untitled` が、題名の無い容器を前の同じ種類の容器に併合する（無ければ親に広げる）
 pub(crate) fn delete_container_title(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
 ) -> Result<(), ApplyError> {
     let c = container_mut(doc, path)?;
     c.title = None;
@@ -1380,7 +1508,7 @@ pub fn collapse_untitled(ps: &mut Vec<Provision>) {
 /// 「第三章第二節から第五節までを削る」
 pub(crate) fn delete_containers(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
     kind: ContainerKind,
     from: u32,
     to: u32,
@@ -1401,7 +1529,10 @@ pub(crate) fn delete_containers(
             container_label(path),
             from,
             to,
-            container_label(&[(kind, 0)]).chars().last().unwrap_or('章')
+            container_label(&[(kind, "0".to_string())])
+                .chars()
+                .last()
+                .unwrap_or('章')
         )));
     }
     Ok(())
@@ -1410,8 +1541,8 @@ pub(crate) fn delete_containers(
 /// 容器の番号を変える（題名の「第N章」も）
 pub(crate) fn renumber_container(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
-    to: u32,
+    path: &[(ContainerKind, String)],
+    to: &str,
 ) -> Result<(), ApplyError> {
     let c = container_mut(doc, path)?;
     c.num = Some(to.to_string());
@@ -1420,7 +1551,7 @@ pub(crate) fn renumber_container(
         let rest = label.trim_start_matches(|ch: char| ch != '\u{3000}');
         *t = vec![Inline::Text(format!(
             "{}{rest}",
-            container_label(&[(c.kind, to)])
+            container_label(&[(c.kind, to.to_string())])
         ))];
     }
     Ok(())
@@ -1429,7 +1560,7 @@ pub(crate) fn renumber_container(
 /// `path` の容器の直後に容器を並べる
 pub(crate) fn insert_containers_after(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
     new: Vec<Container>,
 ) -> Result<(), ApplyError> {
     insert_containers_at(doc, path, new, true)
@@ -1438,13 +1569,14 @@ pub(crate) fn insert_containers_after(
 /// `path` の容器の直後（`after`）または直前に容器を並べる
 pub(crate) fn insert_containers_at(
     doc: &mut LegalDocument,
-    path: &[(ContainerKind, u32)],
+    path: &[(ContainerKind, String)],
     new: Vec<Container>,
     after: bool,
 ) -> Result<(), ApplyError> {
     let label = container_label(path);
-    let (last_kind, last_n) = *path
+    let (last_kind, last_n) = path
         .last()
+        .cloned()
         .ok_or_else(|| ApplyError::BadContent("空の位置".into()))?;
     // 親の子リストを探す（外側の指定があればその中で）
     let parent: &mut Vec<Provision> = if path.len() == 1 {
@@ -1452,12 +1584,12 @@ pub(crate) fn insert_containers_at(
     } else {
         &mut container_mut(doc, &path[..path.len() - 1])?.children
     };
-    fn find_list(
-        ps: &mut Vec<Provision>,
+    fn find_list<'a>(
+        ps: &'a mut Vec<Provision>,
         kind: ContainerKind,
-        n: u32,
-    ) -> Option<&mut Vec<Provision>> {
-        if ps.iter().any(|p| matches!(p, Provision::Container(c) if c.kind == kind && c.num.as_deref() == Some(&n.to_string()))) {
+        n: &str,
+    ) -> Option<&'a mut Vec<Provision>> {
+        if ps.iter().any(|p| matches!(p, Provision::Container(c) if c.kind == kind && c.num.as_deref() == Some(n))) {
             return Some(ps);
         }
         for p in ps.iter_mut() {
@@ -1469,11 +1601,11 @@ pub(crate) fn insert_containers_at(
         }
         None
     }
-    let list = find_list(parent, last_kind, last_n)
+    let list = find_list(parent, last_kind, &last_n)
         .ok_or_else(|| ApplyError::BadContent(format!("{label}が無い")))?;
     let pos = list
         .iter()
-        .position(|p| matches!(p, Provision::Container(c) if c.kind == last_kind && c.num.as_deref() == Some(&last_n.to_string())))
+        .position(|p| matches!(p, Provision::Container(c) if c.kind == last_kind && c.num.as_deref() == Some(last_n.as_str())))
         .unwrap();
     let base = if after { pos + 1 } else { pos };
     for (k, c) in new.into_iter().enumerate() {
@@ -1486,13 +1618,13 @@ pub(crate) fn insert_containers_at(
 /// いちばん外側の容器の列を返す
 pub(crate) fn parse_containers(lines: &[String]) -> Result<Vec<Container>, ApplyError> {
     fn new_container(kind: ContainerKind, num: String, title: String) -> Container {
-        let label = lawean_resolve::numeral::to_kanji(num.parse().unwrap_or(0));
+        let (head, tail) = container_num_label(&num);
         Container {
             stable_id: StableId(String::new()),
             kind,
             num: Some(num),
             title: Some(vec![Inline::Text(format!(
-                "第{label}{}\u{3000}{title}",
+                "第{head}{}{tail}\u{3000}{title}",
                 match kind {
                     ContainerKind::Part => "編",
                     ContainerKind::Chapter => "章",

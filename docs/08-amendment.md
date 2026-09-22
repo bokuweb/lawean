@@ -83,6 +83,11 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 同節の前に次の一節を加える | `InsertContainersBefore` |
 | 第N項中第A号を第B号とし / 第A号から第B号までをK号ずつ繰り下げ / 同号の次に次のK号を加える / 同項に次の各号を加える / 同項第三号を次のように改める / 同項各号を次のように改める / 同号に次のように加える（イロハ・(1)） / 同項第N号を削る | `RenumberItem` / `ShiftItems` / `InsertItemAfter` / `AppendItem` / `ReplaceItem` / `ReplaceItems` / `AppendItem`（号の下）/ `Delete`（号） |
 | 同項に次のただし書を加える / 同項ただし書を次のように改める（＋各号） | `AppendSentence` / `ReplaceSentencePart`（Proviso） |
+| 第二条及び第三条を次のように改める + 条文 / 第四章及び第五章を次のように改める + 章の内容 | `ReplaceArticles`（旧条を先に取り除き、最初の条の位置に並べる）/ `ReplaceContainers` |
+| 目次中「A」を削り / 第二章の章名中「A」を削る | `ReplaceToc` / `ReplaceContainerTitle` の `to` が空 |
+| 第二章の二（枝番の章・節）/ 同号の前に次の一号を加える / 第一号から第四号までの規定中 | 容器の番号は「2_2」（`String`）/ `InsertItemBefore` / 号の範囲の展開 |
+
+字句の一致は数の途中で切らない: 目次の「第五条の二」は「第五条の二十二」の頭に当たらない（`replace_protected`）。
 | 第九条第二項及び第三項を次のように改める + 「２　…」「３　…」 | `ReplaceParagraph`（内容の番号で各項に） |
 
 **同じ文の中の字句の操作は改正前の字句を指す**: 「「は、」の下に「…敷地利用権の持分…」を加え、「敷地利用権の持分」を「その敷地利用権の持分又は敷地共有持分等」に改め」で、加えた字句の中の「敷地利用権の持分」は置き換えない（`replace_protected`。元の字句に無く加えた字句の中にだけあるなら、それを指しているので置き換える）。

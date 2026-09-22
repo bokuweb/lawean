@@ -784,7 +784,7 @@ impl Binder<'_> {
                 }
                 // 章・節の番号だけ。id の世界では何もしない
                 Op::RenumberContainer { path, to } => {
-                    crate::apply::renumber_container(&mut self.doc, path, *to)?;
+                    crate::apply::renumber_container(&mut self.doc, path, to)?;
                 }
                 Op::InsertArticleAfter { after, text } => {
                     // 条の挿入 = 直前の条の最後の項の後ろに新しい項を並べる（「次の二条」なら順に）
@@ -910,11 +910,9 @@ impl Binder<'_> {
                     crate::apply::delete_containers(&mut self.doc, path, *kind, *from, *to)?;
                 }
                 Op::ReplaceArticles { articles, text } => {
-                    // 複数の条を 1 つの「削除」の条に: 最初の条の第1項に anchor して新しい項を置き、全部の旧 id を削る
-                    let a = parse_article(text)?;
-                    let first = articles
-                        .first()
-                        .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
+                    // 複数の条をまとめて改める（「削除」の 1 条にすることも）: 最初の条の第1項に anchor して
+                    // 新しい全部の項を順に置き、旧 id を全部削る
+                    let new = crate::apply::parse_articles(text)?;
                     let mut old_ids: Vec<String> = Vec::new();
                     for n in articles {
                         old_ids.extend(
@@ -927,35 +925,112 @@ impl Binder<'_> {
                         .first()
                         .cloned()
                         .ok_or_else(|| ApplyError::BadContent("項の無い条を改める".into()))?;
-                    let mut a = a;
-                    let mut children = Vec::new();
-                    for c in std::mem::take(&mut a.children) {
-                        let ArticleChild::Paragraph(p) = c else {
-                            children.push(c);
-                            continue;
-                        };
-                        let (id, p) = self.new_para(&a.num, p);
-                        self.ops.push(IdentOp::InsertAfter {
-                            anchor: anchor.clone(),
-                            new_id: id.clone(),
-                            art: a.num.to_num_string(),
-                            text: para_text(&p),
-                        });
-                        anchor = id;
-                        children.push(ArticleChild::Paragraph(p));
+                    let mut tagged: Vec<Article> = Vec::new();
+                    for mut a in new {
+                        let mut children = Vec::new();
+                        for c in std::mem::take(&mut a.children) {
+                            let ArticleChild::Paragraph(p) = c else {
+                                children.push(c);
+                                continue;
+                            };
+                            let (id, p) = self.new_para(&a.num, p);
+                            self.ops.push(IdentOp::InsertAfter {
+                                anchor: anchor.clone(),
+                                new_id: id.clone(),
+                                art: a.num.to_num_string(),
+                                text: para_text(&p),
+                            });
+                            anchor = id;
+                            children.push(ArticleChild::Paragraph(p));
+                        }
+                        a.children = children;
+                        tagged.push(a);
                     }
                     for id in old_ids {
                         self.ops.push(IdentOp::Delete { id });
                     }
-                    a.children = children;
-                    let art = article_mut(&mut self.doc, first)?;
-                    art.caption = a.caption;
-                    art.title = a.title;
-                    art.num = a.num;
-                    art.children = a.children;
+                    // 文書の側: 残りの旧条を先に取り除き、最初の条の位置に並べる（id の印は付けたまま）
+                    let first = articles.first().unwrap().clone();
                     for n in &articles[1..] {
                         remove_article(&mut self.doc.main_provision, n);
                     }
+                    let mut prev: Option<ArticleNum> = None;
+                    for a in tagged {
+                        let num = a.num.clone();
+                        match &prev {
+                            None => {
+                                let art = article_mut(&mut self.doc, &first)?;
+                                art.caption = a.caption;
+                                art.title = a.title;
+                                art.num = a.num.clone();
+                                art.children = a.children;
+                            }
+                            Some(p) => {
+                                if !insert_article_after(&mut self.doc.main_provision, p, a) {
+                                    return Err(ApplyError::ArticleNotFound(p.to_num_string()));
+                                }
+                            }
+                        }
+                        prev = Some(num);
+                    }
+                }
+                Op::ReplaceContainers { paths, text } => {
+                    // 章の差し替え = 新しい章の全部の項を最初の章の直前の項の後ろに並べ、旧章の項を全部削る
+                    let mut new = crate::apply::parse_containers(text)?;
+                    let first = paths
+                        .first()
+                        .ok_or_else(|| ApplyError::BadContent("章が無い".into()))?;
+                    let mut old_ids = Vec::new();
+                    for path in paths {
+                        let c = crate::apply::container_mut(&mut self.doc, path)?;
+                        collect_para_ids(&c.children, &mut old_ids);
+                    }
+                    let target = crate::apply::container_mut(&mut self.doc, first)?;
+                    let first_id = first_para_id_in(&target.children)
+                        .ok_or_else(|| ApplyError::BadContent("章に項が無い".into()))?;
+                    let all = from_document(&self.doc);
+                    let idx = all.nodes.iter().position(|n| n.id == first_id).unwrap_or(0);
+                    let mut anchor = if idx == 0 {
+                        return Err(ApplyError::BadContent("先頭の章は差し替えられない".into()));
+                    } else {
+                        all.nodes[idx - 1].id.clone()
+                    };
+                    fn walk(b: &mut Binder<'_>, ps: &mut [Provision], anchor: &mut String) {
+                        for p in ps {
+                            match p {
+                                Provision::Container(c) => walk(b, &mut c.children, anchor),
+                                Provision::Article(a) => {
+                                    let mut children = Vec::new();
+                                    for c in std::mem::take(&mut a.children) {
+                                        let ArticleChild::Paragraph(p) = c else {
+                                            children.push(c);
+                                            continue;
+                                        };
+                                        let (id, p) = b.new_para(&a.num, p);
+                                        b.ops.push(IdentOp::InsertAfter {
+                                            anchor: anchor.clone(),
+                                            new_id: id.clone(),
+                                            art: a.num.to_num_string(),
+                                            text: para_text(&p),
+                                        });
+                                        *anchor = id;
+                                        children.push(ArticleChild::Paragraph(p));
+                                    }
+                                    a.children = children;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    for c in &mut new {
+                        let mut inner = std::mem::take(&mut c.children);
+                        walk(self, &mut inner, &mut anchor);
+                        c.children = inner;
+                    }
+                    for id in old_ids {
+                        self.ops.push(IdentOp::Delete { id });
+                    }
+                    crate::apply::replace_containers(&mut self.doc, paths, new)?;
                 }
                 Op::ReplaceCaption { article, from, to } => {
                     let art = article_mut(&mut self.doc, article)?;
@@ -1040,6 +1115,7 @@ impl Binder<'_> {
                 | Op::RenumberItem { at, .. }
                 | Op::ShiftItems { at, .. }
                 | Op::InsertItemAfter { at, .. }
+                | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
                 | Op::ReplaceItems { at, .. } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
@@ -1058,6 +1134,9 @@ impl Binder<'_> {
                         }
                         Op::InsertItemAfter { after, text, .. } => {
                             crate::apply::insert_items_after(p, Some(after), text)?
+                        }
+                        Op::InsertItemBefore { before, text, .. } => {
+                            crate::apply::insert_items_before(p, before, text)?
                         }
                         Op::AppendItem { text, .. } => match &at.item {
                             Some(item) => crate::apply::append_subitems(p, item, text)?,
