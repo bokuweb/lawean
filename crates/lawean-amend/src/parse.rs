@@ -46,14 +46,32 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     let mut list: Option<(String, String, String)> = None;
     let mut units: Vec<AmendUnit> = Vec::new();
     let text = normalize_source_text(text);
-    for raw in text.lines() {
+    // 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は改め文ではない。
+    // 章の見出しは「次の一章を加える」の内容（章名の行）と字面が同じなので、次の行が見出し・条の頭なら読み飛ばす
+    static CAPTION: OnceLock<Regex> = OnceLock::new();
+    let caption = CAPTION.get_or_init(|| re(r"^（.+の一部改正）$"));
+    static AMENDING_CHAPTER: OnceLock<Regex> = OnceLock::new();
+    let amending_chapter = AMENDING_CHAPTER.get_or_init(|| re(r"^第{N}(?:編|章|節)　[^（）]+$"));
+    let lines: Vec<&str> = text.lines().collect();
+    for (li, raw) in lines.iter().enumerate() {
         let indent = raw
             .chars()
             .take_while(|c| *c == '\u{3000}' || *c == ' ')
             .count();
         let line = raw.trim_start_matches(['\u{3000}', ' ']).trim_end();
-        if line.is_empty() || line.starts_with('（') && indent == 0 {
+        if line.is_empty() || line.starts_with('（') && indent == 0 || caption.is_match(line) {
             continue;
+        }
+        if amending_chapter.is_match(line) {
+            let next = lines[li + 1..]
+                .iter()
+                .map(|l| l.trim_start_matches(['\u{3000}', ' ']).trim_end())
+                .find(|l| !l.is_empty());
+            if next.is_some_and(|n| {
+                caption.is_match(n) || header.is_match(n) || list_header.is_match(n)
+            }) {
+                continue;
+            }
         }
         if let Some(c) = list_header.captures(line) {
             list = Some((c[1].to_string(), c[2].to_string(), c[3].to_string()));
@@ -1535,5 +1553,30 @@ mod tests {
     fn quoted_commas_do_not_split() {
         let ops = parse_instruction("第一条中「甲、乙」を「丙」に改める。").unwrap();
         assert!(matches!(&ops[0], Op::Replace { from, .. } if from == "甲、乙"));
+    }
+
+    /// 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は読み飛ばす。
+    /// 「次の一章を加える」の内容の章名（同じ字面）は内容として残す
+    #[test]
+    fn captions_and_chapter_headings_of_the_amending_law_are_skipped() {
+        let t = "　　　第一章　総務省関係
+　（甲法の一部改正）
+第一条　甲法（昭和二十二年法律第一号）の一部を次のように改正する。
+　　第一条中「甲」を「乙」に改める。
+　　第三章の次に次の一章を加える。
+　　　　第四章　雑則
+　第九条　削除
+　　　第二章　文部科学省関係
+　（丙法の一部改正）
+第二条　丙法（昭和二十二年法律第二号）の一部を次のように改正する。
+　　第二条中「丙」を「丁」に改める。";
+        let units = parse_units(t).unwrap();
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].instructions.len(), 2);
+        // 加える章の章名は内容
+        assert!(
+            matches!(&units[0].instructions[1].ops[0], Op::InsertContainersAfter { text, .. } if text.len() == 2 && text[0] == "第四章　雑則")
+        );
+        assert_eq!(units[1].instructions.len(), 1);
     }
 }
