@@ -31,6 +31,29 @@ fn part_label(p: SentencePart) -> &'static str {
     }
 }
 
+/// 「3_2」→「三の二」
+fn item_kanji(num: &str) -> String {
+    let mut parts = num.split('_').filter_map(|x| x.parse::<u32>().ok());
+    let mut s = parts.next().map(to_kanji).unwrap_or_default();
+    for b in parts {
+        s.push('の');
+        s.push_str(&to_kanji(b));
+    }
+    s
+}
+
+/// 内容の行のうち号（漢数字＋全角空白）の数
+fn count_items(text: &[String]) -> u32 {
+    text.iter()
+        .filter(|l| {
+            l.split_once('\u{3000}').is_some_and(|(t, _)| {
+                !t.is_empty() && t.chars().all(|c| "一二三四五六七八九十".contains(c))
+            })
+        })
+        .count()
+        .max(1) as u32
+}
+
 fn path_label(path: &[(lawean_source::ContainerKind, u32)]) -> String {
     path.iter()
         .map(|(k, n)| format!("第{}{}", to_kanji(*n), kind_label(*k)))
@@ -112,7 +135,12 @@ fn segment(op: &Op, last: bool) -> String {
                 end("加え", "加える")
             )
         }
-        Op::InsertContainersAfter { path, text } => {
+        Op::InsertContainersAfter { path, text } | Op::InsertContainersBefore { path, text } => {
+            let side = if matches!(op, Op::InsertContainersBefore { .. }) {
+                "前"
+            } else {
+                "次"
+            };
             let kind = path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章");
             let n = text
                 .iter()
@@ -124,7 +152,7 @@ fn segment(op: &Op, last: bool) -> String {
                 .count()
                 .max(1);
             format!(
-                "{}の次に次の{}{kind}を{}",
+                "{}の{side}に次の{}{kind}を{}",
                 path_label(path),
                 to_kanji(n as u32),
                 end("加え", "加える")
@@ -150,6 +178,83 @@ fn segment(op: &Op, last: bool) -> String {
             ),
             end("加え", "加える")
         ),
+        Op::SetTitle { .. } => format!("題名を次のように{}", end("改め", "改める")),
+        Op::DeleteContainerTitle { path } => format!(
+            "{}の{}名を{}",
+            path_label(path),
+            path.last().map(|(k, _)| kind_label(*k)).unwrap_or(""),
+            end("削り", "削る")
+        ),
+        Op::DeleteContainers {
+            path,
+            kind,
+            from,
+            to,
+        } => format!(
+            "{}第{}{}から第{}{}までを{}",
+            path_label(path),
+            to_kanji(*from),
+            kind_label(*kind),
+            to_kanji(*to),
+            kind_label(*kind),
+            end("削り", "削る")
+        ),
+        Op::ReplaceArticles { articles, .. } => format!(
+            "{}を次のように{}",
+            articles
+                .iter()
+                .map(article_label)
+                .collect::<Vec<_>>()
+                .join("及び"),
+            end("改め", "改める")
+        ),
+        Op::SetContainerTitle { path, .. } => format!(
+            "{}の{}名を次のように{}",
+            path_label(path),
+            path.last().map(|(k, _)| kind_label(*k)).unwrap_or(""),
+            end("改め", "改める")
+        ),
+        Op::RenumberItem { at, from, to } => format!(
+            "{}中第{}号を第{}号と{}",
+            loc_label(at),
+            item_kanji(from),
+            item_kanji(to),
+            end("し", "する")
+        ),
+        Op::ShiftItems { at, from, to, by } => format!(
+            "{}中第{}号から第{}号までを{}号ずつ繰り{}",
+            loc_label(at),
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            }
+        ),
+        Op::InsertItemAfter { at, after, text } => format!(
+            "{}第{}号の次に次の{}号を{}",
+            loc_label(at),
+            item_kanji(after),
+            to_kanji(count_items(text)),
+            end("加え", "加える")
+        ),
+        Op::ReplaceItems { at, .. } => {
+            format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
+        }
+        Op::AppendItem { at, text } if at.item.is_some() => {
+            format!("{}に次のように{}", loc_label(at), end("加え", "加える"))
+        }
+        Op::AppendItem { at, text } => format!(
+            "{}に次の{}号を{}",
+            loc_label(at),
+            to_kanji(count_items(text)),
+            end("加え", "加える")
+        ),
+        Op::ReplaceItem { at, .. } => {
+            format!("{}を次のように{}", loc_label(at), end("改め", "改める"))
+        }
         Op::ReplaceParagraph { at, .. } => {
             format!("{}を次のように{}", loc_label(at), end("改め", "改める"))
         }
@@ -169,9 +274,14 @@ fn segment(op: &Op, last: bool) -> String {
             ),
             end("加え", "加える")
         ),
-        Op::AppendSentence { at, .. } => format!(
-            "{}に後段として次のように{}",
+        Op::AppendSentence { at, text } => format!(
+            "{}に{}{}",
             loc_label(at),
+            if text.first().is_some_and(|t| t.starts_with("ただし")) {
+                "次のただし書を"
+            } else {
+                "後段として次のように"
+            },
             end("加え", "加える")
         ),
         Op::RenumberParagraph {
@@ -261,10 +371,18 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertParagraphAfter { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertContainersAfter { text, .. }
+        | Op::InsertContainersBefore { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::AppendSentence { text, .. }
         | Op::ReplaceArticle { text, .. }
         | Op::ReplaceParagraph { text, .. }
+        | Op::ReplaceItem { text, .. }
+        | Op::InsertItemAfter { text, .. }
+        | Op::AppendItem { text, .. }
+        | Op::ReplaceItems { text, .. }
+        | Op::SetTitle { text, .. }
+        | Op::SetContainerTitle { text, .. }
+        | Op::ReplaceArticles { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text,
         _ => &[],
     }
@@ -274,11 +392,38 @@ fn content_of(op: &Op) -> &[String] {
 pub fn render_instruction(ins: &Instruction) -> String {
     let n = ins.ops.len();
     let mut s = String::from("\u{3000}\u{3000}");
+    let phrase_loc = |op: &Op| match op {
+        Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(at.clone()),
+        _ => None,
+    };
     for (i, op) in ins.ops.iter().enumerate() {
         if i > 0 {
             s.push('、');
         }
-        s.push_str(&segment(op, i + 1 == n));
+        let mut seg = segment(op, i + 1 == n);
+        // 同じ位置に続く字句の操作は位置を繰り返さない（「A」を「B」に、「C」を「D」に改め）。
+        // 次も同じ位置の同じ種類の置換なら「改め」「加え」も省く
+        let same_loc =
+            i > 0 && phrase_loc(op).is_some() && phrase_loc(op) == phrase_loc(&ins.ops[i - 1]);
+        let next_same = i + 1 < n
+            && phrase_loc(op).is_some()
+            && phrase_loc(&ins.ops[i + 1]) == phrase_loc(op)
+            && std::mem::discriminant(op) == std::mem::discriminant(&ins.ops[i + 1]);
+        if next_same {
+            for v in ["に改め", "を加え"] {
+                if let Some(base) = seg.strip_suffix(v) {
+                    seg = format!("{base}{}", &v[..v.find(['改', '加']).unwrap()]);
+                    break;
+                }
+            }
+        }
+        if same_loc {
+            if let Some(k) = seg.find("中「") {
+                s.push_str(&seg[k + '中'.len_utf8()..]);
+                continue;
+            }
+        }
+        s.push_str(&seg);
     }
     s.push_str("。\n");
     for op in &ins.ops {

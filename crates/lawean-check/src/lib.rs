@@ -225,8 +225,24 @@ pub fn run(input: &Input<'_>) -> Report {
             });
             continue;
         }
-        // ハネ: この単位を当てる直前の状態で
+        // ハネ: この単位を当てる直前の状態で。参照元の項をこの単位が削る（章・節・条ごと）なら手当ては要らない
+        let deleted: Vec<String> = ident::bind(&cur_doc, unit, "probe")
+            .map(|b| {
+                b.ops
+                    .iter()
+                    .filter_map(|o| match o {
+                        IdentOp::Delete { id } => Some(id.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         for c in hane_candidates(&cur_doc, unit) {
+            let para_of_sentence = c.sentence.0.split("/sent:").next().unwrap_or("");
+            let para_id = para_of_sentence.split("/item:").next().unwrap_or("");
+            if !c.handled && deleted.iter().any(|d| d == para_id) {
+                continue;
+            }
             if c.handled {
                 hane_ok += 1;
             } else if c.advisory {
@@ -1168,6 +1184,31 @@ fn check_enforcement_with(
             details.push(format!("{label}: 附則に施行期日が無い"));
             continue;
         };
+        // 「第三条中第九条第一項の改正規定」のように、この単位の一部だけを別の日にする号なら、
+        // 単位全体（残り）は本文の日。一部の改正規定が別の日に施行されることは Warn で知らせる
+        // 「第三条の規定（…の改正規定に限る。）」の括弧も一部限定
+        let partial = scope.is_some_and(|sc| {
+            sc.contains(&format!("{label}中"))
+                || sc
+                    .split_once(&format!("{label}の規定（"))
+                    .is_some_and(|(_, rest)| {
+                        rest.split('）')
+                            .next()
+                            .is_some_and(|p| p.contains("に限る"))
+                    })
+        });
+        let (clause, scope, where_note) = if partial {
+            warns += 1;
+            details.push(format!(
+                "{label}: 附則の号「{}」は {label} の一部の改正規定だけを別の日（{}）にしている。残りは本文の日で見る",
+                scope.unwrap_or("").chars().take(60).collect::<String>(),
+                clause.text
+            ));
+            (spec.main.as_ref().unwrap(), None, "")
+        } else {
+            (clause, scope, "")
+        };
+        let _ = where_note;
         let where_ = match scope {
             Some(sc) if lawean_extract::suppl::scope_is_target_side(sc) => {
                 "附則第一条のただし書き・号（被改正法の条で）"
@@ -1264,7 +1305,7 @@ fn check_enforcement_with(
             Kind::Enforcement,
             Status::Warn,
             if warns > 0 {
-                "施行期日を読めない単位がある"
+                "施行期日に注意（読めない単位か、一部の改正規定だけ別の日）"
             } else {
                 "附則が挙げる条が改め文に無い"
             },

@@ -246,9 +246,23 @@ struct Ante {
     container: Vec<(lawean_source::ContainerKind, u32)>,
     /// 直前の位置の文（「同項ただし書中「A」を「B」に、「C」を「D」に改め」の続きはただし書の中）
     part: Option<SentencePart>,
+    /// 直前の位置の列挙（「第九十四条第一項及び第三項中」）。位置を省いた続きはこの全部に当てる
+    locs: Vec<Loc>,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
+    // 「第百二条及び第百三条」「第百四条から第百五条の二まで」→ 範囲
+    if let Some((a, b)) = s
+        .split_once("及び")
+        .or_else(|| s.strip_suffix("まで").and_then(|x| x.split_once("から")))
+    {
+        if a.starts_with('第') && b.starts_with('第') {
+            return ArticleNum::Range {
+                from: Box::new(art_num(a)),
+                to: Box::new(art_num(b)),
+            };
+        }
+    }
     // 「第二十二条の二」→ 22_2
     let parts: Vec<u32> = s
         .trim_start_matches('第')
@@ -268,7 +282,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     // 号（「第三号」「第二号の二」「同号」）とただし書・各号列記以外の部分は位置として読むが、操作は項全体に当てる
     // （字句の置換は項の中の全出現に及ぶ。号を限定した置換は未対応で、号の外にも同じ字句があれば置き換わる）
     let r = LOC.get_or_init(|| {
-        re(r"^(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|(同項))?(?:第({N}号(?:の{N})*)|(同号))?[イロハニホヘトチリヌルヲワカヨタレソツネナラム]?(ただし書|各号列記以外の部分|本文|前段|後段)?$")
+        re(r"^(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|(同項))?(?:第({N}号(?:の{N})*)|(同号))?[イロハニホヘトチリヌルヲワカヨタレソツネナラム]?(?:各号)?(ただし書|各号列記以外の部分|本文|前段|後段)?$")
     });
     let Some(c) = r.captures(s) else {
         return Err(ParseError::Unrecognized(s.to_string()));
@@ -322,6 +336,11 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             None
         }
     };
+    // 「同号」「第三号」で項を言わなければ直前の項の中
+    let paragraph = match (paragraph, &item) {
+        (None, Some(_)) if c.get(1).is_none() => ante.paragraph.map(ParaRef::Num),
+        (p, _) => p,
+    };
     let part = c.get(6).map(|m| match m.as_str() {
         "ただし書" => SentencePart::Proviso,
         "本文" => SentencePart::Main,
@@ -329,8 +348,9 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
         "後段" => SentencePart::Back,
         _ => SentencePart::Chapeau,
     });
-    // 位置を新しく言えば文の限定は解ける
+    // 位置を新しく言えば文の限定と列挙は解ける
     ante.part = part;
+    ante.locs.clear();
     Ok(Loc {
         article,
         paragraph,
@@ -393,19 +413,22 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         // 目次は正規表現の規則に任せる（続きの「「A」を「B」に」も）
         return Ok(None);
     }
-    let at = match loc_part {
-        Some(l) => loc(l, ante)?,
-        None => ante_loc(ante, seg)?,
+    // 位置を省いた続きは、直前の位置の列挙（「第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改める」）全部に当てる
+    let ats: Vec<Loc> = match loc_part {
+        Some(l) => vec![loc(l, ante)?],
+        None if ante.locs.len() > 1 => ante.locs.clone(),
+        None => vec![ante_loc(ante, seg)?],
     };
     if let Some(rest) = rest.strip_prefix("を") {
         if rest == "削り" || rest == "削る" {
             return Ok(Some(PhraseOps(
-                phrases
-                    .into_iter()
-                    .map(|from| Op::Replace {
-                        at: at.clone(),
-                        from,
-                        to: String::new(),
+                ats.iter()
+                    .flat_map(|at| {
+                        phrases.iter().map(move |from| Op::Replace {
+                            at: at.clone(),
+                            from: from.clone(),
+                            to: String::new(),
+                        })
                     })
                     .collect(),
             )));
@@ -413,12 +436,13 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         if let Some((b, tail)) = take_quoted(rest) {
             if matches!(tail, "に" | "に改め" | "に改める") {
                 return Ok(Some(PhraseOps(
-                    phrases
-                        .into_iter()
-                        .map(|from| Op::Replace {
-                            at: at.clone(),
-                            from,
-                            to: b.clone(),
+                    ats.iter()
+                        .flat_map(|at| {
+                            phrases.iter().map(|from| Op::Replace {
+                                at: at.clone(),
+                                from: from.clone(),
+                                to: b.clone(),
+                            })
                         })
                         .collect(),
                 )));
@@ -429,11 +453,18 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     if let Some(rest) = rest.strip_prefix("の下に") {
         if let Some((b, tail)) = take_quoted(rest) {
             if matches!(tail, "を" | "を加え" | "を加える") {
-                return Ok(Some(PhraseOps(vec![Op::InsertAfterPhrase {
-                    at,
-                    anchor: a,
-                    text: b,
-                }])));
+                let _ = &a;
+                return Ok(Some(PhraseOps(
+                    ats.iter()
+                        .flat_map(|at| {
+                            phrases.iter().map(|anchor| Op::InsertAfterPhrase {
+                                at: at.clone(),
+                                anchor: anchor.clone(),
+                                text: b.clone(),
+                            })
+                        })
+                        .collect(),
+                )));
             }
         }
     }
@@ -442,6 +473,42 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
 
 /// 1 つの断片から出る字句の操作（列挙なら複数）
 struct PhraseOps(Vec<Op>);
+
+/// 「X中「A」を「B」に、「C」を「D」に改め」を「」に、「」で片に分け、各片を緩く読む
+fn parse_phrase_list_loose(merged: &str, ante: &mut Ante) -> Option<Vec<Op>> {
+    let mut pieces: Vec<String> = Vec::new();
+    let mut rest = merged;
+    loop {
+        let a = rest.find("」に、「");
+        let b = rest.find("」に改め、「");
+        match (a, b) {
+            (None, None) => break,
+            (Some(i), None) => {
+                pieces.push(format!("{}」に", &rest[..i]));
+                rest = &rest[i + "」に、".len()..];
+            }
+            (None, Some(j)) => {
+                pieces.push(format!("{}」に", &rest[..j]));
+                rest = &rest[j + "」に改め、".len()..];
+            }
+            (Some(i), Some(j)) if i < j => {
+                pieces.push(format!("{}」に", &rest[..i]));
+                rest = &rest[i + "」に、".len()..];
+            }
+            (_, Some(j)) => {
+                pieces.push(format!("{}」に", &rest[..j]));
+                rest = &rest[j + "」に改め、".len()..];
+            }
+        }
+    }
+    pieces.push(rest.to_string());
+    let mut out = Vec::new();
+    for p in &pieces {
+        let PhraseOps(v) = parse_phrase_op_loose(p, ante).ok()??;
+        out.extend(v);
+    }
+    Some(out)
+}
 
 /// 括弧が釣り合わない字句（「「規約」を「同条第六項ただし書中「規約」に」）: 最初の「」を「」で A と B を分け、
 /// B は最後の「」に」（「」の下に「」なら「」を」）まで
@@ -540,10 +607,14 @@ fn container_path_with_ante(
     }
     let own = container_path(path);
     if full.is_empty() {
-        if let (Some(first), Some(last)) = (own.first(), ante.container.last()) {
-            if depth(first.0) > depth(last.0) {
-                full = ante.container.clone();
-            }
+        // 直前の位置のうち、この位置より外側の部分を補う（「第四章第二節中第二款を第三款とし、第一款の次に」の「第一款」は第四章第二節の中）
+        if let Some(first) = own.first() {
+            full = ante
+                .container
+                .iter()
+                .take_while(|(k, _)| depth(*k) < depth(first.0))
+                .cloned()
+                .collect();
         }
     }
     full.extend(own);
@@ -578,25 +649,34 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             // 位置を省いた続き: 「第X中「A」の下に「B」を加え、「C」を「D」に改める」の後半。直前の位置を引き継ぐ
             ("replace_cont", r"^「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             ("insert_phrase_cont", r"^「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
+            // 号ずれ（項の中）。「第N項中第A号を第B号とし」「第A号を同条第B号とし」「同号の次に次のK号を加える」
+            ("renumber_item", r"^(?P<loc>.+?中|同条|同項|第{N}条(?:の{N})*(?:第{N}項)?)?(?:第(?P<p>{N})号(?P<pb>(?:の{N})*)|(?P<same>同号))を(?:同条|同項)?第(?P<q>{N})号(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("shift_items", r"^(?P<loc>.+?中|同条|同項|第{N}条(?:の{N})*(?:第{N}項)?)?第(?P<p>{N})号から第(?P<q>{N})号までを(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
+            ("insert_item_after", r"^(?P<loc>.+?)の次に次の{N}号を加え(?:る)?$"),
+            ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号)を加え(?:る)?$"),
+            // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
+            ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             // 「同条中第三項を第五項とし、第二項を第四項とし」の続き（条は直前のもの）
             ("renumber_para_cont", r"^第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
-            ("renumber_art", r"^(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_art", r"^(?:(?:第{N}(?:編|章|節|款|目))+中)?(?P<loc>第{N}条(?:の{N})*|同条)を第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目))+)に次の{N}条を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
-            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+)の次に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
+            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
-            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+)を第(?P<q>{N})(?:編|章|節|款|目)と(?:し|する)$"),
+            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目))+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目))+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)と(?:し|する)$"),
+            ("set_title", r"^題名を次のように改め(?:る)?$"),
+            ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目))+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
-            ("insert_arts_after", r"^(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
-            ("append_sentence", r"^(?P<loc>.+?)に後段として次のように加え(?:る)?$"),
+            ("insert_arts_after", r"^(?:(?:第{N}(?:編|章|節|款|目))+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?P<k>{N})条を加え(?:る)?$"),
+            ("append_sentence", r"^(?P<loc>.+?)に(?:後段として次のように|次のただし書を)加え(?:る)?$"),
         ]
         .iter()
         .map(|(n, s)| (*n, re(s)))
@@ -609,10 +689,55 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         toc: false,
         container: Vec::new(),
         part: None,
+        locs: Vec::new(),
     };
     let mut ops = Vec::new();
-    for seg in split_segments(line) {
+    let segs: Vec<String> = split_segments(line);
+    // 断片ごとの操作の始まり（読めない断片が出たとき、前の断片とつないで読み直すのに使う）
+    let mut op_start: Vec<usize> = Vec::new();
+    let mut skip_until = 0usize;
+    for (si, seg) in segs.iter().enumerate() {
+        if si < skip_until {
+            continue;
+        }
+        op_start.push(ops.len());
         let seg = seg.trim();
+        // 字句そのものに「」に、「」が入る読替え規定の書き換えは「、」で切れてしまう。
+        // 読めない断片は、前の断片（字句の操作）とつないで、改め・加え・削りで終わるところまで緩く読み直す
+        let try_merge = |ops: &mut Vec<Op>, ante: &mut Ante| -> Option<usize> {
+            for start in (0..si).rev() {
+                if !segs[start].contains('「') {
+                    break;
+                }
+                for end in si..segs.len() {
+                    let merged = segs[start..=end].join("、");
+                    let ends = ["改め", "改める", "加え", "加える", "削り", "削る"]
+                        .iter()
+                        .any(|e| merged.ends_with(e));
+                    if !ends {
+                        continue;
+                    }
+                    let mut a2 = Ante {
+                        article: ante.article.clone(),
+                        paragraph: ante.paragraph,
+                        item: ante.item.clone(),
+                        toc: ante.toc,
+                        container: ante.container.clone(),
+                        part: ante.part,
+                        locs: ante.locs.clone(),
+                    };
+                    // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
+                    // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
+                    if let Some(v) = parse_phrase_list_loose(&merged, &mut a2) {
+                        ops.truncate(op_start[start]);
+                        ops.extend(v);
+                        return Some(end + 1);
+                    }
+                    break;
+                }
+            }
+            None
+        };
         // 字句の置換・追加・削除は正規表現でなく手で読む（置換先に「」が入れ子になることがある）。
         // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する。見出しの中は別
         let loc_part = seg.split("中「").next().unwrap_or("");
@@ -647,7 +772,40 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     || g("loc").contains('、')
                     || g("loc").contains("まで"))
             {
-                for at in expand_locs(&g("loc"), &mut ante)? {
+                // 「第五十四条の見出し並びに同条第一項及び第二項中」: 見出しは見出しの置換に
+                let mut rest_tokens: Vec<String> = Vec::new();
+                for tok in g("loc")
+                    .split("並びに")
+                    .flat_map(|x| x.split("及び"))
+                    .flat_map(|x| x.split('、'))
+                {
+                    if let Some(base) = tok.strip_suffix("の見出し") {
+                        if *name == "replace" {
+                            let l = loc(base, &mut ante)?;
+                            ops.push(Op::ReplaceCaption {
+                                article: l.article,
+                                from: g("a"),
+                                to: g("b"),
+                            });
+                        }
+                    } else if let Some(base) = ["の章名", "の節名", "の款名", "の編名", "の目名"]
+                        .iter()
+                        .find_map(|s| tok.strip_suffix(s))
+                    {
+                        if *name == "replace" {
+                            ops.push(Op::ReplaceContainerTitle {
+                                path: container_path(base),
+                                from: g("a"),
+                                to: g("b"),
+                            });
+                        }
+                    } else {
+                        rest_tokens.push(tok.to_string());
+                    }
+                }
+                let ats = expand_locs(&rest_tokens.join("及び"), &mut ante)?;
+                ante.locs = ats.clone();
+                for at in ats {
                     ops.push(if *name == "replace" {
                         Op::Replace {
                             at,
@@ -704,6 +862,65 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     at: ante_loc(&ante, seg)?,
                     anchor: g("a"),
                     text: g("b"),
+                },
+                "renumber_item" => {
+                    let at = if g("loc").is_empty() {
+                        ante_loc(&ante, seg)?
+                    } else {
+                        loc(g("loc").trim_end_matches('中'), &mut ante)?
+                    };
+                    let item_num = |n: &str, branch: &str| {
+                        let mut s = kanji_to_u32(n).unwrap_or(0).to_string();
+                        for b in branch.split('の').filter(|x| !x.is_empty()) {
+                            s.push('_');
+                            s.push_str(&kanji_to_u32(b).unwrap_or(0).to_string());
+                        }
+                        s
+                    };
+                    let from = if g("same").is_empty() {
+                        item_num(&g("p"), &g("pb"))
+                    } else {
+                        ante.item
+                            .clone()
+                            .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?
+                    };
+                    // 「同号を同項第二十一号とし、同号の次に」の「同号」は番号を変えた後の号
+                    ante.item = Some(item_num(&g("q"), &g("qb")));
+                    Op::RenumberItem {
+                        at: Loc { item: None, ..at },
+                        from,
+                        to: item_num(&g("q"), &g("qb")),
+                    }
+                }
+                "shift_items" => {
+                    let at = if g("loc").is_empty() {
+                        ante_loc(&ante, seg)?
+                    } else {
+                        loc(g("loc").trim_end_matches('中'), &mut ante)?
+                    };
+                    let k = num("k") as i32;
+                    Op::ShiftItems {
+                        at: Loc { item: None, ..at },
+                        from: num("p"),
+                        to: num("q"),
+                        by: if g("dir") == "下げ" { k } else { -k },
+                    }
+                }
+                "insert_item_after" => {
+                    let l = loc(&g("loc"), &mut ante)?;
+                    let after = l
+                        .item
+                        .clone()
+                        .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?;
+                    Op::InsertItemAfter {
+                        at: Loc { item: None, ..l },
+                        after,
+                        text: Vec::new(),
+                    }
+                }
+                "append_item" | "append_subitems" => Op::AppendItem {
+                    at: loc(&g("loc"), &mut ante)?,
+                    text: Vec::new(),
                 },
                 "renumber_para" => {
                     let l = loc(&g("loc"), &mut ante)?;
@@ -794,31 +1011,87 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     from: g("a"),
                     to: g("b"),
                 },
-                "insert_containers_after" => Op::InsertContainersAfter {
-                    path: container_path_with_ante(&g("pre"), &g("path"), &mut ante),
+                "set_title" => Op::SetTitle { text: Vec::new() },
+                "set_container_title" => Op::SetContainerTitle {
+                    path: container_path(&g("path")),
                     text: Vec::new(),
                 },
-                "renumber_container" => Op::RenumberContainer {
-                    path: container_path_with_ante(&g("pre"), &g("path"), &mut ante),
-                    to: num("q"),
-                },
+                "insert_containers_after" => {
+                    let path = if g("path").starts_with('同') {
+                        ante.container.clone()
+                    } else {
+                        container_path_with_ante(&g("pre"), &g("path"), &mut ante)
+                    };
+                    if g("side") == "前" {
+                        Op::InsertContainersBefore {
+                            path,
+                            text: Vec::new(),
+                        }
+                    } else {
+                        Op::InsertContainersAfter {
+                            path,
+                            text: Vec::new(),
+                        }
+                    }
+                }
+                "renumber_container" => {
+                    let path = container_path_with_ante(&g("pre"), &g("path"), &mut ante);
+                    // 「同節」は番号を変えた後の節
+                    let mut after = path.clone();
+                    if let Some(last) = after.last_mut() {
+                        last.1 = num("q");
+                    }
+                    ante.container = after;
+                    Op::RenumberContainer { path, to: num("q") }
+                }
                 "replace_whole" => {
+                    // 「第九条第二項及び第三項を次のように改める」: 位置の列挙は最初の項に付け、内容の番号で各項に当てる
                     let l = g("loc");
+                    let l = match l.split_once("及び") {
+                        Some((first, _)) if l.contains('項') => first.to_string(),
+                        _ => l,
+                    };
                     // 「同条後段を次のように改める」: 項の後段（前段）の差し替え
-                    if let Some(part) =
-                        [("後段", SentencePart::Back), ("前段", SentencePart::Front)]
-                            .iter()
-                            .find_map(|(sfx, p)| l.strip_suffix(sfx).map(|_| *p))
+                    if let Some(part) = [
+                        ("後段", SentencePart::Back),
+                        ("前段", SentencePart::Front),
+                        ("ただし書", SentencePart::Proviso),
+                    ]
+                    .iter()
+                    .find_map(|(sfx, p)| l.strip_suffix(sfx).map(|_| *p))
                     {
-                        let base = l.trim_end_matches("後段").trim_end_matches("前段");
+                        let base = l
+                            .trim_end_matches("後段")
+                            .trim_end_matches("前段")
+                            .trim_end_matches("ただし書");
                         Op::ReplaceSentencePart {
                             at: loc(base, &mut ante)?,
                             part,
                             text: Vec::new(),
                         }
+                    } else if let Some(base) = l.strip_suffix("各号") {
+                        Op::ReplaceItems {
+                            at: loc(base, &mut ante)?,
+                            text: Vec::new(),
+                        }
+                    } else if l.contains("及び") && !l.contains('項') && l.ends_with('条') {
+                        // 「第百二条及び第百三条を次のように改める」: 複数の条をまとめて（「削除」の条に）
+                        let articles = expand_locs(&l, &mut ante)?
+                            .into_iter()
+                            .map(|x| x.article)
+                            .collect();
+                        Op::ReplaceArticles {
+                            articles,
+                            text: Vec::new(),
+                        }
                     } else {
                         let at = loc(&l, &mut ante)?;
-                        if at.paragraph.is_some() {
+                        if at.item.is_some() {
+                            Op::ReplaceItem {
+                                at,
+                                text: Vec::new(),
+                            }
+                        } else if at.paragraph.is_some() {
                             Op::ReplaceParagraph {
                                 at,
                                 text: Vec::new(),
@@ -833,6 +1106,64 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 }
                 "delete" => {
                     let l = g("loc");
+                    // 章名・節名、章・節の範囲、条の範囲の列挙: 「第三章の章名及び同章第一節の節名を削る」
+                    //「第百四条から第百五条の二まで及び第三章第二節から第五節までを削る」
+                    static CRANGE: OnceLock<Regex> = OnceLock::new();
+                    let crange = CRANGE.get_or_init(|| {
+                        re(r"^(?P<pre>(?:第{N}(?:編|章|節|款|目))*)第(?P<p>{N})(?P<k>編|章|節|款|目)から第(?P<q>{N})(?:編|章|節|款|目)までの?$")
+                    });
+                    let tokens: Vec<&str> = l
+                        .split("並びに")
+                        .flat_map(|x| x.split("及び"))
+                        .flat_map(|x| x.split('、'))
+                        .collect();
+                    let structural = tokens
+                        .iter()
+                        .any(|t| t.ends_with('名') || crange.is_match(t) || t.contains("まで"));
+                    if structural {
+                        let mut last_container: Vec<(lawean_source::ContainerKind, u32)> =
+                            Vec::new();
+                        for t in tokens {
+                            if let Some(base) = t
+                                .strip_suffix("の章名")
+                                .or_else(|| t.strip_suffix("の節名"))
+                                .or_else(|| t.strip_suffix("の款名"))
+                                .or_else(|| t.strip_suffix("の編名"))
+                                .or_else(|| t.strip_suffix("の目名"))
+                            {
+                                // 「同章第一節」は直前の章の中
+                                let path = if let Some(rest) = base.strip_prefix("同章") {
+                                    let mut p = last_container.clone();
+                                    p.truncate(1);
+                                    p.extend(container_path(rest));
+                                    p
+                                } else {
+                                    container_path(base)
+                                };
+                                last_container = path.clone();
+                                ops.push(Op::DeleteContainerTitle { path });
+                            } else if let Some(c) = crange.captures(t) {
+                                let kind = match &c["k"] {
+                                    "編" => lawean_source::ContainerKind::Part,
+                                    "章" => lawean_source::ContainerKind::Chapter,
+                                    "節" => lawean_source::ContainerKind::Section,
+                                    "款" => lawean_source::ContainerKind::Subsection,
+                                    _ => lawean_source::ContainerKind::Division,
+                                };
+                                ops.push(Op::DeleteContainers {
+                                    path: container_path(&c["pre"]),
+                                    kind,
+                                    from: kanji_to_u32(&c["p"]).unwrap_or(0),
+                                    to: kanji_to_u32(&c["q"]).unwrap_or(0),
+                                });
+                            } else {
+                                for at in expand_locs(t, &mut ante)? {
+                                    ops.push(Op::Delete { at });
+                                }
+                            }
+                        }
+                        break;
+                    }
                     match [
                         ("後段", SentencePart::Back),
                         ("前段", SentencePart::Front),
@@ -863,6 +1194,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             break;
         }
         if !matched {
+            if let Some(next) = try_merge(&mut ops, &mut ante) {
+                skip_until = next;
+                continue;
+            }
             return Err(ParseError::Unrecognized(seg.to_string()));
         }
     }

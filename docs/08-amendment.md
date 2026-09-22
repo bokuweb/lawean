@@ -74,7 +74,18 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 同項後段（前段・ただし書）を削る | `DeleteSentencePart { at, part }` |
 | 同項ただし書中「A」を「B」に改める（本文・前段・後段・各号列記以外の部分も） | `Replace` の `Loc.part`（その文だけで置き換える。続く「「C」を「D」に」も同じ文） |
 | 目次中「A」を「B」に、「C」を「D」に改める（複数行の「 」ブロック） | `ReplaceToc` の列挙。節・条の範囲をまたぐ字句は目次の平文で置き換える（ダッシュ「−」「―」は同一視） |
-| X中「A」、「B」及び「C」を削り | `Replace` の列挙 |
+| X中「A」、「B」及び「C」を削り / 「A」及び「B」の下に「C」を加え | `Replace` / `InsertAfterPhrase` の列挙 |
+| 第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改め | 位置の列挙は続きの置換にも掛かる（`Ante.locs`） |
+| 題名を次のように改める / 第二章の章名を次のように改める | `SetTitle` / `SetContainerTitle` |
+| 第三章の章名を削る | `DeleteContainerTitle`。題名の無い章は単位の最後に前の章に併合（`collapse_untitled`） |
+| 第三章第二節から第五節までを削る / 第百四条から第百五条の二までを削る | `DeleteContainers` / `Delete` の範囲 |
+| 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
+| 同節の前に次の一節を加える | `InsertContainersBefore` |
+| 第N項中第A号を第B号とし / 第A号から第B号までをK号ずつ繰り下げ / 同号の次に次のK号を加える / 同項に次の各号を加える / 同項第三号を次のように改める / 同項各号を次のように改める / 同号に次のように加える（イロハ・(1)） / 同項第N号を削る | `RenumberItem` / `ShiftItems` / `InsertItemAfter` / `AppendItem` / `ReplaceItem` / `ReplaceItems` / `AppendItem`（号の下）/ `Delete`（号） |
+| 同項に次のただし書を加える / 同項ただし書を次のように改める（＋各号） | `AppendSentence` / `ReplaceSentencePart`（Proviso） |
+| 第九条第二項及び第三項を次のように改める + 「２　…」「３　…」 | `ReplaceParagraph`（内容の番号で各項に） |
+
+**同じ文の中の字句の操作は改正前の字句を指す**: 「「は、」の下に「…敷地利用権の持分…」を加え、「敷地利用権の持分」を「その敷地利用権の持分又は敷地共有持分等」に改め」で、加えた字句の中の「敷地利用権の持分」は置き換えない（`replace_protected`。元の字句に無く加えた字句の中にだけあるなら、それを指しているので置き換える）。
 | 括弧が釣り合わない字句（「「規約」を「同条第六項ただし書中「規約」に」） | 最初の「」を「」で分け、最後の「」に」まで（`parse_phrase_op_loose`）。「、」の区切りは「」に」「改め」「削り」等の直後で「「」「同条」「第」の直前だけ |
 | 第N条[第M項]後段（前段）を次のように改める + 本文 | `ReplaceSentencePart { at, part, text }`。2 行目以降は読替え表（上欄は条項の参照で行を切る） |
 

@@ -72,6 +72,11 @@ pub enum Op {
         path: Vec<(lawean_source::ContainerKind, u32)>,
         text: Vec<String>,
     },
+    /// 「同節の前に次の一節を加える」+ 内容
+    InsertContainersBefore {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        text: Vec<String>,
+    },
     /// 「第N章を第M章とする」「第一章中第八節を第十節とする」
     RenumberContainer {
         path: Vec<(lawean_source::ContainerKind, u32)>,
@@ -91,6 +96,50 @@ pub enum Op {
     },
     /// 「第N条第M項を次のように改める」+ 本文（号を含んでよい）。項の本文の全部の差し替え
     ReplaceParagraph { at: Loc, text: Vec<String> },
+    /// 「同項第三号を次のように改める」+「三　本文」（イロハを含んでよい）。号の全部の差し替え
+    ReplaceItem { at: Loc, text: Vec<String> },
+    /// 「題名を次のように改める」+ 題名の行
+    SetTitle { text: Vec<String> },
+    /// 「第三章の章名を削る」: 題名の無くなった章は前の章に併合される（中の条は前の章の末尾に）
+    DeleteContainerTitle {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+    },
+    /// 「第三章第二節から第五節までを削る」
+    DeleteContainers {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        kind: lawean_source::ContainerKind,
+        from: u32,
+        to: u32,
+    },
+    /// 「第百二条及び第百三条を次のように改める」+「第百二条及び第百三条　削除」: 複数の条を 1 つの「削除」の条に
+    ReplaceArticles {
+        articles: Vec<ArticleNum>,
+        text: Vec<String>,
+    },
+    /// 「第二章の章名を次のように改める」+「第二章　題名」の行
+    SetContainerTitle {
+        path: Vec<(lawean_source::ContainerKind, u32)>,
+        text: Vec<String>,
+    },
+    /// 「同項中第二十一号を第三十七号とし」「第四号を同条第七号とし」（`at` は条・項）。号の番号は「3」「3_2」
+    RenumberItem { at: Loc, from: String, to: String },
+    /// 「第十二号から第二十号までを十六号ずつ繰り下げ」
+    ShiftItems {
+        at: Loc,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
+    /// 「同項第一号の次に次の一号を加える」「同号の次に次の五号を加える」+「二　本文」…
+    InsertItemAfter {
+        at: Loc,
+        after: String,
+        text: Vec<String>,
+    },
+    /// 「同項に次の一号を加える」
+    AppendItem { at: Loc, text: Vec<String> },
+    /// 「同項各号を次のように改める」+ 号の行（全部の号の差し替え）
+    ReplaceItems { at: Loc, text: Vec<String> },
     /// 「第N条中第P項を第Q項とし」「同項を同条第D項とし」
     RenumberParagraph {
         article: ArticleNum,
@@ -146,8 +195,14 @@ impl Op {
             Op::ReplaceToc { .. }
             | Op::AppendArticle { .. }
             | Op::InsertContainersAfter { .. }
+            | Op::InsertContainersBefore { .. }
             | Op::RenumberContainer { .. }
-            | Op::ReplaceContainerTitle { .. } => None,
+            | Op::ReplaceContainerTitle { .. }
+            | Op::SetTitle { .. }
+            | Op::SetContainerTitle { .. }
+            | Op::DeleteContainerTitle { .. }
+            | Op::DeleteContainers { .. } => None,
+            Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
             | Op::AppendSentence { at, .. }
@@ -163,7 +218,13 @@ impl Op {
             Op::ReplaceCaption { article, .. } | Op::SetCaption { article, .. } => Some(article),
             Op::ReplaceSentencePart { at, .. }
             | Op::DeleteSentencePart { at, .. }
-            | Op::ReplaceParagraph { at, .. } => Some(&at.article),
+            | Op::ReplaceParagraph { at, .. }
+            | Op::ReplaceItem { at, .. }
+            | Op::RenumberItem { at, .. }
+            | Op::ShiftItems { at, .. }
+            | Op::InsertItemAfter { at, .. }
+            | Op::AppendItem { at, .. }
+            | Op::ReplaceItems { at, .. } => Some(&at.article),
         }
     }
 
@@ -175,10 +236,18 @@ impl Op {
                 | Op::InsertParagraphAfter { .. }
                 | Op::AppendArticle { .. }
                 | Op::InsertContainersAfter { .. }
+                | Op::InsertContainersBefore { .. }
                 | Op::InsertArticleAfter { .. }
                 | Op::AppendSentence { .. }
                 | Op::ReplaceArticle { .. }
                 | Op::ReplaceParagraph { .. }
+                | Op::ReplaceItem { .. }
+                | Op::InsertItemAfter { .. }
+                | Op::AppendItem { .. }
+                | Op::ReplaceItems { .. }
+                | Op::SetTitle { .. }
+                | Op::SetContainerTitle { .. }
+                | Op::ReplaceArticles { .. }
                 | Op::ReplaceSentencePart { .. }
         )
     }
@@ -189,10 +258,18 @@ impl Op {
             | Op::InsertParagraphAfter { text, .. }
             | Op::AppendArticle { text, .. }
             | Op::InsertContainersAfter { text, .. }
+            | Op::InsertContainersBefore { text, .. }
             | Op::InsertArticleAfter { text, .. }
             | Op::AppendSentence { text, .. }
             | Op::ReplaceArticle { text, .. }
             | Op::ReplaceParagraph { text, .. }
+            | Op::ReplaceItem { text, .. }
+            | Op::InsertItemAfter { text, .. }
+            | Op::AppendItem { text, .. }
+            | Op::ReplaceItems { text, .. }
+            | Op::SetTitle { text, .. }
+            | Op::SetContainerTitle { text, .. }
+            | Op::ReplaceArticles { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             _ => {}
         }
