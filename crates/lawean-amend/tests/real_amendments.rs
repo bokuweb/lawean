@@ -829,3 +829,36 @@ fn reiwa3_act49_art7_and_art8_shika_ishi_reproduce_egov_revisions() {
         }
     }
 }
+
+/// 令和3年法律第44号 第5条（沿岸漁業改善資金助成法、附則第一条第三号 2022-04-01）。
+/// 「第七条の見出しを削り、同条の前に見出しとして「（貸付資格の認定）」を付し、同条を次のように改める」、
+/// 「第八条の見出しを削り」、条の繰り下げの連鎖（第15条→第16条 … 第12条→第13条）と「第十一条の次に次の一条を加える」
+#[test]
+fn reiwa3_act44_art5_engan_gyogyo_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art5.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("354AC0000000025_20210526_503AC0000000044"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("354AC0000000025_20220401_503AC0000000044"));
+    // 見出しも e-Gov と同じ（第7条は「（貸付資格の認定）」、第8条は見出し無し）
+    let caption = |d: &LegalDocument, n: &str| -> Option<String> {
+        fn find<'a>(ps: &'a [Provision], n: &str) -> Option<&'a Article> {
+            ps.iter().find_map(|p| match p {
+                Provision::Article(a) if a.num.to_num_string() == n => Some(a),
+                Provision::Container(c) => find(&c.children, n),
+                _ => None,
+            })
+        }
+        find(&d.main_provision, n)
+            .and_then(|a| a.caption.as_ref())
+            .map(|c| inline_text(c))
+    };
+    let exp = revision("354AC0000000025_20220401_503AC0000000044");
+    assert_eq!(caption(&got, "7"), caption(&exp, "7"));
+    assert_eq!(caption(&got, "8"), caption(&exp, "8"));
+    assert_eq!(caption(&got, "7").as_deref(), Some("（貸付資格の認定）"));
+}

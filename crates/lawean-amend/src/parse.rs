@@ -578,6 +578,12 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     }
     // 位置を省いた続きは、直前の位置の列挙（「第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改める」）全部に当てる
     let ats: Vec<Loc> = match loc_part {
+        // 「同条第四項及び第六項中「A」を削る」: 位置の列挙（置換・追加の列挙は規則の側で展開する）
+        Some(l) if l.contains("及び") || l.contains('、') || l.contains("まで") => {
+            let v = expand_locs(l, ante)?;
+            ante.locs = v.clone();
+            v
+        }
         Some(l) => vec![loc(l, ante)?],
         None if ante.locs.len() > 1 => ante.locs.clone(),
         None => vec![ante_loc(ante, seg)?],
@@ -817,6 +823,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             ("container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名中「(?P<a>.+?)」を(?:「(?P<b>.+?)」に(?:改め(?:る)?)?|削(?:り|る))$"),
             ("caption_set", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出しを「(?P<a>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_attach", r"^(?P<loc>第{N}条(?:の{N})*|同条)の前に見出しとして「(?P<a>.+?)」を付(?:し|する)$"),
+            ("caption_delete", r"^(?P<loc>第{N}条(?:の{N})*|同条)の(?:前の)?見出しを削(?:り|る)$"),
             // 「改める」「加える」が付かない形は、同じ文の中で「、」で連なる列挙の途中（「A」を「B」に、「C」を「D」に改める）
             ("replace", r"^(?P<loc>.+?)中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             ("insert_phrase", r"^(?P<loc>.+?)中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
@@ -922,7 +930,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         let loc_part = seg.split("中「").next().unwrap_or("");
         let listed =
             loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで");
-        if (!listed || seg.starts_with('「'))
+        if (!listed || seg.starts_with('「') || seg.ends_with("削り") || seg.ends_with("削る"))
             && !loc_part.contains("見出し")
             && !loc_part.ends_with("名")
         {
@@ -1024,6 +1032,13 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 "caption_set" => Op::SetCaption {
                     article: loc(&g("loc"), &mut ante)?.article,
                     text: g("a"),
+                },
+                "caption_attach" => Op::AttachCaption {
+                    article: loc(&g("loc"), &mut ante)?.article,
+                    text: g("a"),
+                },
+                "caption_delete" => Op::DeleteCaption {
+                    article: loc(&g("loc"), &mut ante)?.article,
                 },
                 "replace" => Op::Replace {
                     at: loc(&g("loc"), &mut ante)?,
@@ -1244,7 +1259,9 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     // 「第九条第二項及び第三項を次のように改める」: 位置の列挙は最初の項に付け、内容の番号で各項に当てる
                     let l = g("loc");
                     let l = match l.split_once("及び") {
-                        Some((first, _)) if l.contains('項') => first.to_string(),
+                        Some((first, _)) if l.contains('項') && !l.ends_with('号') => {
+                            first.to_string()
+                        }
                         _ => l,
                     };
                     // 「同条後段を次のように改める」: 項の後段（前段）の差し替え
@@ -1280,6 +1297,25 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                             .collect();
                         Op::ReplaceContainers {
                             paths,
+                            text: Vec::new(),
+                        }
+                    } else if l.trim_end_matches("まで").ends_with('号')
+                        && (l.contains("及び") || l.contains('、') || l.contains("まで"))
+                    {
+                        // 「第百条の二第三号及び第四号を次のように改める」「第九十六条第六号から第八号までを次のように改める」
+                        let range = l.contains("まで");
+                        let locs = expand_locs(&l, &mut ante)?;
+                        let items: Vec<String> =
+                            locs.iter().filter_map(|x| x.item.clone()).collect();
+                        let mut at = locs
+                            .into_iter()
+                            .next()
+                            .ok_or_else(|| ParseError::Unrecognized(l.clone()))?;
+                        at.item = None;
+                        Op::ReplaceItemSet {
+                            at,
+                            items,
+                            range,
                             text: Vec::new(),
                         }
                     } else if l.contains("及び") && !l.contains('項') && l.ends_with('条') {
@@ -1553,6 +1589,20 @@ mod tests {
     fn quoted_commas_do_not_split() {
         let ops = parse_instruction("第一条中「甲、乙」を「丙」に改める。").unwrap();
         assert!(matches!(&ops[0], Op::Replace { from, .. } if from == "甲、乙"));
+    }
+
+    /// 「同条第四項及び第六項中「A」を削る」: 位置の列挙に字句の削除（令5-79）
+    #[test]
+    fn phrase_delete_over_listed_locations() {
+        let ops = parse_instruction(
+            "第四十三条第二項中「甲」を「乙」に改め、同条第四項及び第六項中「、丙」を削る。",
+        )
+        .unwrap();
+        assert_eq!(ops.len(), 3);
+        assert!(
+            matches!(&ops[1], Op::Replace { at, from, to } if at.paragraph == Some(ParaRef::Num(4)) && from == "、丙" && to.is_empty())
+        );
+        assert!(matches!(&ops[2], Op::Replace { at, .. } if at.paragraph == Some(ParaRef::Num(6))));
     }
 
     /// 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は読み飛ばす。

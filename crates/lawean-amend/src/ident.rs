@@ -1103,9 +1103,12 @@ impl Binder<'_> {
                     }
                     art.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
                 }
-                Op::SetCaption { article, text } => {
+                Op::SetCaption { article, text } | Op::AttachCaption { article, text } => {
                     let art = article_mut(&mut self.doc, article)?;
                     art.caption = Some(vec![Inline::Text(text.clone())]);
+                }
+                Op::DeleteCaption { article } => {
+                    article_mut(&mut self.doc, article)?.caption = None;
                 }
                 Op::DeleteSentencePart { at, part } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
@@ -1197,7 +1200,8 @@ impl Binder<'_> {
                 | Op::InsertItemAfter { at, .. }
                 | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
-                | Op::ReplaceItems { at, .. } => {
+                | Op::ReplaceItems { at, .. }
+                | Op::ReplaceItemSet { at, .. } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                     let p = paragraph_mut(art, idx);
@@ -1225,6 +1229,9 @@ impl Binder<'_> {
                         Op::ReplaceItems { text, .. } => {
                             p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                             crate::apply::insert_items_after(p, None, text)?
+                        }
+                        Op::ReplaceItemSet { items, text, .. } => {
+                            crate::apply::replace_item_set(p, items, text)?
                         }
                         _ => unreachable!(),
                     }
@@ -1302,7 +1309,9 @@ impl Binder<'_> {
                         self.ops.push(IdentOp::Delete { id });
                     }
                     let art = article_mut(&mut self.doc, article)?;
-                    art.caption = a.caption;
+                    if a.caption.is_some() {
+                        art.caption = a.caption;
+                    }
                     art.title = a.title;
                     art.children = children;
                 }

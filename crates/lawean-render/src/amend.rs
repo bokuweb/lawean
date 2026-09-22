@@ -285,6 +285,31 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::ReplaceItemSet {
+            at, items, range, ..
+        } => {
+            let list = if *range && items.len() >= 2 {
+                format!(
+                    "第{}号から第{}号まで",
+                    item_kanji(&items[0]),
+                    item_kanji(&items[items.len() - 1])
+                )
+            } else {
+                let labels: Vec<String> = items
+                    .iter()
+                    .map(|i| format!("第{}号", item_kanji(i)))
+                    .collect();
+                match labels.len() {
+                    0 | 1 => labels.concat(),
+                    n => format!("{}及び{}", labels[..n - 1].join("、"), labels[n - 1]),
+                }
+            };
+            format!(
+                "{}{list}を次のように{}",
+                loc_label(at),
+                end("改め", "改める")
+            )
+        }
         Op::AppendItem { at, text } if at.item.is_some() => {
             format!("{}に次のように{}", loc_label(at), end("加え", "加える"))
         }
@@ -396,6 +421,16 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
+        Op::AttachCaption { article, text } => format!(
+            "{}の前に見出しとして「{text}」を{}",
+            article_label(article),
+            end("付し", "付する")
+        ),
+        Op::DeleteCaption { article } => format!(
+            "{}の見出しを{}",
+            article_label(article),
+            end("削り", "削る")
+        ),
         Op::ReplaceSentencePart { at, part, .. } => format!(
             "{}{}を次のように{}",
             loc_label(at),
@@ -427,6 +462,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertItemBefore { text, .. }
         | Op::AppendItem { text, .. }
         | Op::ReplaceItems { text, .. }
+        | Op::ReplaceItemSet { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }

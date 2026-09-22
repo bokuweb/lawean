@@ -213,9 +213,12 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 }
                 art.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
             }
-            Op::SetCaption { article, text } => {
+            Op::SetCaption { article, text } | Op::AttachCaption { article, text } => {
                 let art = article_mut(doc, article)?;
                 art.caption = Some(vec![Inline::Text(text.clone())]);
+            }
+            Op::DeleteCaption { article } => {
+                article_mut(doc, article)?.caption = None;
             }
             Op::DeleteSentencePart { at, part } => {
                 let art = article_mut(doc, &at.article)?;
@@ -303,6 +306,13 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                 insert_items_after(p, None, text)?;
             }
+            Op::ReplaceItemSet {
+                at, items, text, ..
+            } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                replace_item_set(paragraph_mut(art, idx), items, text)?;
+            }
             Op::ReplaceParagraph { at, text } => {
                 let art = article_mut(doc, &at.article)?;
                 let new = parse_paragraphs(text)?;
@@ -323,7 +333,10 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::ReplaceArticle { article, text } => {
                 let a = parse_article(text)?;
                 let art = article_mut(doc, article)?;
-                art.caption = a.caption;
+                // 見出しの行が無ければ今の見出しのまま（見出しは「第N条の見出しを削り」で別に扱う。令3-44 第5条）
+                if a.caption.is_some() {
+                    art.caption = a.caption;
+                }
                 art.title = a.title;
                 art.children = a.children;
             }
@@ -1072,6 +1085,50 @@ pub(crate) fn replace_item(
     slot.title = new.title;
     slot.body = new.body;
     slot.children = new.children;
+    Ok(())
+}
+
+/// 挙げた号（「第三号及び第四号」）だけを、内容の号（番号の順に対応）で差し替える。番号と id は元のまま
+pub(crate) fn replace_item_set(
+    p: &mut Paragraph,
+    nums: &[String],
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    let mut tmp = vec!["仮".to_string()];
+    tmp.extend(lines.iter().cloned());
+    let parsed = parse_paragraphs(&tmp)?;
+    let new_items: Vec<Item> = parsed
+        .into_iter()
+        .next()
+        .map(|q| {
+            q.children
+                .into_iter()
+                .filter_map(|c| match c {
+                    ParagraphChild::Item(i) => Some(i),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if new_items.len() != nums.len() {
+        return Err(ApplyError::BadContent(format!(
+            "号の数が合わない（{} 号を改めるのに内容は {} 号）",
+            nums.len(),
+            new_items.len()
+        )));
+    }
+    for (num, new) in nums.iter().zip(new_items) {
+        let slot = p.children.iter_mut().find_map(|c| match c {
+            ParagraphChild::Item(i) if i.num.as_deref() == Some(num.as_str()) => Some(i),
+            _ => None,
+        });
+        let Some(slot) = slot else {
+            return Err(ApplyError::BadContent(format!("第{num}号が無い")));
+        };
+        slot.title = new.title;
+        slot.body = new.body;
+        slot.children = new.children;
+    }
     Ok(())
 }
 

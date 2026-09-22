@@ -131,7 +131,7 @@ def main():
         )
         lines = lines[s:e]
         # 直前の見出し「（X法の一部改正）」は含めない、末尾の見出しも落とす
-        while lines and re.match(r"^　?（.+）$", lines[-1]):
+        while lines and re.match(r"^　*(（.+）|第[一二三四五六七八九十]+[編章節]　[^（）]+)$", lines[-1]):
             lines.pop()
     sys.stdout.write("\n".join(lines) + "\n")
 

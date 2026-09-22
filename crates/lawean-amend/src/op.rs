@@ -164,6 +164,14 @@ pub enum Op {
     AppendItem { at: Loc, text: Vec<String> },
     /// 「同項各号を次のように改める」+ 号の行（全部の号の差し替え）
     ReplaceItems { at: Loc, text: Vec<String> },
+    /// 「第N条第M項第A号及び第B号を次のように改める」「第A号から第C号までを次のように改める」+ 号の行: 挙げた号だけの差し替え。
+    /// `items` は号の番号（「3_2」）、`range` は「から…まで」の形（描画用）
+    ReplaceItemSet {
+        at: Loc,
+        items: Vec<String>,
+        range: bool,
+        text: Vec<String>,
+    },
     /// 「第N条中第P項を第Q項とし」「同項を同条第D項とし」
     RenumberParagraph {
         article: ArticleNum,
@@ -191,6 +199,10 @@ pub enum Op {
     },
     /// 「第N条の見出しを「（X）」に改め」
     SetCaption { article: ArticleNum, text: String },
+    /// 「第N条の前に見出しとして「（X）」を付し」: 見出しの無い条に見出しを付ける（結果は `SetCaption` と同じ。字面が違う）
+    AttachCaption { article: ArticleNum, text: String },
+    /// 「第N条の見出しを削り」「第N条の前の見出しを削り」
+    DeleteCaption { article: ArticleNum },
     /// 「第N条[第M項]後段を次のように改める」— 項の本文の前段／後段を差し替える。続く行のうち最初の 1 行が文で、
     /// 残り（読替え表の欄など）は文には入れない
     ReplaceSentencePart {
@@ -242,7 +254,10 @@ impl Op {
             Op::InsertArticleAfter { after, .. } => Some(after),
             Op::RenumberArticle { from, .. } => Some(from),
             Op::ShiftArticles { .. } => None,
-            Op::ReplaceCaption { article, .. } | Op::SetCaption { article, .. } => Some(article),
+            Op::ReplaceCaption { article, .. }
+            | Op::SetCaption { article, .. }
+            | Op::AttachCaption { article, .. }
+            | Op::DeleteCaption { article } => Some(article),
             Op::ReplaceSentencePart { at, .. }
             | Op::DeleteSentencePart { at, .. }
             | Op::ReplaceParagraph { at, .. }
@@ -252,7 +267,8 @@ impl Op {
             | Op::InsertItemAfter { at, .. }
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
-            | Op::ReplaceItems { at, .. } => Some(&at.article),
+            | Op::ReplaceItems { at, .. }
+            | Op::ReplaceItemSet { at, .. } => Some(&at.article),
         }
     }
 
@@ -272,7 +288,8 @@ impl Op {
             | Op::InsertItemAfter { at, .. }
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
-            | Op::ReplaceItems { at, .. } => match at.paragraph {
+            | Op::ReplaceItems { at, .. }
+            | Op::ReplaceItemSet { at, .. } => match at.paragraph {
                 Some(ParaRef::Num(n)) => Some(n),
                 _ => None,
             },
@@ -298,6 +315,7 @@ impl Op {
                 | Op::InsertItemBefore { .. }
                 | Op::AppendItem { .. }
                 | Op::ReplaceItems { .. }
+                | Op::ReplaceItemSet { .. }
                 | Op::SetTitle { .. }
                 | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
@@ -323,6 +341,7 @@ impl Op {
             | Op::InsertItemBefore { text, .. }
             | Op::AppendItem { text, .. }
             | Op::ReplaceItems { text, .. }
+            | Op::ReplaceItemSet { text, .. }
             | Op::SetTitle { text, .. }
             | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }
