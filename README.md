@@ -98,3 +98,7 @@ cargo run -p lawean-lean --example gen   # 実リビジョンと束縛した改�
     - ~~実際に起きた改正漏れの再現~~（docs/12 §5）: 公職選挙法 平成30年法律第75号（罰則の引用の改め忘れ）を実物の改め文と e-Gov の発射台で再現。唯一の未手当てがその箇所で、生成した手当ては 3 年後の訂正法と一字違わず同じ。Lean `Koshoku.lean`
 17. `Ident` に条の挿入（条ずれ、令和5年法律第53号）と参照の id 化。`checkUnit`（[ADR-0014](docs/adr/0014-proofs-at-build-time-editor-runs-verified-code.md)）
 18. その他: [TODO](docs/TODO.md)
+
+## ライセンス
+
+[PolyForm Noncommercial 1.0.0](LICENSE)（商用利用は不可。個人・研究・教育・非営利での利用と改変・再配布は可）
