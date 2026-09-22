@@ -1107,18 +1107,24 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
     let mut ops = Vec::new();
     let segs: Vec<String> = split_segments(line);
     // 断片ごとの操作の始まり（読めない断片が出たとき、前の断片とつないで読み直すのに使う）
-    let mut op_start: Vec<usize> = Vec::new();
+    // 断片ごとの ops の先頭（読めない断片を前後とつないで読み直すときに、そこまで戻す）。
+    // 飛ばした断片は None
+    let mut op_start: Vec<Option<usize>> = vec![None; segs.len()];
     let mut skip_until = 0usize;
     for (si, seg) in segs.iter().enumerate() {
         if si < skip_until {
             continue;
         }
-        op_start.push(ops.len());
+        op_start[si] = Some(ops.len());
         let seg = seg.trim();
         // 字句そのものに「」に、「」が入る読替え規定の書き換えは「、」で切れてしまう。
         // 読めない断片は、前の断片（字句の操作）とつないで、改め・加え・削りで終わるところまで緩く読み直す
         let try_merge = |ops: &mut Vec<Op>, ante: &mut Ante| -> Option<usize> {
-            for start in (0..si).rev() {
+            // 今の断片から前に遡って（今の断片だけで後ろとつなぐ場合も含む）
+            for start in (0..=si).rev() {
+                let Some(from_op) = op_start[start] else {
+                    break;
+                };
                 if !segs[start].contains('「') {
                     break;
                 }
@@ -1145,7 +1151,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
                     if let Some(v) = parse_phrase_list_loose(&merged, &mut a2) {
-                        ops.truncate(op_start[start]);
+                        ops.truncate(from_op);
                         ops.extend(v);
                         return Some(end + 1);
                     }
@@ -2208,6 +2214,21 @@ mod tests {
             matches!(&ops[1], Op::Replace { at, from, to } if at.paragraph == Some(ParaRef::Num(4)) && from == "、丙" && to.is_empty())
         );
         assert!(matches!(&ops[2], Op::Replace { at, .. } if at.paragraph == Some(ParaRef::Num(6))));
+    }
+
+    /// 読替え規定の書き換え（字句そのものに「」が入って釣り合わない）で、最初の断片から後ろとつないで読み直す。
+    /// 令5-53: 「第六十三条第二項中「）」とあるのは」を「）」とあるのは、」に改め、「、「電子調書」とあるのは…」を削る」
+    #[test]
+    fn loose_merge_starts_at_the_first_segment() {
+        let ops = parse_instruction(
+            "第六十三条第二項中「）」とあるのは」を「）」とあるのは、」に改め、「、「電子調書」とあるのは「調書」と」を削る。",
+        )
+        .unwrap();
+        assert_eq!(ops.len(), 2, "{ops:?}");
+        assert!(matches!(&ops[0], Op::Replace { from, to, .. }
+            if from == "）」とあるのは" && to == "）」とあるのは、"));
+        assert!(matches!(&ops[1], Op::Replace { from, to, .. }
+            if from == "、「電子調書」とあるのは「調書」と" && to.is_empty()));
     }
 
     /// 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は読み飛ばす。
