@@ -46,6 +46,11 @@ pub fn admissible(p: Date, e: &Enforcement, t: &DateExpr) -> Option<String> {
             format!("(and {} {})", p.le(t), t.le(&hi))
         }
         Enforcement::Date { era, y, m, d } => t.eq(&DateExpr::lit(era_year(era, *y)?, *m, *d)),
+        Enforcement::LaterOfDateOrPromulgation { era, y, m, d } => {
+            // 暦日と公布日の遅い方: t = d if p <= d else p
+            let day = DateExpr::lit(era_year(era, *y)?, *m, *d);
+            format!("(ite {} {} {})", p.le(&day), t.eq(&day), t.eq(&p))
+        }
         Enforcement::ElapsedFromPromulgation(dur) => {
             // 起算日は公布日（「起算して」）。満了日の翌日
             let day = match dur.unit {

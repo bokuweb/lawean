@@ -28,6 +28,7 @@ use lawean_amend::{article_label, hane_candidates, parse_units, AmendUnit};
 use lawean_source::{parse_law_xml, ArticleNum, LegalDocument};
 use lawean_space::{impact, locate, ImpactKind, LawSpace};
 
+pub mod stage;
 pub mod stale;
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +158,8 @@ pub struct Input<'a> {
     pub base_draft: Option<&'a LegalDocument>,
     /// 他法令の起草時の版（`space` と同じ法令 ID で）
     pub space_draft: Option<&'a LawSpace>,
+    /// 附則の「X法の施行の日」の X の施行日（法令名, YYYY-MM-DD）。整備法の号が兄弟の改正法の施行日を引くとき
+    pub other_law_dates: &'a [(String, String)],
 }
 
 fn check(kind: Kind, status: Status, message: impl Into<String>, details: Vec<String>) -> Check {
@@ -207,9 +210,96 @@ fn op_line(op: &IdentOp) -> String {
 }
 
 /// 検査本体
+/// 施行日ごとの分割: 附則の号が単位の一部の改正規定だけを別の日に施行するなら（令3-49 第6条）、
+/// この施行日に施行される部分だけを当てる。附則か施行日が無ければそのまま
+fn stage_for_day(input: &Input<'_>) -> Vec<(String, AmendUnit)> {
+    use lawean_extract::calendar::parse;
+    use lawean_extract::suppl::{spec_for_law_id, spec_from_text};
+    let Some(day) = input.enforced.and_then(parse) else {
+        return input.units.clone();
+    };
+    let spec = match (input.suppl, input.expected) {
+        (Some(t), _) => Some(spec_from_text(t, input.promulgated.and_then(parse))),
+        (None, Some(exp)) => exp
+            .version_id
+            .as_deref()
+            .and_then(|v| v.rsplit('_').next())
+            .and_then(|id| spec_for_law_id(exp, id)),
+        _ => None,
+    };
+    let Some(spec) = spec else {
+        return input.units.clone();
+    };
+    let spec = resolve_spec(spec, input.other_law_dates);
+    let Some(p) = spec.promulgated else {
+        return input.units.clone();
+    };
+    input
+        .units
+        .iter()
+        .map(|(label, unit)| {
+            let parts = stage::parts_of(&spec, label, unit);
+            if parts.len() <= 1 {
+                return (label.clone(), unit.clone());
+            }
+            let sel = stage::select_for_day(&parts, p, day);
+            let on_day: Vec<&stage::Part> = parts
+                .iter()
+                .zip(&sel)
+                .filter(|(_, s)| **s == stage::Selection::Apply)
+                .map(|(pt, _)| pt)
+                .collect();
+            if on_day.is_empty() {
+                return (label.clone(), unit.clone());
+            }
+            // 元の順で、この施行日の部分の文だけ
+            let keep: Vec<&str> = on_day
+                .iter()
+                .flat_map(|pt| pt.unit.instructions.iter().map(|i| i.text.as_str()))
+                .collect();
+            let u = AmendUnit {
+                article_of_amending_law: unit.article_of_amending_law.clone(),
+                target_title: unit.target_title.clone(),
+                instructions: unit
+                    .instructions
+                    .iter()
+                    .filter(|i| keep.contains(&i.text.as_str()))
+                    .cloned()
+                    .collect(),
+            };
+            (label.clone(), u)
+        })
+        .collect()
+}
+
+/// 附則の「X法の施行の日」を与えられた施行日で暦日にする
+fn resolve_spec(
+    mut spec: lawean_extract::suppl::EnforcementSpec,
+    dates: &[(String, String)],
+) -> lawean_extract::suppl::EnforcementSpec {
+    use lawean_extract::suppl::resolve_other_law;
+    if dates.is_empty() {
+        return spec;
+    }
+    if let Some(m) = &mut spec.main {
+        if let Some(e) = &m.enforcement {
+            m.enforcement = Some(resolve_other_law(e, dates));
+        }
+    }
+    for it in &mut spec.items {
+        if let Some(e) = &it.clause.enforcement {
+            it.clause.enforcement = Some(resolve_other_law(e, dates));
+        }
+    }
+    spec
+}
+
 pub fn run(input: &Input<'_>) -> Report {
     let mut checks = Vec::new();
     let mut units_out = Vec::new();
+    // 施行日ごとの分割（附則の号が単位の一部だけを別の日にするとき）。以下は分けた後の単位で見る
+    let staged = stage_for_day(input);
+    let units: &[(String, AmendUnit)] = &staged;
     let base_rev = ident::from_document(input.base);
     let mut cur_doc = input.base.clone();
     // 再パース済みの改正後文書（新旧対照表・他法令の検査で番号から引くため）
@@ -227,7 +317,7 @@ pub fn run(input: &Input<'_>) -> Report {
     let mut stale_fixes: Vec<String> = Vec::new();
     let mut stopped = false;
 
-    for (i, (label, unit)) in input.units.iter().enumerate() {
+    for (i, (label, unit)) in units.iter().enumerate() {
         if stopped {
             units_out.push(UnitSummary {
                 label: label.clone(),
@@ -365,7 +455,7 @@ pub fn run(input: &Input<'_>) -> Report {
                 }
                 // 後続の単位の後なら当たるか（順序の入れ替わり）
                 let mut after_others = None;
-                for (j, (l2, u2)) in input.units.iter().enumerate() {
+                for (j, (l2, u2)) in units.iter().enumerate() {
                     if j == i {
                         continue;
                     }
@@ -460,7 +550,7 @@ pub fn run(input: &Input<'_>) -> Report {
             "先に施行される単位が後の単位に依存している",
             order_info,
         )
-    } else if input.units.len() > 1 {
+    } else if units.len() > 1 {
         check(
             Kind::Order,
             Status::Pass,
@@ -653,7 +743,7 @@ pub fn run(input: &Input<'_>) -> Report {
                         _ => None,
                     })
             };
-            for (label, unit) in &input.units {
+            for (label, unit) in units {
                 match impact(space, &target, unit, day) {
                     Ok(imps) => {
                         for i in imps {
@@ -755,10 +845,16 @@ pub fn run(input: &Input<'_>) -> Report {
     checks.push(match (input.suppl, input.expected, input.enforced) {
         (Some(suppl), _, Some(day)) => {
             let p = input.promulgated.and_then(lawean_extract::calendar::parse);
-            let spec = lawean_extract::suppl::spec_from_text(suppl, p);
+            let spec = resolve_spec(
+                lawean_extract::suppl::spec_from_text(suppl, p),
+                input.other_law_dates,
+            );
+            // 分ける前の単位で（部分ごとの施行日を報告する）
             check_enforcement_with(&spec, "起草中の附則", day, &input.units, true)
         }
-        (None, Some(exp), Some(day)) => check_enforcement(exp, day, &input.units),
+        (None, Some(exp), Some(day)) => {
+            check_enforcement(exp, day, &input.units, input.other_law_dates)
+        }
         (None, None, Some(_)) => check(
             Kind::Enforcement,
             Status::Skip,
@@ -780,7 +876,7 @@ pub fn run(input: &Input<'_>) -> Report {
             let mut fails = Vec::new();
             let mut warns = Vec::new();
             let mut infos = Vec::new();
-            for (label, unit) in &input.units {
+            for (label, unit) in units {
                 let o = stale::check_unit(
                     label,
                     unit,
@@ -1113,7 +1209,12 @@ fn parse_pos(pos: &str) -> Option<(ArticleNum, u32)> {
 
 /// 改正法の附則第一条から各単位（改正法の第 N 条）の施行日の許容区間を出し、施行日と突き合わせる。
 /// 単位が複数なら、最後の単位の区間に施行日が入り、それより前の単位はその日までに施行できる（下限 ≤ 施行日）こと
-fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit)]) -> Check {
+fn check_enforcement(
+    exp: &LegalDocument,
+    day: &str,
+    units: &[(String, AmendUnit)],
+    other_law_dates: &[(String, String)],
+) -> Check {
     use lawean_extract::suppl::spec_for_law_id;
     // 改正法の法令 ID は改正後リビジョンの id（403AC0000000090_20230220_504AC0000000048）の末尾
     let amend_id = exp
@@ -1129,6 +1230,7 @@ fn check_enforcement(exp: &LegalDocument, day: &str, units: &[(String, AmendUnit
             vec![],
         );
     };
+    let spec = resolve_spec(spec, other_law_dates);
     check_enforcement_with(
         &spec,
         "改正後リビジョンに載る改正法の附則",
@@ -1175,97 +1277,99 @@ fn check_enforcement_with(
     let n = units.len();
     for (i, (label, unit)) in units.iter().enumerate() {
         // 附則の号・ただし書きは、整備法なら改正法の条（「第三十五条」）、単独法の改正なら被改正法の条
-        // （「第三十四条の二第一項の改正規定」）で範囲を書く。両方で引き、被改正法の条の側を優先
-        let target_arts: Vec<String> = unit
-            .instructions
-            .iter()
-            .flat_map(|i| i.ops.iter())
-            .filter_map(|o| o.article().map(|a| a.to_num_string()))
-            .collect();
-        let by_target = spec
-            .for_target_articles(&target_arts)
-            .filter(|(_, sc)| sc.is_some());
-        let by_amending = label
-            .trim_start_matches('第')
-            .split('条')
-            .next()
-            .and_then(kanji_num)
-            .and_then(|art| spec.for_article(art, None));
-        let Some((clause, scope)) = by_target.or(by_amending) else {
+        // （「第三十四条の二第一項の改正規定」）で範囲を書く。号が単位の一部の改正規定だけを別の日にしていれば、
+        // 単位を施行期日ごとの部分に分けて（`stage::parts_of`）、それぞれの日を見る
+        let parts = stage::parts_of(spec, label, unit);
+        if parts.is_empty() {
             warns += 1;
             details.push(format!("{label}: 附則に施行期日が無い"));
             continue;
-        };
-        // 「第三条中第九条第一項の改正規定」のように、この単位の一部だけを別の日にする号なら、
-        // 単位全体（残り）は本文の日。一部の改正規定が別の日に施行されることは Warn で知らせる
-        // 「第三条の規定（…の改正規定に限る。）」の括弧も一部限定
-        let partial = scope.is_some_and(|sc| {
-            sc.contains(&format!("{label}中"))
-                || sc
-                    .split_once(&format!("{label}の規定（"))
-                    .is_some_and(|(_, rest)| {
-                        rest.split('）')
-                            .next()
-                            .is_some_and(|p| p.contains("に限る"))
-                    })
-        });
-        let (clause, scope, where_note) = if partial {
-            warns += 1;
-            details.push(format!(
-                "{label}: 附則の号「{}」は {label} の一部の改正規定だけを別の日（{}）にしている。残りは本文の日で見る",
-                scope.unwrap_or("").chars().take(60).collect::<String>(),
-                clause.text
-            ));
-            (spec.main.as_ref().unwrap(), None, "")
-        } else {
-            (clause, scope, "")
-        };
-        let _ = where_note;
-        let where_ = match scope {
-            Some(sc) if lawean_extract::suppl::scope_is_target_side(sc) => {
-                "附則第一条のただし書き・号（被改正法の条で）"
-            }
-            Some(_) => "附則第一条の号",
-            None => "附則第一条本文",
-        };
-        let Some(enf) = &clause.enforcement else {
-            warns += 1;
-            details.push(format!(
-                "{label}: {where_}「{}」は読めない（他法令の施行日に依る）",
-                clause.text
-            ));
-            continue;
-        };
-        let Some((lo, hi)) = admissible(p, enf) else {
-            warns += 1;
-            details.push(format!(
-                "{label}: {where_}「{}」の区間が出せない",
-                clause.text
-            ));
-            continue;
-        };
-        let range = format!(
-            "{where_}「{}」→ {}〜{}（公布 {}）",
-            clause.text,
-            fmt(lo),
-            fmt(hi),
-            fmt(p)
-        );
+        }
+        let split = parts.len() > 1;
         let last = i + 1 == n;
-        let verdict = if last {
-            if lo <= day && day <= hi {
-                format!("施行日 {} は範囲内", fmt(day))
+        let mut any_on_day = false;
+        let mut lines: Vec<String> = Vec::new();
+        let sel = stage::select_for_day(&parts, p, day);
+        for (part, selection) in parts.iter().zip(sel) {
+            let (clause, scope) = (&part.clause, part.scope.as_deref());
+            let what = if split {
+                let m = part.unit.instructions.len();
+                let first: String = part.unit.instructions[0].text.chars().take(24).collect();
+                format!("{label}のうち {m} 文（「{first}…」）")
+            } else {
+                label.clone()
+            };
+            let where_ = match scope {
+                Some(sc) if lawean_extract::suppl::scope_is_target_side(sc) => {
+                    "附則第一条のただし書き・号（被改正法の条で）"
+                }
+                Some(_) => "附則第一条の号",
+                None => "附則第一条本文",
+            };
+            let Some(enf) = &clause.enforcement else {
+                warns += 1;
+                lines.push(format!(
+                    "{what}: {where_}「{}」は読めない（他法令の施行日に依る）",
+                    clause.text
+                ));
+                continue;
+            };
+            let Some((lo, hi)) = admissible(p, enf) else {
+                warns += 1;
+                lines.push(format!(
+                    "{what}: {where_}「{}」の区間が出せない",
+                    clause.text
+                ));
+                continue;
+            };
+            let range = format!(
+                "{where_}「{}」→ {}〜{}（公布 {}）",
+                clause.text,
+                fmt(lo),
+                fmt(hi),
+                fmt(p)
+            );
+            let on_day = lo <= day && day <= hi;
+            any_on_day |= on_day;
+            let verdict = if split {
+                // 分けた部分: この施行日に当たる部分と、前後の日に施行する部分（当てない）
+                match selection {
+                    stage::Selection::Apply => {
+                        format!("施行日 {} は範囲内（この施行日に当てる）", fmt(day))
+                    }
+                    stage::Selection::CabinetOrderElsewhere => format!(
+                        "政令で定める日の区間に施行日 {} を含むが、この日に確定した別の部分があるので当てない（別の政令の日）",
+                        fmt(day)
+                    ),
+                    stage::Selection::AlreadyEnforced => format!(
+                        "施行日 {} より前に施行済み（この施行日には当てない）",
+                        fmt(day)
+                    ),
+                    _ => format!("施行日 {} より後に施行（この施行日には当てない）", fmt(day)),
+                }
+            } else if last {
+                if on_day {
+                    format!("施行日 {} は範囲内", fmt(day))
+                } else {
+                    fails += 1;
+                    format!("施行日 {} は範囲外", fmt(day))
+                }
+            } else if lo <= day {
+                format!("施行日 {} までに施行できる", fmt(day))
             } else {
                 fails += 1;
-                format!("施行日 {} は範囲外", fmt(day))
-            }
-        } else if lo <= day {
-            format!("施行日 {} までに施行できる", fmt(day))
-        } else {
+                format!("施行日 {} にはまだ施行できない", fmt(day))
+            };
+            lines.push(format!("{what}: {range}。{verdict}"));
+        }
+        if split && !any_on_day && last {
             fails += 1;
-            format!("施行日 {} にはまだ施行できない", fmt(day))
-        };
-        details.push(format!("{label}: {range}。{verdict}"));
+            lines.push(format!(
+                "{label}: どの部分も施行日 {} に施行されない（範囲外）",
+                fmt(day)
+            ));
+        }
+        details.extend(lines);
     }
     // 附則の号・ただし書きが挙げる条のうち、改め文のどの単位にも当たらないもの（「第九十五条の規定は」と書いたが
     // 改め文にあるのは第三十五条、など）。起草中の附則（改め文と一緒に書いたもの）でだけ見る。
@@ -1463,6 +1567,8 @@ pub struct TextInput<'a> {
     pub base_draft_xml: Option<&'a str>,
     /// 他法令の起草時の版
     pub other_laws_draft: &'a [String],
+    /// 附則の「X法の施行の日」の X の施行日（法令名, YYYY-MM-DD）
+    pub other_law_dates: &'a [(String, String)],
 }
 
 pub fn run_text_input(t: &TextInput<'_>) -> Report {
@@ -1477,6 +1583,7 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
         promulgated,
         base_draft_xml,
         other_laws_draft,
+        other_law_dates,
     } = *t;
     let base = match parse_law_xml(base_xml) {
         Ok(d) => d,
@@ -1586,6 +1693,7 @@ pub fn run_text_input(t: &TextInput<'_>) -> Report {
         promulgated,
         base_draft: base_draft.as_ref(),
         space_draft: space_draft.as_ref(),
+        other_law_dates,
     });
     report.checks.insert(
         0,

@@ -79,6 +79,33 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 題名を次のように改める / 第二章の章名を次のように改める | `SetTitle` / `SetContainerTitle` |
 | 第三章の章名を削る | `DeleteContainerTitle`。題名の無い章は単位の最後に前の章に併合（`collapse_untitled`） |
 | 第三章第二節から第五節までを削る / 第百四条から第百五条の二までを削る | `DeleteContainers` / `Delete` の範囲 |
+| 第八条第二項中第三号から第六号までを削り | 「X中」を先行詞にして号の範囲を `Delete` に展開（令6-53） |
+| 本則中第三十三条の三を第三十三条の四とし / 本則中第N条の次に次の一条を加える | 「本則中」は附則にも条があるときの前置き。読み飛ばす（令3-49） |
+| 第七条の見出しを削り / 第十六条の前の見出しを削り | `DeleteCaption { article }`（令3-44・令5-63） |
+| 同条の前に見出しとして「（X）」を付し | `AttachCaption { article, text }`。「第N条を次のように改める」の内容に見出しの行が無ければ今の見出しのまま |
+| 第百条の二第三号及び第四号を次のように改める / 第九十六条第六号から第八号までを次のように改める + 号の行 | `ReplaceItemSet { at, items, range, text }`: 挙げた号だけの差し替え（令5-79 に 6 回） |
+| 同条第四項及び第六項中「A」を削る | 位置の列挙に字句の削除（`Replace` の列挙） |
+| 同号ロ中「A」を「B」に改め | 位置に号の下の細目（`Loc.sub`）。字句の置換をその細目に限る |
+| 同号ロを同号ハとし / 同号中ヘをトとし | `RenumberSubitem { at, from, to }`（令3-44・令3-49） |
+| ハからホまでをニからヘまでとし | `ShiftSubitems { at, from, to, by }` |
+| 同号イの次に次のように加える + 「ロ　本文」 | `InsertSubitemAfter { at, after, text }`。番号は記号の順に付け直す |
+| 第七十六条の二（見出しを含む。）及び第七十七条中「A」を「B」に改める | 見出し（`ReplaceCaption`）と本文の両方 |
+| 同条を附則第一条の三とし / 附則第一条の次に次の一条を加える | `RenumberArticle { suppl: true }` / `InsertArticleAfter { suppl: true }`: 原始附則の条は id の世界（本則）に無いので文書の側だけ（令3-49 第13条） |
+| 附則に次の二条を加える / 附則に次の見出し及び二条を加える + 条の行 | `AppendSupplArticles { text }`: 原始附則の末尾に（令3-49） |
+| 本則に次の一章を加える + 章の行 | `AppendContainers { text }`: 本則の末尾に |
+| 第二十四条の四の七及び第二十四条の四の八を削る / 同条第二項及び第三項を削り | 位置の列挙の削除（`Delete` の列挙） |
+| 第二編第二章に次の一節を加える / 第一編に次の一章を加える | `AppendContainers { path, text }`（容器の末尾に容器） |
+| 第一章第五節中第十七条の前に次の三条を加える | `InsertArticleBefore { before, text }` |
+| 第七条から第九条までを次のように改める | `ReplaceArticles`（条の範囲） |
+| 第四章第四節を削る | `DeleteContainers`（1 つの容器） |
+| 第百八十五条（見出しを含む。）中「A」を「B」に改める | 見出し（`ReplaceCaption`）と本文の両方（1 つの位置でも） |
+| 第九条の見出し中「A」の下に「B」を加え / 同条の見出し中「A」を削り | `ReplaceCaption`（追加は A→AB、削除は A→空） |
+| 第三十八条の表第七十条第二項の項中「A」を「B」に改め / 同条の表Xの項中「A」を削り | `ReplaceTableRow { at, row, from, to }`: 条・項の中の読替え表の、上欄が row の行（位置の列挙も） |
+| 同項に次の表を加える + 欄の行 | `AppendTable { at, text }`（欄は「第」で始まる行から行を組む） |
+| 別表第一及び別表第二を削る | `DeleteAppdx { tables }` |
+| 第八条中「A」を「B」に改め、同条を同条第二項とし、同条に第一項として次の一項を加える + 項の行 | `RenumberParagraph { from: 1, to: 2 }` + `InsertParagraphFirst { article, text }`（条の先頭に項。id の世界では前の条の最後の項の後ろに insertAfter）（令5-53） |
+| 同じ文で「A」を「B」に、「B」を「C」に改め | 加えた字句（B）は後の置換が指さない。置換で入れた字句に印（`apply::mark`、私用領域の文字）を付け、文の終わりに外す。元の字句に無く加えた字句の中にだけあるなら、それを指す（令5-53 仲裁法） |
+| 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |
 | 第N項中第A号を第B号とし / 第A号から第B号までをK号ずつ繰り下げ / 同号の次に次のK号を加える / 同項に次の各号を加える / 同項第三号を次のように改める / 同項各号を次のように改める / 同号に次のように加える（イロハ・(1)） / 同項第N号を削る | `RenumberItem` / `ShiftItems` / `InsertItemAfter` / `AppendItem` / `ReplaceItem` / `ReplaceItems` / `AppendItem`（号の下）/ `Delete`（号） |
@@ -87,6 +114,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 目次中「A」を削り / 第二章の章名中「A」を削る | `ReplaceToc` / `ReplaceContainerTitle` の `to` が空 |
 | 第二章の二（枝番の章・節）/ 同号の前に次の一号を加える / 第一号から第四号までの規定中 | 容器の番号は「2_2」（`String`）/ `InsertItemBefore` / 号の範囲の展開 |
 
+| 別表第二X法（…）の項中「A」を「B」に、「C」の下に「D」を加える | `ReplaceAppdxRow { table, row, from, to }`（別表の行。上欄が `row` で始まる行を文の始まりで引き、行の中の字句を改める。本則ではないので文書の側だけ） |
 | 附則第七条第六項中「A」を「B」に改める | `Loc.suppl`（原始附則の条。id の世界には無いので文書の側だけ） |
 | 目次及び第三章第四節の節名中「A」の下に「B」を加える | 位置の列挙に目次・節名・見出しが混じる形（字句の追加も） |
 

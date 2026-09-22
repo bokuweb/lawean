@@ -16,6 +16,7 @@ lawean-leanrt = { path = "../lawean-leanrt", optional = true }
 lawean-extract = { path = "../lawean-extract" }
 serde.workspace = true
 serde_json.workspace = true
+regex.workspace = true
 
 [features]
 default = ["lean"]

@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""衆議院「制定法律」ページ（Shift_JIS の HTML）を fixtures/amendments の平文にする。
+
+    python3 tools/shugiin_text.py <html> [--article 第七条] > out.txt
+
+- 段落は 1 行。字下げは全角空白（衆議院の体裁のまま: 改め文は 2 字下げ、加える条文は 1 字下げ）
+- 縦書きの大きな「 」（複数行の目次の字句など）は rowspan の表で組まれているので、中の行をつないで 1 行の「…」にし、
+  前の行（「…を」「…に」）と次の行（「に改める。」）と合わせて 1 つの改め文にする
+- ルビの (かな) は残す（lawean-amend の normalize_source_text が落とす）
+- --article を与えると、その条（「第七条　X法（…）の一部を次のように改正する。」から次の条・附則の前まで）だけ
+"""
+import html
+import re
+import sys
+from html.parser import HTMLParser
+
+
+class P(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.lines = []  # 出力の行
+        self.cur = []  # 今の段落の文字
+        self.in_table = 0
+        self.table_rows = []
+        self.row = None
+        self.cell = None
+        self.skip = 0  # script/style
+
+    def flush(self):
+        t = "".join(self.cur)
+        self.cur = []
+        if self.in_table and self.cell is not None:
+            self.cell.append(t)
+            return
+        if t.strip("　 \n\r\t"):
+            self.lines.append(t.rstrip())
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self.skip += 1
+        if tag == "table":
+            self.flush()
+            self.in_table += 1
+            self.table_rows = []
+        elif tag == "tr" and self.in_table:
+            self.row = []
+        elif tag == "td" and self.in_table:
+            self.cell = []
+        elif tag in ("p", "div", "br", "h1", "h2", "h3", "h4", "li"):
+            self.flush()
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self.skip -= 1
+        if tag in ("p", "div", "h1", "h2", "h3", "h4", "li"):
+            self.flush()
+        elif tag == "td" and self.in_table:
+            self.flush()
+            self.row.append("".join(self.cell).strip("\n\r\t "))
+            self.cell = None
+        elif tag == "tr" and self.in_table:
+            if self.row:
+                self.table_rows.append(self.row)
+            self.row = None
+        elif tag == "table" and self.in_table:
+            self.in_table -= 1
+            self.lines.extend(self.table_lines(self.table_rows))
+            self.table_rows = []
+
+    def handle_data(self, data):
+        if self.skip:
+            return
+        self.cur.append(data.replace("\r", "").replace("\n", ""))
+
+    @staticmethod
+    def table_lines(rows):
+        """rowspan の「 」の表なら 1 行の「…」に。それ以外（読替え表など）は欄ごとに 1 行（lawean-amend は表の欄を行で受け取る）"""
+        ws = "\u3000 \xa0\n\r\t"
+        cells = [c.strip(ws) for r in rows for c in r]
+        opens = [c for c in cells if c == "「"]
+        closes = [c for c in cells if c == "」"]
+        body = [c for c in cells if c not in ("「", "」", "")]
+        if opens and closes:
+            return ["「" + "".join(body) + "」"]
+        return [c for c in cells if c]
+
+
+def merge_blocks(lines):
+    """「…」だけの行を、前の行（…を／…に／…中）と次の行（に改める。／を…）につなぐ"""
+    out = []
+    i = 0
+    while i < len(lines):
+        l = lines[i]
+        if l.startswith("「") and l.endswith("」") and out and re.search(r"(を|に|中|、)$", out[-1]):
+            out[-1] += l
+            # 次の行が続き（字下げ 1 の「に改める。」「を「…」に改める。」）なら同じ行に
+            j = i + 1
+            while j < len(lines) and lines[j].startswith("「") and lines[j].endswith("」"):
+                out[-1] += lines[j]
+                j += 1
+            if j < len(lines) and re.match(r"^　?(に|を|、|と)", lines[j]):
+                out[-1] += lines[j].strip("　")
+                j += 1
+            i = j
+            continue
+        out.append(l)
+        i += 1
+    return out
+
+
+def main():
+    args = sys.argv[1:]
+    article = None
+    if "--article" in args:
+        k = args.index("--article")
+        article = args[k + 1]
+        del args[k : k + 2]
+    data = open(args[0], "rb").read()
+    # meta は Shift_JIS と言っていても UTF-8 のページがある。UTF-8 として読めればそれ
+    try:
+        raw = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raw = data.decode("shift_jis", errors="replace")
+    p = P()
+    p.feed(raw)
+    lines = [html.unescape(l) for l in p.lines]
+    lines = merge_blocks(lines)
+    # 本文の始まり（「◎題名」の次）から
+    start = next((i for i, l in enumerate(lines) if l.lstrip("　 ").startswith("◎")), -1) + 1
+    lines = lines[start:]
+    if article:
+        s = next(i for i, l in enumerate(lines) if l.startswith(article + "　"))
+        e = next(
+            (i for i in range(s + 1, len(lines)) if re.match(r"^第[一二三四五六七八九十百]+条　", lines[i]) or "附　則" in lines[i]),
+            len(lines),
+        )
+        lines = lines[s:e]
+        # 直前の見出し「（X法の一部改正）」は含めない、末尾の見出しも落とす
+        while lines and re.match(r"^　*(（.+）|第[一二三四五六七八九十]+[編章節]　[^（）]+)$", lines[-1]):
+            lines.pop()
+    sys.stdout.write("\n".join(lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()

@@ -95,6 +95,9 @@ fn loc_label(l: &Loc) -> String {
             }
         }
     }
+    if let Some(k) = &l.sub {
+        s.push_str(k);
+    }
     if let Some(p) = l.part {
         s.push_str(part_label(p));
     }
@@ -132,6 +135,11 @@ fn segment(op: &Op, last: bool) -> String {
         ),
         Op::AppendParagraph { article, .. } => format!(
             "{}に次の一項を{}",
+            article_label(article),
+            end("加え", "加える")
+        ),
+        Op::InsertParagraphFirst { article, .. } => format!(
+            "{}に第一項として次の一項を{}",
             article_label(article),
             end("加え", "加える")
         ),
@@ -177,6 +185,66 @@ fn segment(op: &Op, last: bool) -> String {
             path.last().map(|(k, _)| kind_label(*k)).unwrap_or("章"),
             end("し", "する")
         ),
+        Op::AppendSupplArticles { text } => format!(
+            "附則に次の{}{}条を{}",
+            if text.first().is_some_and(|l| l.starts_with('（')) {
+                "見出し及び"
+            } else {
+                ""
+            },
+            to_kanji(
+                text.iter()
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
+                    .count() as u32
+            ),
+            end("加え", "加える")
+        ),
+        Op::AppendContainers { path, text } => {
+            // 加える容器の種類は最初の行から（「第二章の二　…」→ 章）
+            let kind = text
+                .iter()
+                .find_map(|l| {
+                    l.trim_start_matches('\u{3000}')
+                        .split_once('\u{3000}')
+                        .map(|(t, _)| t.chars().last().unwrap_or('章'))
+                })
+                .unwrap_or('章');
+            format!(
+                "{}に次の{}{kind}を{}",
+                if path.is_empty() {
+                    "本則".to_string()
+                } else {
+                    path.iter()
+                        .map(|(k, n)| cont_label(*k, n))
+                        .collect::<String>()
+                },
+                to_kanji(
+                    text.iter()
+                        .filter(|l| {
+                            l.trim_start_matches('\u{3000}').starts_with('第')
+                                && l.split_once('\u{3000}')
+                                    .is_some_and(|(t, _)| t.ends_with(kind))
+                        })
+                        .count() as u32
+                ),
+                end("加え", "加える")
+            )
+        }
+        Op::InsertArticleBefore {
+            before,
+            text,
+            suppl,
+        } => format!(
+            "{}{}の前に次の{}条を{}",
+            if *suppl { "附則" } else { "" },
+            article_label(before),
+            to_kanji(
+                text.iter()
+                    .filter(|l| l.starts_with('第') && l.contains('\u{3000}'))
+                    .count() as u32
+            ),
+            end("加え", "加える")
+        ),
         Op::AppendArticle { path, text } => format!(
             "{}に次の{}条を{}",
             path.iter()
@@ -191,6 +259,7 @@ fn segment(op: &Op, last: bool) -> String {
             end("加え", "加える")
         ),
         Op::SetTitle { .. } => format!("題名を次のように{}", end("改め", "改める")),
+        Op::SetToc { .. } => "題名の次に次の目次を付する".to_string(),
         Op::DeleteContainerTitle { path } => format!(
             "{}の{}名を{}",
             path_label(path),
@@ -210,6 +279,19 @@ fn segment(op: &Op, last: bool) -> String {
             to_kanji(*to),
             kind_label(*kind),
             end("削り", "削る")
+        ),
+        Op::ReplaceAppdxRow {
+            table,
+            row,
+            from,
+            to,
+        } => format!(
+            "{table}{row}の項中「{from}」を{}",
+            if to.is_empty() {
+                end("削り", "削る").to_string()
+            } else {
+                format!("「{to}」に{}", end("改め", "改める"))
+            }
         ),
         Op::ReplaceContainers { paths, .. } => format!(
             "{}を次のように{}",
@@ -271,6 +353,63 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::ReplaceTableRow { at, row, from, to } if to.is_empty() => format!(
+            "{}の表{row}の項中「{from}」を{}",
+            loc_label(at),
+            end("削り", "削る")
+        ),
+        Op::ReplaceTableRow { at, row, from, to } => format!(
+            "{}の表{row}の項中「{from}」を「{to}」に{}",
+            loc_label(at),
+            end("改め", "改める")
+        ),
+        Op::AppendTable { at, .. } => {
+            format!("{}に次の表を{}", loc_label(at), end("加え", "加える"))
+        }
+        Op::DeleteAppdx { tables } => format!("{}を{}", tables.join("及び"), end("削り", "削る")),
+        Op::RenumberSubitem { at, from, to } => {
+            format!("{}{from}を{to}と{}", loc_label(at), end("し", "する"))
+        }
+        Op::ShiftSubitems { at, from, to, by } => {
+            let (a, b) = (lawean_amend::kana_index(from), lawean_amend::kana_index(to));
+            format!(
+                "{}{from}から{to}までを{}から{}までと{}",
+                loc_label(at),
+                lawean_amend::kana_of((a as i32 + by) as u32),
+                lawean_amend::kana_of((b as i32 + by) as u32),
+                end("し", "する")
+            )
+        }
+        Op::InsertSubitemAfter { at, after, .. } => format!(
+            "{}{after}の次に次のように{}",
+            loc_label(at),
+            end("加え", "加える")
+        ),
+        Op::ReplaceItemSet {
+            at, items, range, ..
+        } => {
+            let list = if *range && items.len() >= 2 {
+                format!(
+                    "第{}号から第{}号まで",
+                    item_kanji(&items[0]),
+                    item_kanji(&items[items.len() - 1])
+                )
+            } else {
+                let labels: Vec<String> = items
+                    .iter()
+                    .map(|i| format!("第{}号", item_kanji(i)))
+                    .collect();
+                match labels.len() {
+                    0 | 1 => labels.concat(),
+                    n => format!("{}及び{}", labels[..n - 1].join("、"), labels[n - 1]),
+                }
+            };
+            format!(
+                "{}{list}を次のように{}",
+                loc_label(at),
+                end("改め", "改める")
+            )
+        }
         Op::AppendItem { at, text } if at.item.is_some() => {
             format!("{}に次のように{}", loc_label(at), end("加え", "加える"))
         }
@@ -291,8 +430,9 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
-        Op::InsertArticleAfter { after, text } => format!(
-            "{}の次に次の{}条を{}",
+        Op::InsertArticleAfter { after, text, suppl } => format!(
+            "{}{}の次に次の{}条を{}",
+            if *suppl { "附則" } else { "" },
             article_label(after),
             to_kanji(
                 text.iter()
@@ -343,9 +483,11 @@ fn segment(op: &Op, last: bool) -> String {
             }
         ),
         Op::Delete { at } => format!("{}を{}", loc_label(at), end("削り", "削る")),
-        Op::RenumberArticle { from, to } => format!(
-            "{}を{}と{}",
+        Op::RenumberArticle { from, to, suppl } => format!(
+            "{}{}を{}{}と{}",
+            if *suppl { "附則" } else { "" },
             article_label(from),
+            if *suppl { "附則" } else { "" },
             article_label(to),
             end("し", "する")
         ),
@@ -372,6 +514,11 @@ fn segment(op: &Op, last: bool) -> String {
                 format!("「{to}」に{}", end("改め", "改める"))
             }
         ),
+        Op::ReplaceCaption { article, from, to } if to.is_empty() => format!(
+            "{}の見出し中「{from}」を{}",
+            article_label(article),
+            end("削り", "削る")
+        ),
         Op::ReplaceCaption { article, from, to } => format!(
             "{}の見出し中「{from}」を「{to}」に{}",
             article_label(article),
@@ -381,6 +528,16 @@ fn segment(op: &Op, last: bool) -> String {
             "{}の見出しを「{text}」に{}",
             article_label(article),
             end("改め", "改める")
+        ),
+        Op::AttachCaption { article, text } => format!(
+            "{}の前に見出しとして「{text}」を{}",
+            article_label(article),
+            end("付し", "付する")
+        ),
+        Op::DeleteCaption { article } => format!(
+            "{}の見出しを{}",
+            article_label(article),
+            end("削り", "削る")
         ),
         Op::ReplaceSentencePart { at, part, .. } => format!(
             "{}{}を次のように{}",
@@ -401,6 +558,7 @@ fn content_of(op: &Op) -> &[String] {
     match op {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
+        | Op::InsertParagraphFirst { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertContainersAfter { text, .. }
         | Op::InsertContainersBefore { text, .. }
@@ -413,7 +571,14 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertItemBefore { text, .. }
         | Op::AppendItem { text, .. }
         | Op::ReplaceItems { text, .. }
+        | Op::ReplaceItemSet { text, .. }
+        | Op::InsertSubitemAfter { text, .. }
+        | Op::AppendSupplArticles { text, .. }
+        | Op::AppendContainers { text, .. }
+        | Op::InsertArticleBefore { text, .. }
+        | Op::AppendTable { text, .. }
         | Op::SetTitle { text, .. }
+        | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }
         | Op::ReplaceArticles { text, .. }
         | Op::ReplaceContainers { text, .. }
@@ -429,6 +594,7 @@ pub fn render_instruction(ins: &Instruction) -> String {
     let phrase_loc = |op: &Op| match op {
         Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(loc_label(at)),
         Op::ReplaceToc { .. } => Some("目次".to_string()),
+        Op::ReplaceAppdxRow { table, row, .. } => Some(format!("{table}{row}の項")),
         _ => None,
     };
     for (i, op) in ins.ops.iter().enumerate() {

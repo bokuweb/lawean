@@ -1,2 +1,6 @@
 /target
 /lean/.lake
+
+# 地方税法（12MB）は fixture に入れない。cargo test は無ければ飛ばす
+fixtures/revisions/325AC0000000226_*.xml
+fixtures/revisions/322AC0000000067_*.xml

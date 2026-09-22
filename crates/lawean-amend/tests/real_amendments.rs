@@ -292,6 +292,7 @@ fn generated_hane_fixes_match_the_real_amendment() {
                 item: None,
                 part: None,
                 suppl: false,
+                sub: None,
             },
             from: "前項".into(),
             to: "第三項".into(),
@@ -361,7 +362,7 @@ fn reiwa5_act53_art125_reproduces_egov_revision() {
     let ops: Vec<&Op> = unit.instructions.iter().flat_map(|i| &i.ops).collect();
     assert!(ops
         .iter()
-        .any(|o| matches!(o, Op::RenumberArticle { from, to }
+        .any(|o| matches!(o, Op::RenumberArticle { from, to, .. }
         if from.to_num_string() == "61" && to.to_num_string() == "64")));
     assert!(ops.iter().any(|o| matches!(
         o,
@@ -381,7 +382,7 @@ fn reiwa5_act53_art125_reproduces_egov_revision() {
         |o| matches!(o, Op::ReplaceSentencePart { part: SentencePart::Back, text, .. }
         if text.len() > 1 && text[0].starts_with("この場合において、次の表"))
     ));
-    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text }
+    assert!(ops.iter().any(|o| matches!(o, Op::InsertArticleAfter { after, text, .. }
         if after.to_num_string() == "46" && text.iter().filter(|l| l.starts_with("第四十")).count() == 2)));
 
     let got = apply_unit(
@@ -575,4 +576,462 @@ fn reiwa7_act47_other_six_laws_reproduce_egov_revisions() {
             d.join("\n")
         );
     }
+}
+
+/// 同 第10条: 地方税法の原始附則の条（「附則第十五条の九の三第一項中」、枝番つき）の字句改め。
+/// 地方税法の XML は 12MB あるので fixture に入れない（`.gitignore`）。手元に無ければ飛ばす
+#[test]
+fn reiwa7_act47_art10_chihozei_suppl_article_is_amended() {
+    let root = format!("{}/../../fixtures/revisions", env!("CARGO_MANIFEST_DIR"));
+    let before = format!("{root}/325AC0000000226_20251121_507AC0000000007.xml");
+    let after = format!("{root}/325AC0000000226_20251128_507AC0000000047.xml");
+    if !std::path::Path::new(&before).exists() || !std::path::Path::new(&after).exists() {
+        eprintln!("skip: 地方税法の XML が無い（e-Gov から取ってくる）");
+        return;
+    }
+    let read = |p: &str| parse_response(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let units = parse_units(&fixture("amendments/507AC0000000047_art10.txt")).unwrap();
+    let got = apply_unit(&read(&before), &units[0], "test").unwrap();
+    let want = read(&after);
+    // 本則は変わらない
+    assert_same_main(&got, &want);
+    // 原始附則第15条の9の3第1項が e-Gov と一致する
+    let suppl_text = |d: &LegalDocument| -> String {
+        let sp = d
+            .suppl_provisions
+            .iter()
+            .find(|s| s.amend_law_num.is_none())
+            .unwrap();
+        for c in &sp.children {
+            if let SupplChild::Provision(Provision::Article(a)) = c {
+                if a.num.to_num_string() == "15_9_3" {
+                    return lawean_amend::para_text(match &a.children[0] {
+                        ArticleChild::Paragraph(p) => p,
+                        _ => panic!(),
+                    });
+                }
+            }
+        }
+        panic!("附則第十五条の九の三が無い")
+    };
+    let (g, w) = (suppl_text(&got), suppl_text(&want));
+    assert!(g.contains("第五条の二十第一項"), "{g}");
+    assert_eq!(g, w);
+}
+
+/// 同 第9条: 地方自治法 別表第二の「マンションの建替え等の円滑化に関する法律の項」の字句改め（別表の行）。
+/// 地方自治法の XML は 2.4MB あるので fixture に入れない。手元に無ければ飛ばす。
+/// 突き合わせは別表の行の本文（本則は e-Gov の 2 つの版の間で他の法律も変えているので見ない）
+#[test]
+fn reiwa7_act47_art9_chihojichi_appendix_row_is_amended() {
+    let root = format!("{}/../../fixtures/revisions", env!("CARGO_MANIFEST_DIR"));
+    let before = format!("{root}/322AC0000000067_20251001_507AC0000000022.xml");
+    let after = format!("{root}/322AC0000000067_20260401_507AC0000000047.xml");
+    if !std::path::Path::new(&before).exists() || !std::path::Path::new(&after).exists() {
+        eprintln!("skip: 地方自治法の XML が無い");
+        return;
+    }
+    let read = |p: &str| parse_response(&std::fs::read_to_string(p).unwrap()).unwrap();
+    let units = parse_units(&fixture("amendments/507AC0000000047_art9.txt")).unwrap();
+    let got = apply_unit(&read(&before), &units[0], "test").unwrap();
+    let want = read(&after);
+    let row = |d: &LegalDocument, key: &str| -> String {
+        for ap in &d.appendices {
+            let x = ap.to_xml();
+            if let Some(i) = x.find(key) {
+                let j = x[..i].rfind("<TableRow").unwrap();
+                let k = x[i..].find("</TableRow>").unwrap() + i;
+                let t = regex_strip(&x[j..k]);
+                return t;
+            }
+        }
+        panic!("{key} の項が無い")
+    };
+    fn regex_strip(x: &str) -> String {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for c in x.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                c if !in_tag && !c.is_whitespace() => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    }
+    let g = row(
+        &got,
+        "マンションの再生等の円滑化に関する法律（平成十四年法律第七十八号）",
+    );
+    let w = row(
+        &want,
+        "マンションの再生等の円滑化に関する法律（平成十四年法律第七十八号）",
+    );
+    assert_eq!(g, w);
+    assert!(
+        g.contains("第九条第六項") && g.contains("第九十七条第一項及び第三項"),
+        "{g}"
+    );
+}
+
+/// 令和5年法律第63号（デジタル社会形成基本法等の一部改正、令5-6-16 公布）第7条（古物営業法）・第10条（質屋営業法）。
+/// 施行 2024-04-01。e-Gov は公布日に改正法の附則だけを付けた版（`_20230616_`）を挟むので、その版を発射台にする。
+/// 古物営業法: 「の下に…を加える」の中で定義語を足し、同条に一項を加える。質屋営業法: 見出しつきの条の全部改正
+#[test]
+fn reiwa5_act63_kobutsu_and_shichiya_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "324AC0000000108_20230616_505AC0000000063",
+            "324AC0000000108_20240401_505AC0000000063",
+        ),
+        (
+            "10",
+            "325AC0000000158_20230616_505AC0000000063",
+            "325AC0000000158_20240401_505AC0000000063",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/505AC0000000063_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        assert_eq!(units.len(), 1, "art{art}");
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+    }
+}
+
+/// 令和3年法律第44号（第11次地方分権一括法、令3-5-26 公布）第7条（宅地建物取引業法）。施行は公布から 3 年以内の政令日 = 2024-05-25。
+/// 起草から施行までの 3 年の間に宅建業法は令3-37・令2-8・令4-61・令4-68・令5-79 で改正されている（先行改正との競合の実例）。
+/// 第78条の3の全部改正（見出し・号・第2項つき）と第78条の4の字句改め・削除
+#[test]
+fn reiwa3_act44_art7_takken_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art7.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("327AC1000000176_20240401_505AC0000000079"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC1000000176_20240525_503AC0000000044"));
+}
+
+/// 令和6年法律第53号（第14次地方分権一括法、令6-6-19 公布）第8条（宅地建物取引業法）。施行 2025-04-01。
+/// 号の繰り下げの連鎖（「同項中第四号を第八号とし、第三号を第五号とし、同号の次に次の二号を加える」）、号の範囲の削除、
+/// 見出しの改め、第78条の3（令3-44 が 2024-05-25 に全部改正したばかりの条）の字句改め
+#[test]
+fn reiwa6_act53_art8_takken_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/506AC0000000053_art8.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("327AC1000000176_20240619_506AC0000000053"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC1000000176_20250401_506AC0000000053"));
+}
+
+/// 令和5年法律第52号（旅館業法等の一部改正、令5-6-14 公布、施行 2023-12-13）第1条（旅館業法）。
+/// 条の繰り下げ「第三条の四を第三条の五とし、第三条の三を第三条の四とする」の後に第3条の2の字句改めと項の追加、
+/// 号の中のイロ、「同条第一号中…に改め、同条に次の一号を加える」
+#[test]
+fn reiwa5_act52_art1_ryokan_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000052_art1.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("323AC0000000138_20230713_505AC0000000067"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("323AC0000000138_20231213_505AC0000000052"));
+}
+
+/// 令和3年法律第49号（医療法等の一部改正、令3-5-28 公布）第5条・第6条（医師法）。医師法の 3 段の施行:
+/// 第5条 → 2023-04-01（附則第一条第六号）、第6条のうち「医師法第十六条の十一第一項の改正規定」→ 本文 2024-04-01、
+/// 第6条の残り → 2025-04-01（第七号「第六条の規定（医師法第十六条の十一第一項の改正規定を除く。）」）。
+/// 1 つの条を号の範囲（被改正法の条で書く「〜の改正規定」）で 2 つの単位に分けて順に当てる
+#[test]
+fn reiwa3_act49_ishi_stages_split_by_the_enforcement_scope() {
+    let u5 = parse_units(&fixture("amendments/503AC0000000049_art5.txt"))
+        .unwrap()
+        .remove(0);
+    let s1 = apply_unit(
+        &revision("323AC0000000201_20230101_504AC0000000047"),
+        &u5,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("323AC0000000201_20230401_503AC0000000049"));
+
+    let u6 = parse_units(&fixture("amendments/503AC0000000049_art6.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs("医師法第十六条の十一第一項の改正規定").unwrap();
+    let (part, rest) = u6.split_by_locs(&locs);
+    assert_eq!(part.instructions.len(), 1);
+    assert!(part.instructions[0]
+        .text
+        .starts_with("第十六条の十一第一項中"));
+    assert_eq!(rest.instructions.len(), u6.instructions.len() - 1);
+    let s2 = apply_unit(
+        &revision("323AC0000000201_20230401_503AC0000000049"),
+        &part,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s2, &revision("323AC0000000201_20240401_503AC0000000049"));
+    let s3 = apply_unit(&s2, &rest, "test").unwrap();
+    assert_same_main(&s3, &revision("323AC0000000201_20250401_503AC0000000049"));
+}
+
+/// 同 第7条・第8条（歯科医師法）。第7条（本文 2024-04-01）は「題名の次に次の目次を付する」（目次の無い法律に目次を足す）と
+/// 「本則中第三十一条の三を第三十一条の四とし」。第8条（第八号 2026-04-01）は令4-68（2025-06-01）の後の版に当てる
+#[test]
+fn reiwa3_act49_art7_and_art8_shika_ishi_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "323AC0000000202_20230101_504AC0000000047",
+            "323AC0000000202_20240401_503AC0000000049",
+        ),
+        (
+            "8",
+            "323AC0000000202_20250601_504AC0000000068",
+            "323AC0000000202_20260401_503AC0000000049",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/503AC0000000049_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+        if art == "7" {
+            // 目次が付いた
+            assert!(got.toc.is_some(), "art7: 目次が無い");
+        }
+    }
+}
+
+/// 令和3年法律第44号 第5条（沿岸漁業改善資金助成法、附則第一条第三号 2022-04-01）。
+/// 「第七条の見出しを削り、同条の前に見出しとして「（貸付資格の認定）」を付し、同条を次のように改める」、
+/// 「第八条の見出しを削り」、条の繰り下げの連鎖（第15条→第16条 … 第12条→第13条）と「第十一条の次に次の一条を加える」
+#[test]
+fn reiwa3_act44_art5_engan_gyogyo_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art5.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("354AC0000000025_20210526_503AC0000000044"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("354AC0000000025_20220401_503AC0000000044"));
+    // 見出しも e-Gov と同じ（第7条は「（貸付資格の認定）」、第8条は見出し無し）
+    let caption = |d: &LegalDocument, n: &str| -> Option<String> {
+        fn find<'a>(ps: &'a [Provision], n: &str) -> Option<&'a Article> {
+            ps.iter().find_map(|p| match p {
+                Provision::Article(a) if a.num.to_num_string() == n => Some(a),
+                Provision::Container(c) => find(&c.children, n),
+                _ => None,
+            })
+        }
+        find(&d.main_provision, n)
+            .and_then(|a| a.caption.as_ref())
+            .map(|c| inline_text(c))
+    };
+    let exp = revision("354AC0000000025_20220401_503AC0000000044");
+    assert_eq!(caption(&got, "7"), caption(&exp, "7"));
+    assert_eq!(caption(&got, "8"), caption(&exp, "8"));
+    assert_eq!(caption(&got, "7").as_deref(), Some("（貸付資格の認定）"));
+}
+
+/// 令和3年法律第44号 第4条（中小漁業融資保証法、2022-04-01）。号の下のイロハ:
+/// 「同号ロ中「イに」を「イ及びロに」に改め、同号ロを同号ハとし、同号イの次に次のように加える」+「ロ　沿岸漁業改善資金」、
+/// 「第七十六条の二（見出しを含む。）及び第七十七条中「A」を「B」に改める」
+#[test]
+fn reiwa3_act44_art4_chusho_gyogyo_yushi_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art4.txt")).unwrap();
+    let got = apply_unit(
+        &revision("327AC0000000346_20210901_503AC0000000037"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC0000000346_20220401_503AC0000000044"));
+}
+
+/// 令和3年法律第49号 第13条（地域における医療及び介護の総合的な確保の促進に関する法律）。2 段の施行:
+/// 附則第一条の二を触る改正規定（「附則第一条の二第二項中…改め、同条を附則第一条の三とし、附則第一条の次に次の一条を加える」）は
+/// 第四号（2022-02-01）、残り（目次・第4条第2項第2号のイロハ・第二章の二の追加・第35条）は第二号（2021-05-28）。
+/// 附則の条の繰り下げと附則への条の挿入は文書の側だけ（id の世界は本則）
+#[test]
+fn reiwa3_act49_art13_chiiki_iryo_kaigo_two_stages_reproduce_egov_revisions() {
+    let u = parse_units(&fixture("amendments/503AC0000000049_art13.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs(
+        "地域における医療及び介護の総合的な確保の促進に関する法律附則第一条の二第二項の改正規定",
+    )
+    .unwrap();
+    assert_eq!(locs.len(), 1);
+    assert!(locs[0].suppl, "{locs:?}");
+    let (suppl_part, rest) = u.split_by_locs(&locs);
+    assert_eq!(suppl_part.instructions.len(), 1);
+    assert!(suppl_part.instructions[0]
+        .text
+        .starts_with("附則第一条の二第二項中"));
+    // 第二号: 2021-05-28
+    let s1 = apply_unit(
+        &revision("401AC0000000064_20210401_502AC0000000052"),
+        &rest,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("401AC0000000064_20210528_503AC0000000049"));
+    // 第四号: 2022-02-01（附則の条。本則は変わらず、附則第一条の二が第一条の三になり、新しい第一条の二が入る）。
+    // ただし起草時（2021-05-28 の版）の附則第一条の二第二項「…及び附則第一条の二第一項各号」は、先に施行された
+    // 令2-52 第7条（令3-49 附則第25条で改められたもの、2022-01-01）で「附則第一条の二第一項の規定により行う同項各号」に
+    // 変わっている。書いたままの改め文は空振りする（先行改正との競合の実例）
+    let stale = apply_unit(
+        &revision("401AC0000000064_20220101_503AC0000000066"),
+        &suppl_part,
+        "test",
+    );
+    assert!(
+        matches!(&stale, Err(ApplyError::PhraseNotFound { phrase, .. }) if phrase == "附則第一条の二第一項各号"),
+        "{stale:?}"
+    );
+    // 令3-49 附則第26条の調整規定（施行順がこの場合には「附則第一条の二第一項各号」とあるのは「附則第一条の二第一項」と…）を
+    // 当てた改め文なら e-Gov の 2022-02-01 版になる
+    let adjusted = parse_units(&fixture(
+        "amendments/503AC0000000049_art13_suppl_adjusted.txt",
+    ))
+    .unwrap()
+    .remove(0);
+    let s2 = apply_unit(
+        &revision("401AC0000000064_20220101_503AC0000000066"),
+        &adjusted,
+        "test",
+    )
+    .unwrap();
+    let exp = revision("401AC0000000064_20220201_503AC0000000049");
+    assert_same_main(&s2, &exp);
+    let suppl_arts = |d: &LegalDocument| -> Vec<(String, String)> {
+        d.suppl_provisions[0]
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                SupplChild::Provision(Provision::Article(a)) => Some((
+                    a.num.to_num_string(),
+                    a.children
+                        .iter()
+                        .filter_map(|ch| match ch {
+                            ArticleChild::Paragraph(p) => Some(
+                                p.sentences
+                                    .iter()
+                                    .map(|s| s.plain_text())
+                                    .collect::<String>(),
+                            ),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(""),
+                )),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(suppl_arts(&s2), suppl_arts(&exp));
+}
+
+/// 令和5年法律第53号 第241条（労働審判法、本文 = 公布から 5 年以内の政令日 2028-06-13、未施行）。
+/// 民事訴訟のデジタル化の整備の典型（電子…への字句改め、条の挿入、目次の改め）を e-Gov の未施行リビジョンと突き合わせる
+#[test]
+fn reiwa5_act53_art241_rodo_shinpan_reproduces_egov_unenforced_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art241.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("416AC0000000045_20260521_504AC0000000048"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("416AC0000000045_20280613_505AC0000000053"));
+}
+
+/// 同 第227条（仲裁法、2028-06-13、未施行）
+#[test]
+fn reiwa5_act53_art227_chusai_reproduces_egov_unenforced_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art227.txt")).unwrap();
+    let got = apply_unit(
+        &revision("415AC0000000138_20260521_504AC0000000048"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("415AC0000000138_20280613_505AC0000000053"));
+}
+
+/// 同 第219条（人事訴訟法）の 2 段: 附則第一条第三号「第二百十九条中人事訴訟法第九条に一項を加える改正規定及び同法第三十三条に二項を
+/// 加える改正規定」は「民事訴訟法等の一部を改正する法律の施行の日」（令4-48 = 2026-05-21）、残りは本文（2028-06-13）。
+/// 間に令8-46（2026-06-24）が入る。「〜に一項を加える改正規定」の頭の位置で分ける
+#[test]
+fn reiwa5_act53_art219_jinji_sosho_two_stages_reproduce_egov_revisions() {
+    let u = parse_units(&fixture("amendments/505AC0000000053_art219.txt"))
+        .unwrap()
+        .remove(0);
+    let locs = parse_scope_locs(
+        "人事訴訟法第九条に一項を加える改正規定及び同法第三十三条に二項を加える改正規定",
+    )
+    .unwrap();
+    assert_eq!(
+        locs.iter()
+            .map(|l| l.article.to_num_string())
+            .collect::<Vec<_>>(),
+        ["9", "33"]
+    );
+    let (first, rest) = u.split_by_locs(&locs);
+    assert_eq!(
+        first.instructions.len(),
+        2,
+        "{:?}",
+        first
+            .instructions
+            .iter()
+            .map(|i| &i.text)
+            .collect::<Vec<_>>()
+    );
+    let s1 = apply_unit(
+        &revision("415AC0000000109_20260521_504AC0000000048"),
+        &first,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s1, &revision("415AC0000000109_20260521_505AC0000000053"));
+    let s2 = apply_unit(
+        &revision("415AC0000000109_20260624_508AC0000000046"),
+        &rest,
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&s2, &revision("415AC0000000109_20280613_505AC0000000053"));
 }

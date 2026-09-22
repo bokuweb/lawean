@@ -127,7 +127,8 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
             match op {
                 Op::ShiftParagraphs { article, .. }
                 | Op::RenumberParagraph { article, .. }
-                | Op::InsertParagraphAfter { article, .. } => {
+                | Op::InsertParagraphAfter { article, .. }
+                | Op::InsertParagraphFirst { article, .. } => {
                     articles.insert(article.clone());
                 }
                 Op::Delete {
@@ -280,6 +281,7 @@ pub fn hane_candidates(doc: &LegalDocument, unit: &AmendUnit) -> Vec<HaneCandida
                                         .map(String::from),
                                     part: None,
                                     suppl: false,
+                                    sub: None,
                                 },
                                 from: r.span.text.clone(),
                                 to: f.clone(),
@@ -313,7 +315,7 @@ pub fn article_mapping(doc: &LegalDocument, unit: &AmendUnit) -> BTreeMap<Articl
     for ins in &unit.instructions {
         for op in &ins.ops {
             match op {
-                Op::RenumberArticle { from, to } => {
+                Op::RenumberArticle { from, to, suppl } if !suppl => {
                     map.insert(from.clone(), to.clone());
                 }
                 Op::ShiftArticles { from, to, by } => {
@@ -448,6 +450,7 @@ fn article_hane_candidates(
                                 .map(String::from),
                             part: None,
                             suppl: false,
+                            sub: None,
                         },
                         from: r.span.text.clone(),
                         to: f.clone(),
@@ -484,8 +487,9 @@ fn refine_candidates(
     let mut grown: Vec<ArticleNum> = Vec::new();
     for ins in &unit.instructions {
         for op in &ins.ops {
-            if let Op::AppendParagraph { article, .. } | Op::InsertParagraphAfter { article, .. } =
-                op
+            if let Op::AppendParagraph { article, .. }
+            | Op::InsertParagraphAfter { article, .. }
+            | Op::InsertParagraphFirst { article, .. } = op
             {
                 let single = paragraph_count(&doc.main_provision, article) == Some(1);
                 if single && !grown.contains(article) {
@@ -565,6 +569,7 @@ fn refine_candidates(
                             item: None,
                             part: None,
                             suppl: false,
+                            sub: None,
                         },
                         from: r.span.text.clone(),
                         to: fix.clone(),

@@ -563,9 +563,10 @@ impl Binder<'_> {
                 art,
                 Some(i),
                 at.item.as_deref(),
+                at.sub.as_deref(),
                 at.part,
                 from,
-                to,
+                &crate::apply::mark(to),
                 protect,
             ) == 0
             {
@@ -591,6 +592,7 @@ impl Binder<'_> {
     fn instruction(&mut self, ins: &Instruction) -> Result<(), ApplyError> {
         let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
         let mut inserted: Vec<String> = Vec::new();
+        let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
         for op in &ins.ops {
             match op {
                 Op::ReplaceToc { from, to } => {
@@ -610,9 +612,10 @@ impl Binder<'_> {
                         art,
                         idx,
                         at.item.as_deref(),
+                        at.sub.as_deref(),
                         at.part,
                         from,
-                        to,
+                        &crate::apply::mark(to),
                         &inserted,
                     ) == 0
                     {
@@ -630,9 +633,10 @@ impl Binder<'_> {
                         art,
                         idx,
                         at.item.as_deref(),
+                        at.sub.as_deref(),
                         at.part,
                         anchor,
-                        &format!("{anchor}{text}"),
+                        &format!("{anchor}{}", crate::apply::mark(text)),
                         &inserted,
                     ) == 0
                     {
@@ -704,6 +708,40 @@ impl Binder<'_> {
                             .get_mut(&article.to_num_string())
                             .unwrap()
                             .insert(idx + 1, None);
+                    }
+                }
+                // 条の先頭に項: 直前のノード（前の条の最後の項）の後ろに
+                Op::InsertParagraphFirst { article, text } => {
+                    let first = paragraphs(article_mut(&mut self.doc, article)?)
+                        .first()
+                        .map(|p| id_of(p))
+                        .ok_or_else(|| ApplyError::BadContent("項の無い条".into()))?;
+                    let all = from_document(&self.doc);
+                    let idx = all.nodes.iter().position(|n| n.id == first).unwrap_or(0);
+                    if idx == 0 {
+                        return Err(ApplyError::BadContent("先頭の前には加えられない".into()));
+                    }
+                    let mut anchor = all.nodes[idx - 1].id.clone();
+                    for (k, p) in crate::apply::parse_paragraphs(text)?
+                        .into_iter()
+                        .enumerate()
+                    {
+                        let (id, p) = self.new_para(article, p);
+                        self.ops.push(IdentOp::InsertAfter {
+                            anchor: anchor.clone(),
+                            new_id: id.clone(),
+                            art: article.to_num_string(),
+                            text: para_text(&p),
+                        });
+                        anchor = id;
+                        let art = article_mut(&mut self.doc, article)?;
+                        snapshot(art, &mut snapshots);
+                        let pos = nth_paragraph_child(art, k);
+                        art.children.insert(pos, ArticleChild::Paragraph(p));
+                        snapshots
+                            .get_mut(&article.to_num_string())
+                            .unwrap()
+                            .insert(k, None);
                     }
                 }
                 // 番号だけを動かす操作。id の世界では何もしない（番号は描画時に数える）
@@ -827,7 +865,120 @@ impl Binder<'_> {
                 Op::RenumberContainer { path, to } => {
                     crate::apply::renumber_container(&mut self.doc, path, to)?;
                 }
-                Op::InsertArticleAfter { after, text } => {
+                Op::AppendSupplArticles { text } => {
+                    crate::apply::append_suppl_articles(&mut self.doc, text)?;
+                }
+                // 本則の末尾に章: 本則の最後の項の後ろに新しい章の全部の項を並べる
+                Op::AppendContainers { path, text } => {
+                    let mut new = crate::apply::parse_containers(text)?;
+                    let slot: &[Provision] = if path.is_empty() {
+                        &self.doc.main_provision
+                    } else {
+                        &crate::apply::container_mut(&mut self.doc, path)?.children
+                    };
+                    let mut anchor = last_para_id_in(slot)
+                        .ok_or_else(|| ApplyError::BadContent("本則に項が無い".into()))?;
+                    fn walk(b: &mut Binder<'_>, ps: &mut [Provision], anchor: &mut String) {
+                        for p in ps {
+                            match p {
+                                Provision::Container(c) => walk(b, &mut c.children, anchor),
+                                Provision::Article(a) => {
+                                    let mut children = Vec::new();
+                                    for c in std::mem::take(&mut a.children) {
+                                        let ArticleChild::Paragraph(p) = c else {
+                                            children.push(c);
+                                            continue;
+                                        };
+                                        let (id, p) = b.new_para(&a.num, p);
+                                        b.ops.push(IdentOp::InsertAfter {
+                                            anchor: anchor.clone(),
+                                            new_id: id.clone(),
+                                            art: a.num.to_num_string(),
+                                            text: para_text(&p),
+                                        });
+                                        *anchor = id;
+                                        children.push(ArticleChild::Paragraph(p));
+                                    }
+                                    a.children = children;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    for c in &mut new {
+                        let mut inner = std::mem::take(&mut c.children);
+                        walk(self, &mut inner, &mut anchor);
+                        c.children = inner;
+                    }
+                    let slot = if path.is_empty() {
+                        &mut self.doc.main_provision
+                    } else {
+                        &mut crate::apply::container_mut(&mut self.doc, path)?.children
+                    };
+                    slot.extend(new.into_iter().map(Provision::Container));
+                }
+                // 条を前に置く = 直前の項の後ろに新しい項を並べる（先頭の条の前なら、その前の項）
+                Op::InsertArticleBefore {
+                    before,
+                    text,
+                    suppl,
+                } => {
+                    if *suppl {
+                        return Err(ApplyError::BadContent(
+                            "附則の条の前への挿入は未対応".into(),
+                        ));
+                    }
+                    let first = paragraphs(article_mut(&mut self.doc, before)?)
+                        .first()
+                        .map(|p| id_of(p))
+                        .ok_or_else(|| ApplyError::BadContent("項の無い条の前に加える".into()))?;
+                    let all = from_document(&self.doc);
+                    let idx = all.nodes.iter().position(|n| n.id == first).unwrap_or(0);
+                    if idx == 0 {
+                        return Err(ApplyError::BadContent("先頭の前には加えられない".into()));
+                    }
+                    let mut anchor = all.nodes[idx - 1].id.clone();
+                    let mut arts = Vec::new();
+                    for mut a in crate::apply::parse_articles(text)? {
+                        let mut children = Vec::new();
+                        for c in std::mem::take(&mut a.children) {
+                            let ArticleChild::Paragraph(p) = c else {
+                                children.push(c);
+                                continue;
+                            };
+                            let (id, p) = self.new_para(&a.num, p);
+                            self.ops.push(IdentOp::InsertAfter {
+                                anchor: anchor.clone(),
+                                new_id: id.clone(),
+                                art: a.num.to_num_string(),
+                                text: para_text(&p),
+                            });
+                            anchor = id;
+                            children.push(ArticleChild::Paragraph(p));
+                        }
+                        a.children = children;
+                        arts.push(a);
+                    }
+                    crate::apply::insert_articles_before(
+                        &mut self.doc.main_provision,
+                        before,
+                        arts,
+                    )?;
+                }
+                // 別表は id の世界に無い
+                Op::DeleteAppdx { tables } => {
+                    crate::apply::delete_appendices(&mut self.doc, tables)?;
+                }
+                // 附則の条は id の世界（本則）に無い。文書の側だけ
+                Op::InsertArticleAfter { after, text, suppl } if *suppl => {
+                    crate::apply::insert_suppl_articles_after(&mut self.doc, after, text)?;
+                }
+                Op::RenumberArticle { from, to, suppl } if *suppl => {
+                    let art = crate::apply::suppl_article_mut(&mut self.doc, from)?;
+                    art.num = to.clone();
+                    art.title = Some(vec![Inline::Text(crate::apply::article_label(to))]);
+                }
+                Op::InsertArticleAfter { after, text, .. } => {
                     // 条の挿入 = 直前の条の最後の項の後ろに新しい項を並べる（「次の二条」なら順に）
                     let mut anchor = paragraphs(article_mut(&mut self.doc, after)?)
                         .last()
@@ -859,7 +1010,7 @@ impl Binder<'_> {
                         prev_art = num;
                     }
                 }
-                Op::RenumberArticle { from, to } => {
+                Op::RenumberArticle { from, to, .. } => {
                     // 条ずれ = その条の全項の art を付け替える。id は変わらない
                     let ids: Vec<String> = paragraphs(article_mut(&mut self.doc, from)?)
                         .iter()
@@ -1015,6 +1166,20 @@ impl Binder<'_> {
                         prev = Some(num);
                     }
                 }
+                // 別表の行は本則ではない。文書の側だけ
+                Op::ReplaceAppdxRow {
+                    table,
+                    row,
+                    from,
+                    to,
+                } => crate::apply::replace_appdx_row(
+                    &mut self.doc,
+                    table,
+                    row,
+                    from,
+                    to,
+                    &mut appdx_rows,
+                )?,
                 Op::ReplaceContainers { paths, text } => {
                     // 章の差し替え = 新しい章の全部の項を最初の章の直前の項の後ろに並べ、旧章の項を全部削る
                     let mut new = crate::apply::parse_containers(text)?;
@@ -1088,9 +1253,12 @@ impl Binder<'_> {
                     }
                     art.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
                 }
-                Op::SetCaption { article, text } => {
+                Op::SetCaption { article, text } | Op::AttachCaption { article, text } => {
                     let art = article_mut(&mut self.doc, article)?;
                     art.caption = Some(vec![Inline::Text(text.clone())]);
+                }
+                Op::DeleteCaption { article } => {
+                    article_mut(&mut self.doc, article)?.caption = None;
                 }
                 Op::DeleteSentencePart { at, part } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
@@ -1138,6 +1306,30 @@ impl Binder<'_> {
                         new: para_text(p),
                     });
                 }
+                // 目次を付ける: id の世界では toc ノード。無ければ先頭の項の後ろに insertAfter で足す
+                // （id の操作に「先頭に加える」は無い。目次は本文ではないので並びは問わない。あれば replace）
+                Op::SetToc { text } => {
+                    let before = toc_text(&self.doc);
+                    crate::apply::set_toc(&mut self.doc, text);
+                    let new = toc_text(&self.doc).unwrap_or_default();
+                    match before {
+                        Some(expected) => self.ops.push(IdentOp::Replace {
+                            id: TOC_ID.into(),
+                            expected,
+                            new,
+                        }),
+                        None => {
+                            let anchor = first_para_id_in(&self.doc.main_provision)
+                                .ok_or_else(|| ApplyError::ArticleNotFound("本則".into()))?;
+                            self.ops.push(IdentOp::InsertAfter {
+                                anchor,
+                                new_id: TOC_ID.into(),
+                                art: TOC_ID.into(),
+                                text: new,
+                            });
+                        }
+                    }
+                }
                 // 題名は本文ではない
                 Op::SetTitle { text } => {
                     let t = text.join("").trim().to_string();
@@ -1158,7 +1350,13 @@ impl Binder<'_> {
                 | Op::InsertItemAfter { at, .. }
                 | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
-                | Op::ReplaceItems { at, .. } => {
+                | Op::ReplaceItems { at, .. }
+                | Op::ReplaceItemSet { at, .. }
+                | Op::ReplaceTableRow { at, .. }
+                | Op::AppendTable { at, .. }
+                | Op::RenumberSubitem { at, .. }
+                | Op::ShiftSubitems { at, .. }
+                | Op::InsertSubitemAfter { at, .. } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                     let p = paragraph_mut(art, idx);
@@ -1186,6 +1384,42 @@ impl Binder<'_> {
                         Op::ReplaceItems { text, .. } => {
                             p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                             crate::apply::insert_items_after(p, None, text)?
+                        }
+                        Op::ReplaceItemSet { items, text, .. } => {
+                            crate::apply::replace_item_set(p, items, text)?
+                        }
+                        Op::ReplaceTableRow { row, from, to, .. } => {
+                            crate::apply::replace_table_row(p, row, from, to, &inserted)?
+                        }
+                        Op::AppendTable { text, .. } => {
+                            let table = crate::apply::build_table(text);
+                            p.children
+                                .push(ParagraphChild::Raw(lawean_source::xml::Element {
+                                    name: "TableStruct".into(),
+                                    attrs: vec![],
+                                    children: vec![lawean_source::xml::Node::Element(table)],
+                                }));
+                        }
+                        Op::RenumberSubitem { from, to, .. } => crate::apply::renumber_subitem(
+                            p,
+                            at.item.as_deref().unwrap_or(""),
+                            from,
+                            to,
+                        )?,
+                        Op::ShiftSubitems { from, to, by, .. } => crate::apply::shift_subitems(
+                            p,
+                            at.item.as_deref().unwrap_or(""),
+                            from,
+                            to,
+                            *by,
+                        )?,
+                        Op::InsertSubitemAfter { after, text, .. } => {
+                            crate::apply::insert_subitems_after(
+                                p,
+                                at.item.as_deref().unwrap_or(""),
+                                after,
+                                text,
+                            )?
                         }
                         _ => unreachable!(),
                     }
@@ -1263,7 +1497,9 @@ impl Binder<'_> {
                         self.ops.push(IdentOp::Delete { id });
                     }
                     let art = article_mut(&mut self.doc, article)?;
-                    art.caption = a.caption;
+                    if a.caption.is_some() {
+                        art.caption = a.caption;
+                    }
                     art.title = a.title;
                     art.children = children;
                 }
@@ -1298,6 +1534,7 @@ impl Binder<'_> {
                 }
             }
         }
+        crate::apply::strip_marks_doc(&mut self.doc);
         Ok(())
     }
 }

@@ -338,7 +338,13 @@ pub fn check_unit(
         }
     }
 
-    // 3. 他法令への参照と、置換先の中の参照は字面で: 起草時の項の本文を施行時の版で探す
+    // 3. 他法令への参照と、置換先の中の参照は字面で: 起草時の項の本文を施行時の版で探す。
+    //    起草時の版に当たらず施行時の版に当たる（先行改正の施行後を前提に書かれている）なら、加える本文の参照も
+    //    施行時の版に対して書かれているので、起草時の版からの対応で直す提案はしない（令6-53 第8条の「第七十八条の三第一項」）
+    if bd.is_err() && be.is_ok() {
+        o.fixes.dedup();
+        return o;
+    }
     let external = |law: &str| -> Option<(LegalDocument, LegalDocument)> {
         let id = space?.resolve_name(law)?;
         let e = space?.get(id)?.clone();
@@ -489,6 +495,7 @@ fn content_of(op: &Op) -> Vec<String> {
     match op {
         Op::AppendParagraph { text, .. }
         | Op::InsertParagraphAfter { text, .. }
+        | Op::InsertParagraphFirst { text, .. }
         | Op::AppendArticle { text, .. }
         | Op::InsertArticleAfter { text, .. }
         | Op::InsertContainersAfter { text, .. }

@@ -49,7 +49,7 @@
     <label for="future">施行日までに施行される未施行の改正（任意）。選ぶと、改め文はその版に当たるものとして検査し、上の発射台は「起草時の版」になる（先行改正との競合: 空振り・別の項・参照のずれ・可換性）</label>
     <select id="future"></select>
     <button id="run">検査する</button>
-    <button id="z3" class="secondary">Z3 で確かめる（ブラウザ内の z3。初回に 33MB 読む）</button>
+    <span class="hint">Rust/Lean の検査に続けて Z3（ブラウザ内の z3-solver。初回に 33MB 読む）も必ず走る</span>
     <span class="status" id="status"></span>
   </section>
   <section class="right">
@@ -65,7 +65,9 @@ const BASES = [
   ['403AC0000000090.xml', '借地借家法（現行 2026-05-21）'],
   ['revisions/325AC1000000100_20180620_430AC0000000059.xml', '公職選挙法（2018-06-20、平成30年法律第75号の発射台）'],
   ['revisions/325AC1000000100_20201212_502AC1000000045.xml', '公職選挙法（2020-12-12、令和3年法律第51号の発射台）'],
-  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律'],
+  ['revisions/337AC0000000069_20250530_507AC0000000047.xml', '建物の区分所有等に関する法律（2025-05-30、令和7年法律第47号の発射台）'],
+  ['revisions/414AC0000000078_20250601_504AC0000000068.xml', 'マンションの建替え等の円滑化に関する法律（2025-06-01、令7-47 第3条の発射台）'],
+  ['laws/337AC0000000069.xml', '建物の区分所有等に関する法律（2026-04-01 現行）'],
   ['laws/327AC1000000176.xml', '宅地建物取引業法'],
   ['laws/413AC0000000026_20220518_503AC0000000037.xml', '高齢者の居住の安定確保に関する法律'],
   ['laws/425AC0000000061.xml', '大規模災害借地借家特別措置法'],
@@ -102,6 +104,18 @@ const PRESETS = {
     suppl: '第一条　この法律は、公布の日から起算して五年を超えない範囲内において政令で定める日から施行する。',
     promulgated: '2023-06-14', enforced: '2028-06-13',
     note: '令和5年法律第53号（民事関係手続のデジタル化）第125条: 第47条〜第61条を第49条〜第64条に繰り下げる条ずれと第47・48・51条の新設、読替え表。第129条は大規模災害借地借家特別措置法の「第五十九条」を「第六十二条」に改める（他法令への波及の手当て）。実際の改め文と附則第一条本文。e-Gov の施行日は 2028-06-13（未施行）',
+  },
+  'revisions/337AC0000000069_20250530_507AC0000000047.xml': {
+    amendment: 'amendments/507AC0000000047_art1.txt',
+    suppl: '第一条　この法律は、令和八年四月一日から施行する。',
+    promulgated: '2025-05-30', enforced: '2026-04-01',
+    note: '令和7年法律第47号（老朽化マンション等…区分所有法等改正法）第1条: 2025 年の区分所有法大改正。40 文・140 操作、本則 396 項が e-Gov の 2026-04-01 版と一致。ハネ 11 件',
+  },
+  'revisions/414AC0000000078_20250601_504AC0000000068.xml': {
+    amendment: 'amendments/507AC0000000047_art3.txt',
+    suppl: '第一条　この法律は、令和八年四月一日から施行する。',
+    promulgated: '2025-05-30', enforced: '2026-04-01',
+    note: '同 第3条: 建替え円滑化法を「マンションの再生等の円滑化に関する法律」に。174 文・616 操作、本則 766 項が一致。ハネ 24 件',
   },
   'revisions/325AC1000000100_20180620_430AC0000000059.xml': {
     amendment: 'amendments/430AC0100000075.txt',
@@ -196,20 +210,28 @@ async function loadZ3() {
   const M = await initZ3({ locateFile: f => Z3_CDN + f, mainScriptUrlOrBlob: blob });
   // 問いごとに context を作る（同じ context で set-logic を繰り返すと z3 が exit(1) する）。
   // 解くのは worker（z3-solver の async 版）。主スレッドで同期に解くと、z3 がスレッドを起こすときに固まる
-  z3 = { eval: async (script) => {
+  // 同時に 2 つ解かせない（async_call は一度に 1 つ。重なると入力が混ざって "unexpected character" になる）
+  let lock = Promise.resolve();
+  const evalOne = async (script) => {
     const ctx = M._Z3_mk_context(M._Z3_mk_config());
     M._set_noop_error_handler(ctx);
     try { return await M.async_call(() => M.ccall('async_Z3_eval_smtlib2_string', 'void', ['number', 'string'], [ctx, script])); }
     finally { M._Z3_del_context(ctx); }
-  } };
+  };
+  z3 = { eval: (script) => { const p = lock.then(() => evalOne(script)); lock = p.catch(() => {}); return p; } };
   return z3;
 }
 let lastInput = null;
-async function runZ3() {
-  if (!lastInput) { $('status').textContent = '先に「検査する」'; return; }
+let runSeq = 0; // 「検査する」の通し番号。古い run の Z3 の結果を新しい報告に混ぜない
+// 「検査する」の一部として必ず走る。結果は報告の先頭に、Z3 が落ちたら判定も落とす
+async function runZ3(seq) {
+  if (!lastInput) return;
+  const stale = () => seq !== runSeq;
   $('status').textContent = 'Z3 を読み込み中…';
+  $('report').insertAdjacentHTML('afterbegin', '<p id="z3wait" class="status">Z3 を読み込んで解いている…（初回は 33MB）</p>');
   try {
     const solver = await loadZ3();
+    if (stale()) return;
     $('status').textContent = 'Z3 で解いている…';
     const scripts = JSON.parse(smt_scripts(JSON.stringify(lastInput)));
     if (scripts.error) throw new Error(scripts.error);
@@ -218,6 +240,7 @@ async function runZ3() {
     let t0 = performance.now();
     for (const sc of scripts) {
       const out = String(await solver.eval(sc.script)).trim();
+      if (stale()) return;
       const first = out.split('\n')[0].trim();
       const verdict = first === 'sat' ? sc.sat_means : first === 'unsat' ? sc.unsat_means : ('? ' + out.slice(0, 80));
       const bad = (sc.kind === 'enforcement' && first === 'unsat') || (sc.kind === 'vacuity' && first === 'unsat') || (sc.kind === 'conflict' && first === 'sat');
@@ -226,15 +249,24 @@ async function runZ3() {
     const ms = performance.now() - t0;
     const h = `<details open id="z3out"><summary>Z3 の結果（${scripts.length} 問、${ms.toFixed(0)} ms、ブラウザ内の z3-solver ${scripts.length ? '' : '— 型のある条件が無いので問いが無い'}）</summary><table class="cands"><tr><th>種類</th><th>問い</th><th>答え</th><th></th></tr>${rows}</table></details>`;
     const old = $('z3out'); if (old) old.remove();
+    const wait = $('z3wait'); if (wait) wait.remove();
     $('report').insertAdjacentHTML('afterbegin', h);
+    // Z3 で落ちた問いがあれば、全体の判定も FAIL に
+    if (rows.includes('class="fail"')) {
+      const v = $('report').querySelector('p.verdict');
+      if (v) { v.classList.remove('pass'); v.classList.add('fail'); v.firstChild.textContent = 'FAIL '; v.insertAdjacentHTML('beforeend', '<span class="status">・Z3 で矛盾</span>'); }
+    }
   } catch (e) {
+    if (stale()) return;
+    const wait = $('z3wait'); if (wait) wait.remove();
     const msg = e && (e.message || e.stack) ? (e.message || e.stack) : (typeof e === 'object' ? JSON.stringify(e) : String(e));
-    $('report').insertAdjacentHTML('afterbegin', `<p class="verdict fail">Z3 エラー</p><pre>${esc(msg)}</pre>`);
+    $('report').insertAdjacentHTML('afterbegin', `<p class="verdict fail">Z3 が走らなかった</p><pre>${esc(msg)}</pre>`);
   }
   $('status').textContent = '';
 }
 
 async function run() {
+  const seq = ++runSeq;
   $('status').textContent = '検査中…';
   try {
     const other_laws = await Promise.all([...$('laws').selectedOptions].map(o => load(o.value)));
@@ -258,8 +290,11 @@ async function run() {
     $('report').innerHTML = renderReport(r, performance.now() - t0, { extra, baseXml });
   } catch (e) {
     $('report').innerHTML = `<p class="verdict fail">エラー</p><pre>${String(e)}</pre>`;
+    $('status').textContent = '';
+    return;
   }
-  $('status').textContent = '';
+  // Z3 も必ず
+  await runZ3(seq);
 }
 
 (async () => {
@@ -270,7 +305,6 @@ async function run() {
   $('basefile').onchange = async (e) => { const f = e.target.files[0]; if (f) setBase(await f.text()); };
   $('filter').oninput = showOutline;
   $('run').onclick = run;
-  $('z3').onclick = runZ3;
   const today = new Date();
   const iso = d => d.toISOString().slice(0, 10);
   $('promulgated').value = iso(today);

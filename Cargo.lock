@@ -849,6 +849,7 @@ dependencies = [
  "lawean-source",
  "lawean-space",
  "lawean-verify",
+ "regex",
  "serde",
  "serde_json",
 ]
