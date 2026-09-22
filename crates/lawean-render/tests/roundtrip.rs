@@ -35,6 +35,10 @@ fn amendment_text_roundtrips_through_ops() {
         "amendments/507AC0000000047_art17.txt",
         "amendments/507AC0000000047_art9.txt",
         "amendments/507AC0000000047_art10.txt",
+        "amendments/505AC0000000063_art7.txt",
+        "amendments/505AC0000000063_art10.txt",
+        "amendments/503AC0000000044_art7.txt",
+        "amendments/506AC0000000053_art8.txt",
     ] {
         let units = parse_units(&fixture(f)).unwrap();
         let text = render_units(&units);

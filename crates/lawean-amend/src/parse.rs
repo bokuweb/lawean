@@ -252,6 +252,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
     Ok(out)
 }
 
+#[derive(Clone)]
 struct Ante {
     article: Option<ArticleNum>,
     paragraph: Option<u32>,
@@ -1246,7 +1247,17 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     }
                 }
                 "delete" => {
-                    let l = g("loc");
+                    let mut l = g("loc");
+                    // 「第八条第二項中第三号から第六号までを削り」: 「X中」は号の列挙の入れ物。先に先行詞にして、残りを号として読む
+                    if let Some((ctx, rest)) = l.split_once('中') {
+                        if rest.starts_with('第') || rest.starts_with("同号") {
+                            let mut probe = ante.clone();
+                            if loc(ctx, &mut probe).is_ok() {
+                                loc(ctx, &mut ante)?;
+                                l = rest.to_string();
+                            }
+                        }
+                    }
                     // 章名・節名、章・節の範囲、条の範囲の列挙: 「第三章の章名及び同章第一節の節名を削る」
                     //「第百四条から第百五条の二まで及び第三章第二節から第五節までを削る」
                     static CRANGE: OnceLock<Regex> = OnceLock::new();

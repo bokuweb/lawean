@@ -723,3 +723,19 @@ fn reiwa3_act44_art7_takken_reproduces_egov_revision() {
     .unwrap();
     assert_same_main(&got, &revision("327AC1000000176_20240525_503AC0000000044"));
 }
+
+/// 令和6年法律第53号（第14次地方分権一括法、令6-6-19 公布）第8条（宅地建物取引業法）。施行 2025-04-01。
+/// 号の繰り下げの連鎖（「同項中第四号を第八号とし、第三号を第五号とし、同号の次に次の二号を加える」）、号の範囲の削除、
+/// 見出しの改め、第78条の3（令3-44 が 2024-05-25 に全部改正したばかりの条）の字句改め
+#[test]
+fn reiwa6_act53_art8_takken_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/506AC0000000053_art8.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("327AC1000000176_20240619_506AC0000000053"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC1000000176_20250401_506AC0000000053"));
+}

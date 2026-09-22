@@ -154,6 +154,15 @@ fn failure_details_name_the_cause() {
             .status,
         Status::Warn
     );
+    // 令6-53 第8条: 起草時の版には当たらず施行時の版に当たる（令3-44 の全部改正後を前提）。X が加える「第七十八条の三第一項」は
+    // 改正後の第1項を指すので、起草時の版からの対応（第1項 → 第2項）で直す提案を出してはいけない
+    let r = get("r6-53-art8-takken-future-base");
+    let st = r.checks.iter().find(|c| c.kind == Kind::Stale).unwrap();
+    assert_eq!(st.status, Status::Warn, "{st:?}");
+    let d = detail(&r, Kind::Stale);
+    assert!(d.contains("先行改正の施行後を前提に書かれている"), "{d}");
+    assert!(!d.contains("第七十八条の三第二項"), "{d}");
+    assert!(r.suggested_fixes.is_empty(), "{:?}", r.suggested_fixes);
     let r = get("wrong-ref");
     assert!(
         detail(&r, Kind::Base).contains("第38条第11項"),

@@ -79,6 +79,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 題名を次のように改める / 第二章の章名を次のように改める | `SetTitle` / `SetContainerTitle` |
 | 第三章の章名を削る | `DeleteContainerTitle`。題名の無い章は単位の最後に前の章に併合（`collapse_untitled`） |
 | 第三章第二節から第五節までを削る / 第百四条から第百五条の二までを削る | `DeleteContainers` / `Delete` の範囲 |
+| 第八条第二項中第三号から第六号までを削り | 「X中」を先行詞にして号の範囲を `Delete` に展開（令6-53） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |
 | 第N項中第A号を第B号とし / 第A号から第B号までをK号ずつ繰り下げ / 同号の次に次のK号を加える / 同項に次の各号を加える / 同項第三号を次のように改める / 同項各号を次のように改める / 同号に次のように加える（イロハ・(1)） / 同項第N号を削る | `RenumberItem` / `ShiftItems` / `InsertItemAfter` / `AppendItem` / `ReplaceItem` / `ReplaceItems` / `AppendItem`（号の下）/ `Delete`（号） |
