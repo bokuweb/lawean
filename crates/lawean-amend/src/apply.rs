@@ -393,6 +393,11 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 to,
             } => renumber_appdx_row_sub(doc, table, row, from, to)?,
 
+            Op::InsertItemFirst { at, text } => {
+                let art = article_mut(doc, &at.article)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                insert_items_first(paragraph_mut(art, idx), text)?;
+            }
             Op::ReplaceItemSet {
                 at, items, text, ..
             } => {
@@ -1719,6 +1724,15 @@ pub(crate) fn insert_subitems_after(
         }
     }
     Ok(())
+}
+
+/// 「同項に第一号として次の一号を加える」: 項の先頭（最初の号の前）に号を置く
+pub(crate) fn insert_items_first(p: &mut Paragraph, lines: &[String]) -> Result<(), ApplyError> {
+    let first = items_mut(p)
+        .into_iter()
+        .find_map(|i| i.num.clone())
+        .ok_or_else(|| ApplyError::BadContent("号の無い項".into()))?;
+    insert_items_before(p, &first, lines)
 }
 
 /// 「同号の前に次の一号を加える」

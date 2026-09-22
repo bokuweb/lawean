@@ -980,6 +980,26 @@ fn container_path_with_ante(
     full
 }
 
+/// 直前の容器のうち、`kind`（「節」）までの部分（「同節第一款」の「同節」）
+fn ante_container_upto(ante: &Ante, kind: char) -> Vec<(lawean_source::ContainerKind, String)> {
+    use lawean_source::ContainerKind::*;
+    let want = match kind {
+        '編' => Part,
+        '章' => Chapter,
+        '節' => Section,
+        '款' => Subsection,
+        _ => Division,
+    };
+    let mut out = Vec::new();
+    for (k, n) in &ante.container {
+        out.push((*k, n.clone()));
+        if *k == want {
+            break;
+        }
+    }
+    out
+}
+
 /// 直前の位置（条・項）を引き継ぐ
 fn ante_loc(ante: &Ante, seg: &str) -> Result<Loc, ParseError> {
     Ok(Loc {
@@ -1001,7 +1021,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         [
             ("toc", r"^目次中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しは「中」の規則より先に（「第四十二条の見出し中「A」を「B」に改め」）
-            ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の(?:前の)?見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しの中の字句の追加・削除: 「第九条の見出し中「A」の下に「B」を加え」「同条の見出し中「A」を削り」
             ("caption_insert", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
             ("caption_delete_phrase", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を削(?:り|る)$"),
@@ -1024,6 +1044,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("insert_sub_after", r"^(?P<loc>同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>[{K}])の次に次のように加え(?:る)?$"),
             ("insert_item_after", r"^(?P<loc>.+?)の(?P<side>次|前)に次の{N}号を加え(?:る)?$"),
             ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号)を加え(?:る)?$"),
+            ("insert_item_first", r"^(?P<loc>.+?)に第一号として次の{N}号を加え(?:る)?$"),
             // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
             ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
@@ -1035,7 +1056,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
-            ("renumber_art", r"^(?:本則中|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)を(?P<qs>附則)?第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_art", r"^(?:本則中|(?:同編|同章|同節|同款|第{N}(?:編|章|節|款|目)(?:の{N})*)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)を(?P<qs>附則)?第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
@@ -1047,7 +1068,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("appdx_row_whole", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項を次のように改め(?:る)?$"),
             ("appdx_rows_delete", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<rows>.+?の項(?:(?:及び|、)(?:同表(?:の|中)?)?.+?の項)*)を削(?:り|る)$"),
             ("appdx_row_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<from>.+?)の項|同項)を(?:同表(?:の|中)?)?(?P<to>.+?)の項と(?:し|する)$"),
-            ("appdx_rows_insert", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?P<after>.+?)の項の次に次のように加え(?:る)?$"),
+            ("appdx_rows_insert", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<after>.+?)の項|同項)の次に次のように加え(?:る)?$"),
             ("append_appdx", r"^(?:附則の次に次の別表|附則の次に別表として次の{N}表|本則に次の別表)を加え(?:る)?$"),
             ("rename_appdx", r"^(?P<from>別表(?:第[一二三四五六七八九十百千]+)?|同表)を(?P<to>別表(?:第[一二三四五六七八九十百千]+)?)と(?:し|する)$"),
             ("insert_appdx_after", r"^(?P<after>別表(?:第[一二三四五六七八九十百千]+)?|同表)の次に次の{N}表を加え(?:る)?$"),
@@ -1056,9 +1077,9 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("append_containers", r"^(?P<path>本則|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             ("insert_arts_before", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の{N}条を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
-            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
+            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|(?:同編|同章|同節|同款)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
-            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同編|同章|同節|同款)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
             ("set_toc", r"^題名の次に次の目次を付する$"),
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
@@ -1216,8 +1237,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         .iter()
                         .find_map(|s| tok.strip_suffix(s))
                     {
+                        let path = container_path(base);
+                        ante.container = path.clone();
                         ops.push(Op::ReplaceContainerTitle {
-                            path: container_path(base),
+                            path,
                             from: from.clone(),
                             to: to.clone(),
                         });
@@ -1440,6 +1463,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         }
                     }
                 }
+                "insert_item_first" => Op::InsertItemFirst {
+                    at: loc(&g("loc"), &mut ante)?,
+                    text: Vec::new(),
+                },
                 "append_item" | "append_subitems" => Op::AppendItem {
                     at: loc(&g("loc"), &mut ante)?,
                     text: Vec::new(),
@@ -1624,6 +1651,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                             Op::RenumberAppdxRow { table, from, to }
                         }
                         "appdx_rows_insert" => {
+                            // 「同項の次に次のように加える」: 直前の行
                             let after = row_of(&g("after"), &ante)?;
                             ante.appdx = Some((table.clone(), after.clone()));
                             ante.article = None;
@@ -1708,11 +1736,16 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         suppl: l.suppl,
                     }
                 }
-                "container_title" => Op::ReplaceContainerTitle {
-                    path: container_path(&g("path")),
-                    from: g("a"),
-                    to: g("b"),
-                },
+                "container_title" => {
+                    let path = container_path(&g("path"));
+                    ante.container = path.clone();
+                    ante.article = None;
+                    Op::ReplaceContainerTitle {
+                        path,
+                        from: g("a"),
+                        to: g("b"),
+                    }
+                }
                 "set_title" => Op::SetTitle { text: Vec::new() },
                 "set_toc" => Op::SetToc { text: Vec::new() },
                 "set_container_title" => Op::SetContainerTitle {
@@ -1720,10 +1753,17 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     text: Vec::new(),
                 },
                 "insert_containers_after" => {
-                    let path = if g("path").starts_with('同') {
-                        ante.container.clone()
-                    } else {
-                        container_path_with_ante(&g("pre"), &g("path"), &mut ante)
+                    // 「同節第一款の次に」: 直前の容器のうち「節」までを取り、その中の「第一款」
+                    let path = match g("path").strip_prefix('同') {
+                        Some(rest) => {
+                            let kind = rest.chars().next().unwrap_or('章');
+                            let mut p = ante_container_upto(&ante, kind);
+                            p.extend(container_path(
+                                rest.trim_start_matches(['編', '章', '節', '款', '目']),
+                            ));
+                            p
+                        }
+                        None => container_path_with_ante(&g("pre"), &g("path"), &mut ante),
                     };
                     if g("side") == "前" {
                         Op::InsertContainersBefore {
@@ -1738,7 +1778,15 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     }
                 }
                 "renumber_container" => {
-                    let path = container_path_with_ante(&g("pre"), &g("path"), &mut ante);
+                    // 「同節を同章第二節とし」: 直前の容器
+                    let path = if g("path").starts_with('同') {
+                        if ante.container.is_empty() {
+                            return Err(ParseError::NoAntecedent(seg.to_string()));
+                        }
+                        ante.container.clone()
+                    } else {
+                        container_path_with_ante(&g("pre"), &g("path"), &mut ante)
+                    };
                     // 「同節」は番号を変えた後の節
                     let mut after = path.clone();
                     let to = container_num(&g("q"), &g("qb"));

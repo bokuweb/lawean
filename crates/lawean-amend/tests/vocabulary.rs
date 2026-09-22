@@ -37,6 +37,12 @@ fn items_of(doc: &LegalDocument, art: &str, para: usize) -> Vec<(String, String)
                 i.num.clone().unwrap_or_default(),
                 match &i.body {
                     ItemBody::Sentences(ss) => ss.iter().map(|s| s.plain_text()).collect(),
+                    // 定義の号は 2 欄（「借地権」「建物の所有を目的とする…」）
+                    ItemBody::Columns(cs) => cs
+                        .iter()
+                        .flat_map(|c| c.sentences.iter())
+                        .map(|s| s.plain_text())
+                        .collect(),
                     _ => String::new(),
                 },
             )),
@@ -405,6 +411,99 @@ fn make_the_sole_paragraph_the_second_and_prepend_the_first() {
     let again = parse_units(&text).unwrap();
     assert_eq!(
         again[0].instructions[0].ops, u.instructions[0].ops,
+        "{text}"
+    );
+}
+
+/// 個人情報保護法・資金決済法の形（相対の容器と号の先頭への追加）:
+/// 「第二章第一節の節名中「A」を「B」に改め、同節を同章第二節とし、同節の前に次の一節を加える」+ 節名、
+/// 「同節第一款の次に次の一款を加える」、「同項第一号を同項第二号とし、同項に第一号として次の一号を加える」、
+/// 「第N条の前の見出し中「A」を「B」に改める」
+#[test]
+fn relative_containers_and_first_item() {
+    let base = revision("403AC0000000090_20220518_503AC0000000037");
+    let t = "第一条　借地借家法（平成三年法律第九十号）の一部を次のように改正する。
+　　第二章第一節の節名中「存続期間」を「期間」に改め、同節を同章第二節とし、同節の前に次の一節を加える。
+　　　　第一節　通則
+　第二条の二　甲は、乙とする。
+　　第二条第五号を同条第六号とし、同条第四号を同条第五号とし、同条第三号を同条第四号とし、同条第二号を同条第三号とし、同条第一号を同条第二号とし、同条に第一号として次の一号を加える。
+　　一　甲　乙をいう。
+　　第三条の前の見出し中「存続期間」を「期間」に改める。";
+    let units = parse_units(t).unwrap();
+    let u = &units[0];
+    let ops = &u.instructions[0].ops;
+    assert!(matches!(&ops[0], Op::ReplaceContainerTitle { path, .. } if path.len() == 2));
+    assert!(matches!(&ops[1], Op::RenumberContainer { path, to } if path.len() == 2 && to == "2"));
+    // 「同節の前に」は番号を変えた後の節（第二章第二節）の前
+    assert!(
+        matches!(&ops[2], Op::InsertContainersBefore { path, .. } if path == &vec![
+            (lawean_source::ContainerKind::Chapter, "2".to_string()),
+            (lawean_source::ContainerKind::Section, "2".to_string()),
+        ])
+    );
+    assert!(matches!(
+        u.instructions[1].ops.last(),
+        Some(Op::InsertItemFirst { .. })
+    ));
+    assert!(
+        matches!(&u.instructions[2].ops[0], Op::ReplaceCaption { article, .. } if article.to_num_string() == "3")
+    );
+    let got = apply_unit(&base, u, "test").unwrap();
+    // 新しい第一節（通則）に第2条の2、元の第一節は第二節に
+    let sections: Vec<String> = {
+        fn walk(ps: &[Provision], out: &mut Vec<String>) {
+            for p in ps {
+                if let Provision::Container(c) = p {
+                    out.push(c.title.as_ref().map(|t| inline_text(t)).unwrap_or_default());
+                    walk(&c.children, out);
+                }
+            }
+        }
+        let mut v = vec![];
+        walk(&got.main_provision, &mut v);
+        v
+    };
+    assert!(
+        sections.contains(&"第一節　通則".to_string()),
+        "{sections:?}"
+    );
+    assert!(
+        sections.contains(&"第二節　借地権の期間等".to_string()),
+        "{sections:?}"
+    );
+    let snap = snapshot_main(&got);
+    assert!(snap["2_2"][0].1.contains("甲は、乙とする"));
+    // 第2条の号: 新しい第一号が先頭、元の第一号は第二号
+    let items: Vec<(String, String)> = items_of(&got, "2", 0)
+        .iter()
+        .map(|(n, t)| (n.clone(), t.chars().take(4).collect::<String>()))
+        .collect();
+    assert_eq!(
+        items,
+        vec![
+            ("1".to_string(), "甲乙をい".to_string()),
+            ("2".to_string(), "借地権建".to_string()),
+            ("3".to_string(), "借地権者".to_string()),
+            ("4".to_string(), "借地権設".to_string()),
+            ("5".to_string(), "転借地権".to_string()),
+            ("6".to_string(), "転借地権".to_string()),
+        ],
+        "{items:?}"
+    );
+    let b = ident::bind(&base, u, "t").unwrap();
+    assert_eq!(snapshot_main(&b.doc), snap);
+    let text = lawean_render::amend::render_unit(u);
+    let again = parse_units(&text).unwrap();
+    assert_eq!(
+        again[0]
+            .instructions
+            .iter()
+            .flat_map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
+        u.instructions
+            .iter()
+            .flat_map(|i| i.ops.clone())
+            .collect::<Vec<_>>(),
         "{text}"
     );
 }

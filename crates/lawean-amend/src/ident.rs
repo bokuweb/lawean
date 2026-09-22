@@ -1381,6 +1381,7 @@ impl Binder<'_> {
                 | Op::InsertItemAfter { at, .. }
                 | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
+                | Op::InsertItemFirst { at, .. }
                 | Op::ReplaceItems { at, .. }
                 | Op::ReplaceItemSet { at, .. }
                 | Op::ReplaceTableRow { at, .. }
@@ -1412,6 +1413,9 @@ impl Binder<'_> {
                             Some(item) => crate::apply::append_subitems(p, item, text)?,
                             None => crate::apply::insert_items_after(p, None, text)?,
                         },
+                        Op::InsertItemFirst { text, .. } => {
+                            crate::apply::insert_items_first(p, text)?
+                        }
                         Op::ReplaceItems { text, .. } => {
                             p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                             crate::apply::insert_items_after(p, None, text)?

@@ -237,6 +237,8 @@ pub enum Op {
     },
     /// 「同項に次の一号を加える」
     AppendItem { at: Loc, text: Vec<String> },
+    /// 「同項に第一号として次の一号を加える」: 項の先頭に号を置く（号ずれの後）
+    InsertItemFirst { at: Loc, text: Vec<String> },
     /// 「同項各号を次のように改める」+ 号の行（全部の号の差し替え）
     ReplaceItems { at: Loc, text: Vec<String> },
     /// 「同号ロを同号ハとし」「同号中ヘをトとし」: 号の下のイロハの番号の付け替え（`at` は号）
@@ -376,6 +378,7 @@ impl Op {
             | Op::InsertItemAfter { at, .. }
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
+            | Op::InsertItemFirst { at, .. }
             | Op::ReplaceItems { at, .. }
             | Op::ReplaceItemSet { at, .. }
             | Op::ReplaceTableRow { at, .. }
@@ -402,6 +405,7 @@ impl Op {
             | Op::InsertItemAfter { at, .. }
             | Op::InsertItemBefore { at, .. }
             | Op::AppendItem { at, .. }
+            | Op::InsertItemFirst { at, .. }
             | Op::ReplaceItems { at, .. }
             | Op::ReplaceItemSet { at, .. }
             | Op::ReplaceTableRow { at, .. }
@@ -434,6 +438,7 @@ impl Op {
                 | Op::InsertItemAfter { .. }
                 | Op::InsertItemBefore { .. }
                 | Op::AppendItem { .. }
+                | Op::InsertItemFirst { .. }
                 | Op::ReplaceItems { .. }
                 | Op::ReplaceItemSet { .. }
                 | Op::InsertSubitemAfter { .. }
@@ -470,6 +475,7 @@ impl Op {
             | Op::InsertItemAfter { text, .. }
             | Op::InsertItemBefore { text, .. }
             | Op::AppendItem { text, .. }
+            | Op::InsertItemFirst { text, .. }
             | Op::ReplaceItems { text, .. }
             | Op::ReplaceItemSet { text, .. }
             | Op::InsertSubitemAfter { text, .. }
