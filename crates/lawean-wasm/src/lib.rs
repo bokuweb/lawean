@@ -141,13 +141,15 @@ pub fn smt_scripts(input_json: &str) -> String {
                 let by_target = spec
                     .for_target_articles(&arts)
                     .filter(|(_, sc)| sc.is_some());
+                let in_suppl = u.article_of_amending_law.starts_with("附則");
                 let by_amending = u
                     .article_of_amending_law
+                    .trim_start_matches("附則")
                     .trim_start_matches('第')
                     .split('条')
                     .next()
                     .and_then(lawean_extract::suppl::kanji_num)
-                    .and_then(|a| spec.for_article(a, None));
+                    .and_then(|a| spec.for_article(a, Some(in_suppl)));
                 let Some((clause, _)) = by_target.or(by_amending) else {
                     continue;
                 };

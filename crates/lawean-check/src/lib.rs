@@ -1185,12 +1185,16 @@ fn check_enforcement_with(
         let by_target = spec
             .for_target_articles(&target_arts)
             .filter(|(_, sc)| sc.is_some());
+        // 単位の条は本則の条（「附則第N条」なら附則）。None で引くと本則に無いとき附則の条に落ちて、
+        // 「附則第七条」を本則第7条と取り違える（令5-63 第7条）
+        let in_suppl = label.starts_with("附則");
         let by_amending = label
+            .trim_start_matches("附則")
             .trim_start_matches('第')
             .split('条')
             .next()
             .and_then(kanji_num)
-            .and_then(|art| spec.for_article(art, None));
+            .and_then(|art| spec.for_article(art, Some(in_suppl)));
         let Some((clause, scope)) = by_target.or(by_amending) else {
             warns += 1;
             details.push(format!("{label}: 附則に施行期日が無い"));

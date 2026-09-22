@@ -673,3 +673,37 @@ fn reiwa7_act47_art9_chihojichi_appendix_row_is_amended() {
         "{g}"
     );
 }
+
+/// 令和5年法律第63号（デジタル社会形成基本法等の一部改正、令5-6-16 公布）第7条（古物営業法）・第10条（質屋営業法）。
+/// 施行 2024-04-01。e-Gov は公布日に改正法の附則だけを付けた版（`_20230616_`）を挟むので、その版を発射台にする。
+/// 古物営業法: 「の下に…を加える」の中で定義語を足し、同条に一項を加える。質屋営業法: 見出しつきの条の全部改正
+#[test]
+fn reiwa5_act63_kobutsu_and_shichiya_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "324AC0000000108_20230616_505AC0000000063",
+            "324AC0000000108_20240401_505AC0000000063",
+        ),
+        (
+            "10",
+            "325AC0000000158_20230616_505AC0000000063",
+            "325AC0000000158_20240401_505AC0000000063",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/505AC0000000063_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        assert_eq!(units.len(), 1, "art{art}");
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+    }
+}
