@@ -707,3 +707,19 @@ fn reiwa5_act63_kobutsu_and_shichiya_reproduce_egov_revisions() {
         );
     }
 }
+
+/// 令和3年法律第44号（第11次地方分権一括法、令3-5-26 公布）第7条（宅地建物取引業法）。施行は公布から 3 年以内の政令日 = 2024-05-25。
+/// 起草から施行までの 3 年の間に宅建業法は令3-37・令2-8・令4-61・令4-68・令5-79 で改正されている（先行改正との競合の実例）。
+/// 第78条の3の全部改正（見出し・号・第2項つき）と第78条の4の字句改め・削除
+#[test]
+fn reiwa3_act44_art7_takken_reproduces_egov_revision() {
+    let units = parse_units(&fixture("amendments/503AC0000000044_art7.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("327AC1000000176_20240401_505AC0000000079"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("327AC1000000176_20240525_503AC0000000044"));
+}
