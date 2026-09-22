@@ -104,6 +104,7 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 同項に次の表を加える + 欄の行 | `AppendTable { at, text }`（欄は「第」で始まる行から行を組む） |
 | 別表第一及び別表第二を削る | `DeleteAppdx { tables }` |
 | 第八条中「A」を「B」に改め、同条を同条第二項とし、同条に第一項として次の一項を加える + 項の行 | `RenumberParagraph { from: 1, to: 2 }` + `InsertParagraphFirst { article, text }`（条の先頭に項。id の世界では前の条の最後の項の後ろに insertAfter）（令5-53） |
+| 同じ文で「A」を「B」に、「B」を「C」に改め | 加えた字句（B）は後の置換が指さない。置換で入れた字句に印（`apply::mark`、私用領域の文字）を付け、文の終わりに外す。元の字句に無く加えた字句の中にだけあるなら、それを指す（令5-53 仲裁法） |
 | 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |

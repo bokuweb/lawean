@@ -962,3 +962,31 @@ fn reiwa3_act49_art13_chiiki_iryo_kaigo_two_stages_reproduce_egov_revisions() {
     };
     assert_eq!(suppl_arts(&s2), suppl_arts(&exp));
 }
+
+/// 令和5年法律第53号 第241条（労働審判法、本文 = 公布から 5 年以内の政令日 2028-06-13、未施行）。
+/// 民事訴訟のデジタル化の整備の典型（電子…への字句改め、条の挿入、目次の改め）を e-Gov の未施行リビジョンと突き合わせる
+#[test]
+fn reiwa5_act53_art241_rodo_shinpan_reproduces_egov_unenforced_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art241.txt")).unwrap();
+    assert_eq!(units.len(), 1);
+    let got = apply_unit(
+        &revision("416AC0000000045_20260521_504AC0000000048"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("416AC0000000045_20280613_505AC0000000053"));
+}
+
+/// 同 第227条（仲裁法、2028-06-13、未施行）
+#[test]
+fn reiwa5_act53_art227_chusai_reproduces_egov_unenforced_revision() {
+    let units = parse_units(&fixture("amendments/505AC0000000053_art227.txt")).unwrap();
+    let got = apply_unit(
+        &revision("415AC0000000138_20260521_504AC0000000048"),
+        &units[0],
+        "test",
+    )
+    .unwrap();
+    assert_same_main(&got, &revision("415AC0000000138_20280613_505AC0000000053"));
+}

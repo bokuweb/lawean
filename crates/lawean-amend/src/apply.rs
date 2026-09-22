@@ -64,7 +64,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                         at.sub.as_deref(),
                         at.part,
                         from,
-                        to,
+                        &mark(to),
                         &inserted,
                     );
                     if n == 0 {
@@ -86,7 +86,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                     at.sub.as_deref(),
                     at.part,
                     anchor,
-                    &format!("{anchor}{text}"),
+                    &format!("{anchor}{}", mark(text)),
                     &inserted,
                 );
                 if n == 0 {
@@ -467,6 +467,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             }
         }
     }
+    strip_marks_doc(doc);
     Ok(())
 }
 
@@ -898,22 +899,123 @@ fn sentences_mut<'a>(
     out
 }
 
-/// 条（idx=None）または項の中の全出現を置換し、置換数を返す。`item` があればその号の中だけ
-/// 同じ文（改め文の 1 文）で先に加えた字句の中は置き換えない。
-/// 「「は、」の下に「…敷地利用権の持分…」を加え、「敷地利用権の持分」を「その敷地利用権の持分又は…」に改め」で、
-/// 加えた字句の中の「敷地利用権の持分」まで置き換わらないように（改正規定は改正前の字句を指す）。
-/// 元の字句に無く、加えた字句の中にだけあるなら、それを指しているので置き換える
-fn replace_protected(t: &str, from: &str, to: &str, protect: &[String]) -> (String, usize) {
+/// 同じ文（改め文の 1 文）で加えた字句の印。置換で入れた字句を `MARK_O`…`MARK_C` で囲み、文の終わりに外す。
+/// 後の置換は印の中（加えた字句）を指さない（改正規定は改正前の字句を指す）。印は e-Gov の本文に現れない私用領域の文字
+pub(crate) const MARK_O: char = '\u{E000}';
+pub(crate) const MARK_C: char = '\u{E001}';
+
+/// 加えた字句に印を付ける（`replace_protected` に渡す置換先）
+pub(crate) fn mark(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    format!("{MARK_O}{s}{MARK_C}")
+}
+
+/// 印を外す
+pub(crate) fn strip_marks(s: &str) -> String {
+    if !s.contains(MARK_O) && !s.contains(MARK_C) {
+        return s.to_string();
+    }
+    s.chars().filter(|c| *c != MARK_O && *c != MARK_C).collect()
+}
+
+/// 文書の全部の文から印を外す（改め文の 1 文の終わりに）
+pub(crate) fn strip_marks_doc(doc: &mut LegalDocument) {
+    fn sentences(s: &mut Sentence) {
+        for inl in &mut s.text {
+            if let Inline::Text(t) = inl {
+                if t.contains(MARK_O) || t.contains(MARK_C) {
+                    *t = strip_marks(t);
+                }
+            }
+        }
+    }
+    fn item(i: &mut Item) {
+        match &mut i.body {
+            ItemBody::Sentences(ss) => ss.iter_mut().for_each(sentences),
+            ItemBody::Columns(cs) => cs
+                .iter_mut()
+                .for_each(|c| c.sentences.iter_mut().for_each(sentences)),
+            _ => {}
+        }
+        for c in &mut i.children {
+            if let ItemChild::Subitem(x) = c {
+                item(x);
+            }
+        }
+    }
+    fn element(e: &mut Element) {
+        for c in &mut e.children {
+            match c {
+                Node::Text(t) => {
+                    if t.contains(MARK_O) || t.contains(MARK_C) {
+                        *t = strip_marks(t);
+                    }
+                }
+                Node::Element(x) => element(x),
+            }
+        }
+    }
+    fn paragraph(p: &mut Paragraph) {
+        p.sentences.iter_mut().for_each(sentences);
+        for c in &mut p.children {
+            match c {
+                ParagraphChild::Item(i) => item(i),
+                ParagraphChild::Raw(e) => element(e),
+            }
+        }
+    }
+    fn article(a: &mut Article) {
+        for c in &mut a.children {
+            if let ArticleChild::Paragraph(p) = c {
+                paragraph(p);
+            }
+        }
+    }
+    fn provisions(ps: &mut [Provision]) {
+        for p in ps {
+            match p {
+                Provision::Article(a) => article(a),
+                Provision::Container(c) => provisions(&mut c.children),
+                Provision::Paragraph(p) => paragraph(p),
+                Provision::Raw(_) => {}
+            }
+        }
+    }
+    provisions(&mut doc.main_provision);
+    for sp in &mut doc.suppl_provisions {
+        for c in &mut sp.children {
+            match c {
+                SupplChild::Provision(p) => provisions(std::slice::from_mut(p)),
+                SupplChild::Paragraph(p) => paragraph(p),
+                SupplChild::Raw(_) => {}
+            }
+        }
+    }
+}
+
+/// `t` の中の `from` を `to` に置き換え、置換数を返す。`to` は加えた字句なら `mark` で印を付けて渡す。
+/// 同じ文で先に加えた字句（印の中）は置き換えない（改正規定は改正前の字句を指す）。
+/// 元の字句に無く、加えた字句の中にだけあるなら、それを指しているので置き換える。
+/// 「第五条の二」は「第五条の二十二」の頭には当たらない（数の途中で切らない）
+fn replace_protected(t: &str, from: &str, to: &str, _protect: &[String]) -> (String, usize) {
     if from.is_empty() {
         return (t.to_string(), 0);
     }
     let mut guarded: Vec<(usize, usize)> = Vec::new();
-    for p in protect.iter().filter(|p| !p.is_empty()) {
-        for (i, _) in t.match_indices(p.as_str()) {
-            guarded.push((i, i + p.len()));
+    let mut open: Option<usize> = None;
+    for (i, ch) in t.char_indices() {
+        match ch {
+            MARK_O => open = Some(i),
+            MARK_C => {
+                if let Some(a) = open.take() {
+                    guarded.push((a, i + ch.len_utf8()));
+                }
+            }
+            _ => {}
         }
     }
-    // 「第五条の二」は「第五条の二十二」の頭には当たらない（数の途中で切らない）
     let ends_with_numeral = from
         .chars()
         .last()
@@ -2594,7 +2696,7 @@ pub fn para_text(p: &Paragraph) -> String {
             item(i, &mut s);
         }
     }
-    strip_ws(&s)
+    strip_ws(&strip_marks(&s))
 }
 
 /// 「題名の次に次の目次を付する」の行から e-Gov の形の目次を組む:

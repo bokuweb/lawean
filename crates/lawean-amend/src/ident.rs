@@ -566,7 +566,7 @@ impl Binder<'_> {
                 at.sub.as_deref(),
                 at.part,
                 from,
-                to,
+                &crate::apply::mark(to),
                 protect,
             ) == 0
             {
@@ -615,7 +615,7 @@ impl Binder<'_> {
                         at.sub.as_deref(),
                         at.part,
                         from,
-                        to,
+                        &crate::apply::mark(to),
                         &inserted,
                     ) == 0
                     {
@@ -636,7 +636,7 @@ impl Binder<'_> {
                         at.sub.as_deref(),
                         at.part,
                         anchor,
-                        &format!("{anchor}{text}"),
+                        &format!("{anchor}{}", crate::apply::mark(text)),
                         &inserted,
                     ) == 0
                     {
@@ -1534,6 +1534,7 @@ impl Binder<'_> {
                 }
             }
         }
+        crate::apply::strip_marks_doc(&mut self.doc);
         Ok(())
     }
 }
