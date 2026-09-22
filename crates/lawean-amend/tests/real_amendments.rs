@@ -793,3 +793,39 @@ fn reiwa3_act49_ishi_stages_split_by_the_enforcement_scope() {
     let s3 = apply_unit(&s2, &rest, "test").unwrap();
     assert_same_main(&s3, &revision("323AC0000000201_20250401_503AC0000000049"));
 }
+
+/// 同 第7条・第8条（歯科医師法）。第7条（本文 2024-04-01）は「題名の次に次の目次を付する」（目次の無い法律に目次を足す）と
+/// 「本則中第三十一条の三を第三十一条の四とし」。第8条（第八号 2026-04-01）は令4-68（2025-06-01）の後の版に当てる
+#[test]
+fn reiwa3_act49_art7_and_art8_shika_ishi_reproduce_egov_revisions() {
+    for (art, before, after) in [
+        (
+            "7",
+            "323AC0000000202_20230101_504AC0000000047",
+            "323AC0000000202_20240401_503AC0000000049",
+        ),
+        (
+            "8",
+            "323AC0000000202_20250601_504AC0000000068",
+            "323AC0000000202_20260401_503AC0000000049",
+        ),
+    ] {
+        let units = parse_units(&fixture(&format!(
+            "amendments/503AC0000000049_art{art}.txt"
+        )))
+        .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let got = apply_unit(&revision(before), &units[0], "test")
+            .unwrap_or_else(|e| panic!("art{art}: {e}"));
+        let d = diff_snapshots(&snapshot_main(&got), &snapshot_main(&revision(after)));
+        assert!(
+            d.is_empty(),
+            "art{art}: {} differences:\n{}",
+            d.len(),
+            d.join("\n")
+        );
+        if art == "7" {
+            // 目次が付いた
+            assert!(got.toc.is_some(), "art7: 目次が無い");
+        }
+    }
+}

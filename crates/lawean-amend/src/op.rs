@@ -103,6 +103,8 @@ pub enum Op {
     ReplaceItem { at: Loc, text: Vec<String> },
     /// 「題名を次のように改める」+ 題名の行
     SetTitle { text: Vec<String> },
+    /// 「題名の次に次の目次を付する」+ 目次の行（「目次」「第一章　総則（第一条）」…「附則」）。目次の無い法律に目次を足す
+    SetToc { text: Vec<String> },
     /// 「第三章の章名を削る」: 題名の無くなった章は前の章に併合される（中の条は前の章の末尾に）
     DeleteContainerTitle {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -215,6 +217,7 @@ impl Op {
     pub fn article(&self) -> Option<&ArticleNum> {
         match self {
             Op::ReplaceToc { .. }
+            | Op::SetToc { .. }
             | Op::AppendArticle { .. }
             | Op::InsertContainersAfter { .. }
             | Op::InsertContainersBefore { .. }
@@ -296,6 +299,7 @@ impl Op {
                 | Op::AppendItem { .. }
                 | Op::ReplaceItems { .. }
                 | Op::SetTitle { .. }
+                | Op::SetToc { .. }
                 | Op::SetContainerTitle { .. }
                 | Op::ReplaceArticles { .. }
                 | Op::ReplaceContainers { .. }
@@ -320,6 +324,7 @@ impl Op {
             | Op::AppendItem { text, .. }
             | Op::ReplaceItems { text, .. }
             | Op::SetTitle { text, .. }
+            | Op::SetToc { text, .. }
             | Op::SetContainerTitle { text, .. }
             | Op::ReplaceArticles { text, .. }
             | Op::ReplaceContainers { text, .. }

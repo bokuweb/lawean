@@ -828,6 +828,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
             ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
+            ("set_toc", r"^題名の次に次の目次を付する$"),
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
@@ -1187,6 +1188,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     to: g("b"),
                 },
                 "set_title" => Op::SetTitle { text: Vec::new() },
+                "set_toc" => Op::SetToc { text: Vec::new() },
                 "set_container_title" => Op::SetContainerTitle {
                     path: container_path(&g("path")),
                     text: Vec::new(),

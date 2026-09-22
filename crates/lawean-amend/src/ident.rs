@@ -1153,6 +1153,30 @@ impl Binder<'_> {
                         new: para_text(p),
                     });
                 }
+                // 目次を付ける: id の世界では toc ノード。無ければ先頭の項の後ろに insertAfter で足す
+                // （id の操作に「先頭に加える」は無い。目次は本文ではないので並びは問わない。あれば replace）
+                Op::SetToc { text } => {
+                    let before = toc_text(&self.doc);
+                    crate::apply::set_toc(&mut self.doc, text);
+                    let new = toc_text(&self.doc).unwrap_or_default();
+                    match before {
+                        Some(expected) => self.ops.push(IdentOp::Replace {
+                            id: TOC_ID.into(),
+                            expected,
+                            new,
+                        }),
+                        None => {
+                            let anchor = first_para_id_in(&self.doc.main_provision)
+                                .ok_or_else(|| ApplyError::ArticleNotFound("本則".into()))?;
+                            self.ops.push(IdentOp::InsertAfter {
+                                anchor,
+                                new_id: TOC_ID.into(),
+                                art: TOC_ID.into(),
+                                text: new,
+                            });
+                        }
+                    }
+                }
                 // 題名は本文ではない
                 Op::SetTitle { text } => {
                     let t = text.join("").trim().to_string();

@@ -247,6 +247,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let p = paragraph_mut(art, idx);
                 append_sentence(p, text)?;
             }
+            Op::SetToc { text } => set_toc(doc, text),
             Op::SetTitle { text } => {
                 let t = text.join("").trim().to_string();
                 doc.title = Some(LawTitle {
@@ -2149,6 +2150,110 @@ pub fn para_text(p: &Paragraph) -> String {
         }
     }
     strip_ws(&s)
+}
+
+/// 「題名の次に次の目次を付する」の行から e-Gov の形の目次を組む:
+/// 「目次」→ TOCLabel、「第一章　総則（第一条）」→ TOCChapter（ChapterTitle + ArticleRange）、「附則」→ TOCSupplProvision。
+/// 節・款は章の中に入れる（TOCSection / TOCSubsection）。範囲の「−」は e-Gov の「―」に
+pub(crate) fn build_toc(lines: &[String]) -> Element {
+    fn text_el(name: &str, t: &str) -> Node {
+        Node::Element(Element {
+            name: name.into(),
+            attrs: vec![],
+            children: vec![Node::Text(t.to_string())],
+        })
+    }
+    fn close_to(stack: &mut Vec<(usize, Element)>, toc: &mut Element, depth: usize) {
+        while stack.last().is_some_and(|(d, _)| *d >= depth) {
+            let (_, e) = stack.pop().unwrap();
+            match stack.last_mut() {
+                Some((_, parent)) => parent.children.push(Node::Element(e)),
+                None => toc.children.push(Node::Element(e)),
+            }
+        }
+    }
+    let mut toc = Element {
+        name: "TOC".into(),
+        attrs: vec![],
+        children: vec![],
+    };
+    // 章の下に節、節の下に款
+    let mut stack: Vec<(usize, Element)> = Vec::new();
+    for raw in lines {
+        let line = raw.trim().replace(['−', '－'], "―");
+        if line.is_empty() {
+            continue;
+        }
+        if line == "目次" {
+            toc.children.push(text_el("TOCLabel", "目次"));
+            continue;
+        }
+        if line == "附則" {
+            close_to(&mut stack, &mut toc, 0);
+            toc.children.push(Node::Element(Element {
+                name: "TOCSupplProvision".into(),
+                attrs: vec![],
+                children: vec![text_el("SupplProvisionLabel", "附則")],
+            }));
+            continue;
+        }
+        // 「第三章の二　臨床研修（第十六条の二―第十六条の六）」→ 題と範囲
+        let (title, range) = match line.find('（') {
+            Some(i) => (line[..i].to_string(), Some(line[i..].to_string())),
+            None => (line.clone(), None),
+        };
+        let label = title.split('　').next().unwrap_or("");
+        let kind = label
+            .trim_start_matches('第')
+            .trim_start_matches(|c: char| "一二三四五六七八九十百の".contains(c))
+            .chars()
+            .next();
+        let (name, tname, depth) = match kind {
+            Some('編') => ("TOCPart", "PartTitle", 0),
+            Some('章') => ("TOCChapter", "ChapterTitle", 1),
+            Some('節') => ("TOCSection", "SectionTitle", 2),
+            Some('款') => ("TOCSubsection", "SubsectionTitle", 3),
+            _ => ("TOCDivision", "DivisionTitle", 4),
+        };
+        let num = toc_container_num(label);
+        close_to(&mut stack, &mut toc, depth);
+        let mut e = Element {
+            name: name.into(),
+            attrs: vec![("Num".into(), num)],
+            children: vec![text_el(tname, &title)],
+        };
+        if let Some(r) = range {
+            e.children.push(text_el("ArticleRange", &r));
+        }
+        stack.push((depth, e));
+    }
+    close_to(&mut stack, &mut toc, 0);
+    toc
+}
+
+/// 目次を付ける（題名の次 = 前文・本則の前）。目次の無かった法律なら本文の並び（`body_order`）にも目次の枠を足す
+pub(crate) fn set_toc(doc: &mut LegalDocument, lines: &[String]) {
+    doc.toc = Some(build_toc(lines));
+    if !doc.body_order.iter().any(|s| matches!(s, BodySlot::Toc)) {
+        let at = doc
+            .body_order
+            .iter()
+            .position(|s| matches!(s, BodySlot::Preamble | BodySlot::MainProvision))
+            .unwrap_or(doc.body_order.len());
+        doc.body_order.insert(at, BodySlot::Toc);
+    }
+}
+
+/// 「第三章の二」→ "3_2"
+fn toc_container_num(label: &str) -> String {
+    label
+        .trim_start_matches('第')
+        .trim_end_matches(['編', '章', '節', '款', '目'])
+        .split('の')
+        .filter_map(kanji_to_u32)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join("_")
 }
 
 /// 目次の平文（空白を除く）

@@ -191,6 +191,7 @@ fn segment(op: &Op, last: bool) -> String {
             end("加え", "加える")
         ),
         Op::SetTitle { .. } => format!("題名を次のように{}", end("改め", "改める")),
+        Op::SetToc { .. } => "題名の次に次の目次を付する".to_string(),
         Op::DeleteContainerTitle { path } => format!(
             "{}の{}名を{}",
             path_label(path),
@@ -427,6 +428,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::AppendItem { text, .. }
         | Op::ReplaceItems { text, .. }
         | Op::SetTitle { text, .. }
+        | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }
         | Op::ReplaceArticles { text, .. }
         | Op::ReplaceContainers { text, .. }
