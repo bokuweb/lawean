@@ -164,6 +164,13 @@ fn segment(op: &Op, last: bool) -> String {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::DeleteTitle => format!("題名を{}", end("削り", "削る")),
+        Op::ParagraphToArticle { from, to } => format!(
+            "附則第{}項を附則{}と{}",
+            to_kanji(*from),
+            article_label(to),
+            end("し", "する")
+        ),
         Op::DeleteContainer { path } => format!("{}を{}", path_label(path), end("削り", "削る")),
         Op::ShiftBranchArticles {
             base,

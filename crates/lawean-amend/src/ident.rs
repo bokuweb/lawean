@@ -1324,7 +1324,11 @@ impl Binder<'_> {
                     ))
                 }
                 // 表の中（欄の字句・行）は id を持たない。文書の側だけ
-                Op::TableEdit { .. } | Op::ParagraphCaption { .. } | Op::DeleteToc => {
+                Op::TableEdit { .. }
+                | Op::ParagraphCaption { .. }
+                | Op::DeleteToc
+                | Op::DeleteTitle
+                | Op::ParagraphToArticle { .. } => {
                     let one = Instruction {
                         text: ins.text.clone(),
                         ops: vec![op.clone()],

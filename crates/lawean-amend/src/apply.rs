@@ -329,6 +329,10 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 }
             }
             Op::DeleteToc => doc.toc = None,
+            Op::DeleteTitle => doc.title = None,
+            Op::ParagraphToArticle { .. } => {
+                return Err(ApplyError::Unsupported("附則の項を条にする".into()))
+            }
             Op::DeleteContainer { path } => delete_container(doc, path)?,
             Op::ShiftBranchArticles {
                 base,

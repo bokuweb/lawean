@@ -186,6 +186,10 @@ pub enum Op {
     ReplaceTitle { from: String, to: String },
     /// 「目次を削る」
     DeleteToc,
+    /// 「題名を削る」
+    DeleteTitle,
+    /// 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則の項を条に（原始附則）
+    ParagraphToArticle { from: u32, to: ArticleNum },
     /// 「第二章の二を削る」: 枝番の容器 1 つ（`path` は外側から、最後が消す容器）
     DeleteContainer {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -471,6 +475,8 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::DeleteTitle
+            | Op::ParagraphToArticle { .. }
             | Op::DeleteContainer { .. }
             | Op::ShiftBranchArticles { .. }
             | Op::ReplaceInContainer { .. }
