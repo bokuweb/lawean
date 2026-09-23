@@ -186,8 +186,7 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
             }
             Op::AppendArticle { path, text } => {
                 let arts = parse_articles(text)?;
-                let c = container_mut(doc, path)?;
-                c.children.extend(arts.into_iter().map(Provision::Article));
+                children_mut(doc, path)?.extend(arts.into_iter().map(Provision::Article));
             }
             Op::InsertContainersAfter { path, text } => {
                 let new = parse_containers(text)?;
@@ -1100,6 +1099,17 @@ pub(crate) fn loc_article_mut<'a>(
 }
 
 /// 「第一章第八節」のように外側から辿った容器
+/// 容器の中身（`path` が空なら本則）
+pub(crate) fn children_mut<'a>(
+    doc: &'a mut LegalDocument,
+    path: &[(ContainerKind, String)],
+) -> Result<&'a mut Vec<Provision>, ApplyError> {
+    if path.is_empty() {
+        return Ok(&mut doc.main_provision);
+    }
+    Ok(&mut container_mut(doc, path)?.children)
+}
+
 pub(crate) fn container_mut<'a>(
     doc: &'a mut LegalDocument,
     path: &[(ContainerKind, String)],

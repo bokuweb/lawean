@@ -789,8 +789,8 @@ impl Binder<'_> {
                 }
                 Op::AppendArticle { path, text } => {
                     let arts = crate::apply::parse_articles(text)?;
-                    let c = crate::apply::container_mut(&mut self.doc, path)?;
-                    let mut anchor = last_para_id_in(&c.children).ok_or_else(|| {
+                    let c = crate::apply::children_mut(&mut self.doc, path)?;
+                    let mut anchor = last_para_id_in(c).ok_or_else(|| {
                         ApplyError::BadContent(format!(
                             "{}に項が無い",
                             crate::apply::container_label(path)
@@ -814,8 +814,7 @@ impl Binder<'_> {
                             children.push(ArticleChild::Paragraph(p));
                         }
                         a.children = children;
-                        crate::apply::container_mut(&mut self.doc, path)?
-                            .children
+                        crate::apply::children_mut(&mut self.doc, path)?
                             .push(Provision::Article(a));
                     }
                 }
