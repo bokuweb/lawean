@@ -1310,6 +1310,11 @@ impl Binder<'_> {
                 Op::DeleteCaption { article } => {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
+                Op::InsertContainersAfterArticle { .. } | Op::InsertHeadingsBefore { .. } => {
+                    return Err(ApplyError::Unsupported(
+                        "条の前後に容器を置く改正の id の対応".into(),
+                    ))
+                }
                 // 表の中（欄の字句・行）は id を持たない。文書の側だけ
                 Op::TableEdit { .. } => {
                     let one = Instruction {

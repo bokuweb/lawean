@@ -346,6 +346,18 @@ pub enum Op {
     /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
     /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
     Suppl(Box<Op>),
+    /// 「第八条の次に次の二章を加える」「第十条の次に次の一款を加える」+ 章・款の内容: 条の後ろに容器を置く
+    InsertContainersAfterArticle {
+        after: ArticleNum,
+        text: Vec<String>,
+    },
+    /// 「第一条の前に次の章名を加える」「第五条の前に次の目次及び章名を加える」「題名の次に次の目次及び章名を附する」
+    /// + 目次・章名の行: 条の前に容器の題名を置く（その条から次の題名までがその容器）。`before` が None なら本則の最初
+    InsertHeadingsBefore {
+        before: Option<ArticleNum>,
+        with_toc: bool,
+        text: Vec<String>,
+    },
     /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
     TableEdit {
         table: TableRef,
@@ -397,7 +409,9 @@ impl Op {
             | Op::DeleteAppdxRowSub { .. }
             | Op::RenumberAppdxRowSub { .. }
             | Op::DeleteAppdx { .. }
+            | Op::InsertHeadingsBefore { .. }
             | Op::Suppl(_) => None,
+            Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::TableEdit { table, .. } => match table {
                 TableRef::InArticle(at) => Some(&at.article),
                 TableRef::Appdx(_) => None,
@@ -533,6 +547,10 @@ impl Op {
         if let Op::Suppl(inner) = self {
             return inner.takes_content();
         }
+        // 「第二十四条の見出しを次のように改める」+「（見出し）」
+        if let Op::SetCaption { text, .. } = self {
+            return text.is_empty();
+        }
         if let Op::TableEdit { action, .. } = self {
             return matches!(
                 action,
@@ -576,6 +594,8 @@ impl Op {
                 | Op::ReplaceArticles { .. }
                 | Op::ReplaceContainers { .. }
                 | Op::ReplaceSentencePart { .. }
+                | Op::InsertContainersAfterArticle { .. }
+                | Op::InsertHeadingsBefore { .. }
         )
     }
 
@@ -614,6 +634,10 @@ impl Op {
             | Op::ReplaceContainers { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             Op::Suppl(inner) => inner.push_content(line),
+            Op::SetCaption { text, .. } if text.is_empty() => *text = line.trim().to_string(),
+            Op::InsertContainersAfterArticle { text, .. } | Op::InsertHeadingsBefore { text, .. } => {
+                text.push(line)
+            }
             Op::TableEdit {
                 action:
                     TableAction::Replace { text }

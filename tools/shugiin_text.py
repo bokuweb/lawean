@@ -22,6 +22,7 @@ class P(HTMLParser):
         self.cur = []  # 今の段落の文字
         self.in_table = 0
         self.table_rows = []
+        self.pending_rows = []  # 閉じていない「 の表の行
         self.row = None
         self.cell = None
         self.skip = 0  # script/style
@@ -66,8 +67,16 @@ class P(HTMLParser):
             self.row = None
         elif tag == "table" and self.in_table:
             self.in_table -= 1
-            self.lines.extend(self.table_lines(self.table_rows))
+            rows = self.pending_rows + self.table_rows
             self.table_rows = []
+            # 「 が閉じないまま表が終わる（行ごとに表を分けて組んだ「 」）: 」の表まで続けて 1 つの字句に
+            ws = "\u3000 \xa0\n\r\t"
+            cells = [c.strip(ws) for r in rows for c in r]
+            if cells.count("「") > cells.count("」"):
+                self.pending_rows = rows
+                return
+            self.pending_rows = []
+            self.lines.extend(self.table_lines(rows))
 
     def handle_data(self, data):
         if self.skip:

@@ -307,6 +307,15 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 path,
                 action,
             } => table_edit_appdx(doc, t, path, action, &mut appdx_rows)?,
+            Op::InsertContainersAfterArticle { after, text } => {
+                let new = parse_containers(text)?;
+                insert_containers_after_article(doc, after, new)?;
+            }
+            Op::InsertHeadingsBefore { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "条の前に章名・目次を置く（条を容器に包み直す）".into(),
+                ))
+            }
             Op::Suppl(inner) => {
                 let one = Instruction {
                     text: ins.text.clone(),
@@ -872,6 +881,36 @@ pub(crate) fn suppl_article_mut<'a>(
         "附則{}",
         num.to_num_string()
     )))
+}
+
+/// 「第八条の次に次の二章を加える」: 条のある並び（本則または容器の中）で、条の後ろに容器を置く
+pub(crate) fn insert_containers_after_article(
+    doc: &mut LegalDocument,
+    after: &ArticleNum,
+    new: Vec<Container>,
+) -> Result<(), ApplyError> {
+    fn go(ps: &mut Vec<Provision>, after: &ArticleNum, new: &mut Option<Vec<Container>>) -> bool {
+        if let Some(i) = ps
+            .iter()
+            .position(|p| matches!(p, Provision::Article(a) if &a.num == after))
+        {
+            let v = new.take().unwrap();
+            for (k, c) in v.into_iter().enumerate() {
+                ps.insert(i + 1 + k, Provision::Container(c));
+            }
+            return true;
+        }
+        ps.iter_mut().any(|p| match p {
+            Provision::Container(c) => go(&mut c.children, after, new),
+            _ => false,
+        })
+    }
+    let mut new = Some(new);
+    if go(&mut doc.main_provision, after, &mut new) {
+        Ok(())
+    } else {
+        Err(ApplyError::ArticleNotFound(after.to_num_string()))
+    }
 }
 
 /// 「A、B及びCの項」「Aの項及びBの項」→ 行の上欄の列
