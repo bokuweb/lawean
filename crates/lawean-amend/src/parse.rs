@@ -165,7 +165,8 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             Some(prev)
                 if (prev.ends_with('、')
                     || prev.ends_with('」') && next.starts_with(['を', 'に', '及', '並'])
-                    || prev.ends_with(['を', '中']) && next.starts_with('「')
+                    || (prev.ends_with(['を', '中']) || prev.ends_with("とあるのは"))
+                        && next.starts_with('「')
                     || !prev.ends_with('。')
                         && prev.matches('「').count() > prev.matches('」').count())
                     && prev
@@ -3404,7 +3405,7 @@ fn parse_instruction_split(
             ("set_suppl_note", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)(?:の付記を次のように改め(?:る)?|に付記として次のように加え(?:る)?)$"),
             ("shift_branch_items", r"^(?P<loc>.+?中|同条|同項)?第(?P<b>{N})号の(?P<p>{N})から第(?P<b2>{N})号の(?P<q>{N})までを(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_items_each", r"^(?P<loc>.+?中|同条|同項)?第(?P<a>{N})号及び第(?P<b>{N})号をそれぞれ第(?P<c>{N})号及び第(?P<d>{N})号と(?:し|する)$"),
-            ("append_structure", r"^本則に次の{N}条及び{N}(?:編|章|節)を加え(?:る)?$"),
+            ("append_structure", r"^本則に次の(?:{N}(?:条|編|章|節|款|目)(?:、|及び))+{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「同号イからニまでを次のように改める」「同号イ及びロを削る」: 号の下のイロハの列挙
             ("subitems_edit", r"^(?P<loc>.*?号(?:の{N})*)?(?P<a>{S})(?:から(?P<b>{S})まで|(?P<list>(?:(?:、|及び){S})+))を(?P<act>次のように改め(?:る)?|削(?:り|る))$"),
             ("suppl_para_to_art", r"^(?:附則(?:第(?P<p>{N})項)?|(?P<same>同項))を(?:附則第(?P<q>{N})条|(?P<samea>同条))(?:第(?P<r>{N})項)?と(?:し|する)$"),
@@ -4790,8 +4791,8 @@ fn parse_instruction_split(
                     } else if g("side") == "前" || g("side2") == "前" {
                         TableAction::InsertBefore { text: Vec::new() }
                     } else if act.starts_with("に次")
-                        || act.ends_with("として次のように加え")
-                        || act.ends_with("として次のように加える")
+                        || act.contains("として次の")
+                            && (act.ends_with("加え") || act.ends_with("加える"))
                     {
                         TableAction::Append { text: Vec::new() }
                     } else if !g("k").is_empty() {
