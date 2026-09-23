@@ -125,10 +125,17 @@ fn main() {
         for b in bs {
             let head: String = b.lines().next().unwrap_or("").chars().take(40).collect();
             let r = std::panic::catch_unwind(|| lawean_amend::parse_units(&b));
+            // （理由, 読めなかった文）
             let e = match r {
                 Ok(Ok(_)) => None,
-                Ok(Err(e)) => Some(e.to_string()),
-                Err(_) => Some("panic".to_string()),
+                Ok(Err(e)) => Some((
+                    e.cause().to_string(),
+                    match &e {
+                        lawean_amend::ParseError::InSentence { line, .. } => line.clone(),
+                        _ => String::new(),
+                    },
+                )),
+                Err(_) => Some(("panic".to_string(), String::new())),
             };
             let s = by_session.entry(session).or_default();
             match e {
@@ -136,7 +143,7 @@ fn main() {
                     units_ok += 1;
                     s.0 += 1;
                 }
-                Some(e) => {
+                Some((e, line)) => {
                     units_ng += 1;
                     s.1 += 1;
                     // 種類: エラーの断片の形（数をならし、「」の中を落とす）
@@ -144,7 +151,13 @@ fn main() {
                     let k = kinds.entry(key).or_insert((0, format!("{name} {head}")));
                     k.0 += 1;
                     if let Some(t) = tsv.as_mut() {
-                        writeln!(t, "{name}\t{head}\t{}", e.replace(['\t', '\n'], " ")).unwrap();
+                        writeln!(
+                            t,
+                            "{name}\t{head}\t{}\t{}",
+                            e.replace(['\t', '\n'], " "),
+                            line.replace(['\t', '\n'], " ")
+                        )
+                        .unwrap();
                     }
                 }
             }
