@@ -105,6 +105,18 @@ Revision = Source IR（LegalDocument）。apply : Revision → AmendUnit → Res
 | 別表第一及び別表第二を削る | `DeleteAppdx { tables }` |
 | 第八条中「A」を「B」に改め、同条を同条第二項とし、同条に第一項として次の一項を加える + 項の行 | `RenumberParagraph { from: 1, to: 2 }` + `InsertParagraphFirst { article, text }`（条の先頭に項。id の世界では前の条の最後の項の後ろに insertAfter）（令5-53） |
 | 同じ文で「A」を「B」に、「B」を「C」に改め | 加えた字句（B）は後の置換が指さない。置換で入れた字句に印（`apply::mark`、私用領域の文字）を付け、文の終わりに外す。元の字句に無く加えた字句の中にだけあるなら、それを指す（令5-53 仲裁法） |
+| 別表第一の七の項中「A」を「B」に改め / 同表の一七の項イ(イ)中… / 同項ニ中… | `ReplaceAppdxRow { table, row, sub, from, to }`: 別表の行（`rowspan` や上欄の空欄で続く行も同じ項）と行の中の細目（衆議院の半角括弧は e-Gov の全角で当てる） |
+| 別表第一の八の項を次のように改める + 行の内容 | `ReplaceAppdxRowWhole`（欄の数は元の行から） |
+| 別表第一中九の項及び一〇の項を削り | `DeleteAppdxRows` |
+| 同項を同表の九の項とし / 同表中一二の項を一一の項とし | `RenumberAppdxRow`（上欄の番号） |
+| 四十四の三の項の次に次のように加える + 行 | `InsertAppdxRowsAfter` |
+| 同表の一一の二の項中ハを削り / ニをハとし | `DeleteAppdxRowSub` / `RenumberAppdxRowSub`（行の中の文の記号） |
+| 同表を別表第三とし | `RenameAppdx`（題の「別表第二」だけ） |
+| 別表第一の次に次の一表を加える / 附則の次に次の別表を加える + 題と行 | `InsertAppdxAfter` / `AppendAppdx`（題は `AppdxTableTitle` と `RelatedArticleNum` に分ける） |
+| 同節を同章第二節とし / 同節第一款の次に次の一款を加える / 同節第二款中第百五十二条を第百五十五条とし | 相対の容器（「同編」「同章」「同節」「同款」）。直前の容器のうちその種類までを取り、続きの容器を足す |
+| 第四十条の前の見出し中「A」を「B」に改め | `ReplaceCaption`（「前の見出し」も見出し） |
+| 同項に第一号として次の一号を加える + 号の行 | `InsertItemFirst { at, text }`（号ずれの後で先頭に置く） |
+| 第六十三条第二項中「）」とあるのは」を「）」とあるのは、」に改め | 読替え規定の書き換え（字句に「」が入って釣り合わない）。読めない断片は前後とつないで緩く読み直す（最初の断片から後ろへも） |
 | 題名の次に次の目次を付する + 目次の行 | `SetToc { text }`。目次の無い法律に e-Gov の形の目次（TOCChapter + ArticleRange、節・款は章の中）を組んで付ける（令3-49 第7条 歯科医師法） |
 | 第百二条及び第百三条を次のように改める + 「第百二条及び第百三条　削除」 | `ReplaceArticles`（範囲の番号の「削除」の条） |
 | 同節の前に次の一節を加える | `InsertContainersBefore` |

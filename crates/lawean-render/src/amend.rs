@@ -77,6 +77,19 @@ fn kind_label(k: lawean_source::ContainerKind) -> &'static str {
     }
 }
 
+/// 別表の行の位置。行が数（「一一の二」）なら「別表第一の一一の二の項」、法令名なら「別表第二宅地建物取引業法（…）の項」
+fn appdx_loc(table: &str, row: &str) -> String {
+    let numeric = row
+        .chars()
+        .next()
+        .is_some_and(|c| "一二三四五六七八九十〇百千".contains(c));
+    if numeric {
+        format!("{table}の{row}の項")
+    } else {
+        format!("{table}{row}の項")
+    }
+}
+
 fn loc_label(l: &Loc) -> String {
     let mut s = match &l.paragraph {
         Some(ParaRef::Num(n)) => format!("{}第{}項", article_label(&l.article), to_kanji(*n)),
@@ -283,10 +296,13 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceAppdxRow {
             table,
             row,
+            sub,
             from,
             to,
         } => format!(
-            "{table}{row}の項中「{from}」を{}",
+            "{}{}中「{from}」を{}",
+            appdx_loc(table, row),
+            sub.clone().unwrap_or_default(),
             if to.is_empty() {
                 end("削り", "削る").to_string()
             } else {
@@ -350,6 +366,12 @@ fn segment(op: &Op, last: bool) -> String {
             to_kanji(count_items(text)),
             end("加え", "加える")
         ),
+        Op::InsertItemFirst { at, text } => format!(
+            "{}に第一号として次の{}号を{}",
+            loc_label(at),
+            to_kanji(count_items(text)),
+            end("加え", "加える")
+        ),
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
@@ -367,6 +389,43 @@ fn segment(op: &Op, last: bool) -> String {
             format!("{}に次の表を{}", loc_label(at), end("加え", "加える"))
         }
         Op::DeleteAppdx { tables } => format!("{}を{}", tables.join("及び"), end("削り", "削る")),
+        Op::ReplaceAppdxRowWhole { table, row, .. } => {
+            format!("{table}の{row}の項を次のように{}", end("改め", "改める"))
+        }
+        Op::DeleteAppdxRows { table, rows } => format!(
+            "{table}中{}を{}",
+            rows.iter()
+                .map(|r| format!("{r}の項"))
+                .collect::<Vec<_>>()
+                .join("及び"),
+            end("削り", "削る")
+        ),
+        Op::RenumberAppdxRow { table, from, to } => {
+            format!("{table}中{from}の項を{to}の項と{}", end("し", "する"))
+        }
+        Op::InsertAppdxRowsAfter { table, after, .. } => format!(
+            "{}の次に次のように{}",
+            appdx_loc(table, after),
+            end("加え", "加える")
+        ),
+        Op::AppendAppdx { .. } => format!("附則の次に次の別表を{}", end("加え", "加える")),
+        Op::RenameAppdx { from, to } => format!("{from}を{to}と{}", end("し", "する")),
+        Op::InsertAppdxAfter { after, .. } => {
+            format!("{after}の次に次の一表を{}", end("加え", "加える"))
+        }
+        Op::DeleteAppdxRowSub { table, row, sub } => {
+            format!("{}中{sub}を{}", appdx_loc(table, row), end("削り", "削る"))
+        }
+        Op::RenumberAppdxRowSub {
+            table,
+            row,
+            from,
+            to,
+        } => format!(
+            "{}中{from}を{to}と{}",
+            appdx_loc(table, row),
+            end("し", "する")
+        ),
         Op::RenumberSubitem { at, from, to } => {
             format!("{}{from}を{to}と{}", loc_label(at), end("し", "する"))
         }
@@ -570,6 +629,7 @@ fn content_of(op: &Op) -> &[String] {
         | Op::InsertItemAfter { text, .. }
         | Op::InsertItemBefore { text, .. }
         | Op::AppendItem { text, .. }
+        | Op::InsertItemFirst { text, .. }
         | Op::ReplaceItems { text, .. }
         | Op::ReplaceItemSet { text, .. }
         | Op::InsertSubitemAfter { text, .. }
@@ -577,6 +637,10 @@ fn content_of(op: &Op) -> &[String] {
         | Op::AppendContainers { text, .. }
         | Op::InsertArticleBefore { text, .. }
         | Op::AppendTable { text, .. }
+        | Op::ReplaceAppdxRowWhole { text, .. }
+        | Op::InsertAppdxRowsAfter { text, .. }
+        | Op::AppendAppdx { text, .. }
+        | Op::InsertAppdxAfter { text, .. }
         | Op::SetTitle { text, .. }
         | Op::SetToc { text, .. }
         | Op::SetContainerTitle { text, .. }
@@ -594,7 +658,13 @@ pub fn render_instruction(ins: &Instruction) -> String {
     let phrase_loc = |op: &Op| match op {
         Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => Some(loc_label(at)),
         Op::ReplaceToc { .. } => Some("目次".to_string()),
-        Op::ReplaceAppdxRow { table, row, .. } => Some(format!("{table}{row}の項")),
+        Op::ReplaceAppdxRow {
+            table, row, sub, ..
+        } => Some(format!(
+            "{}{}",
+            appdx_loc(table, row),
+            sub.clone().unwrap_or_default()
+        )),
         _ => None,
     };
     for (i, op) in ins.ops.iter().enumerate() {

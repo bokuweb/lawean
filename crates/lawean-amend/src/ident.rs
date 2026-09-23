@@ -969,6 +969,35 @@ impl Binder<'_> {
                 Op::DeleteAppdx { tables } => {
                     crate::apply::delete_appendices(&mut self.doc, tables)?;
                 }
+                // 別表は id の世界（本則の項）に無い。文書の側だけ
+                Op::ReplaceAppdxRowWhole { table, row, text } => {
+                    crate::apply::replace_appdx_row_whole(&mut self.doc, table, row, text)?
+                }
+                Op::DeleteAppdxRows { table, rows } => {
+                    crate::apply::delete_appdx_rows(&mut self.doc, table, rows)?
+                }
+                Op::RenumberAppdxRow { table, from, to } => {
+                    crate::apply::renumber_appdx_row(&mut self.doc, table, from, to)?
+                }
+                Op::InsertAppdxRowsAfter { table, after, text } => {
+                    crate::apply::insert_appdx_rows_after(&mut self.doc, table, after, text)?
+                }
+                Op::AppendAppdx { text } => crate::apply::append_appdx(&mut self.doc, text, None)?,
+                Op::InsertAppdxAfter { after, text } => {
+                    crate::apply::append_appdx(&mut self.doc, text, Some(after))?
+                }
+                Op::RenameAppdx { from, to } => {
+                    crate::apply::rename_appdx(&mut self.doc, from, to)?
+                }
+                Op::DeleteAppdxRowSub { table, row, sub } => {
+                    crate::apply::delete_appdx_row_sub(&mut self.doc, table, row, sub)?
+                }
+                Op::RenumberAppdxRowSub {
+                    table,
+                    row,
+                    from,
+                    to,
+                } => crate::apply::renumber_appdx_row_sub(&mut self.doc, table, row, from, to)?,
                 // 附則の条は id の世界（本則）に無い。文書の側だけ
                 Op::InsertArticleAfter { after, text, suppl } if *suppl => {
                     crate::apply::insert_suppl_articles_after(&mut self.doc, after, text)?;
@@ -1170,12 +1199,14 @@ impl Binder<'_> {
                 Op::ReplaceAppdxRow {
                     table,
                     row,
+                    sub,
                     from,
                     to,
                 } => crate::apply::replace_appdx_row(
                     &mut self.doc,
                     table,
                     row,
+                    sub.as_deref(),
                     from,
                     to,
                     &mut appdx_rows,
@@ -1350,6 +1381,7 @@ impl Binder<'_> {
                 | Op::InsertItemAfter { at, .. }
                 | Op::InsertItemBefore { at, .. }
                 | Op::AppendItem { at, .. }
+                | Op::InsertItemFirst { at, .. }
                 | Op::ReplaceItems { at, .. }
                 | Op::ReplaceItemSet { at, .. }
                 | Op::ReplaceTableRow { at, .. }
@@ -1381,6 +1413,9 @@ impl Binder<'_> {
                             Some(item) => crate::apply::append_subitems(p, item, text)?,
                             None => crate::apply::insert_items_after(p, None, text)?,
                         },
+                        Op::InsertItemFirst { text, .. } => {
+                            crate::apply::insert_items_first(p, text)?
+                        }
                         Op::ReplaceItems { text, .. } => {
                             p.children.retain(|c| !matches!(c, ParagraphChild::Item(_)));
                             crate::apply::insert_items_after(p, None, text)?

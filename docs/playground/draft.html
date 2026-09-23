@@ -44,6 +44,8 @@
       <div><label for="promulgated">公布予定日</label><input id="promulgated" placeholder="YYYY-MM-DD"></div>
       <div><label for="enforced">施行日（予定）</label><input id="enforced" placeholder="YYYY-MM-DD"></div>
     </div>
+    <label for="otherdates">附則が「X法の施行の日」と書くときの X の施行日（任意。<code>法令名=YYYY-MM-DD</code>、1 行に 1 つ）</label>
+    <textarea id="otherdates" class="small" spellcheck="false" rows="2" placeholder="民事訴訟法等の一部を改正する法律=2026-05-21"></textarea>
     <label for="laws">他法令（参照の波及を見る。発射台を引いている法令は自動で選ぶ。複数選択）</label>
     <select id="laws" multiple size="4"></select>
     <label for="future">施行日までに施行される未施行の改正（任意）。選ぶと、改め文はその版に当たるものとして検査し、上の発射台は「起草時の版」になる（先行改正との競合: 空振り・別の項・参照のずれ・可換性）</label>
@@ -275,6 +277,11 @@ async function run() {
       base: future || baseXml, base_draft: future ? baseXml : null,
       amendment: $('amend').value, expected: null, taisho: null, other_laws,
       enforced: $('enforced').value || null, suppl: $('suppl').value.trim() || null, promulgated: $('promulgated').value || null,
+      // 「X法の施行の日」を暦日に解く（施行期日の検査と、施行日ごとの分割）
+      other_law_dates: Object.fromEntries($('otherdates').value.split('\n')
+        .map(l => l.trim()).filter(Boolean)
+        .map(l => l.split('=')).filter(p => p.length === 2)
+        .map(([n, d]) => [n.trim(), d.trim()])),
     };
     lastInput = input;
     const t0 = performance.now();

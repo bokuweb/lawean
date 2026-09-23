@@ -498,19 +498,49 @@ pub fn run(input: &Input<'_>) -> Report {
         }
     }
 
-    checks.push(if base_fail.is_empty() {
-        check(
-            Kind::Base,
-            Status::Pass,
-            "改め文の指す条・項・字句が発射台にある",
-            vec![],
-        )
-    } else {
+    // 「「A」の下に「B」を加える」の A の全部の出現が既に AB になっていれば、先行改正が同じ手当てを済ませている
+    // （そのまま当てると字句が重複する。令4-48 第4条 ← 令6-33）
+    let mut base_warn: Vec<String> = Vec::new();
+    for (label, unit) in units {
+        for ins in &unit.instructions {
+            for op in &ins.ops {
+                let lawean_amend::Op::InsertAfterPhrase { at, anchor, text } = op else {
+                    continue;
+                };
+                if anchor.is_empty() || text.is_empty() {
+                    continue;
+                }
+                let hay = lawean_amend::apply::loc_text(input.base, at);
+                let n = hay.matches(anchor.as_str()).count();
+                if n > 0 && hay.matches(&format!("{anchor}{text}")).count() == n {
+                    base_warn.push(format!(
+                        "{label}: {} の「{anchor}」は既に「{anchor}{text}」になっている。先行改正が同じ手当てを済ませているので、そのまま当てると字句が重複する",
+                        lawean_amend::apply::loc_name(at)
+                    ));
+                }
+            }
+        }
+    }
+    checks.push(if !base_fail.is_empty() {
         check(
             Kind::Base,
             Status::Fail,
             "発射台に無いものを指している",
             base_fail,
+        )
+    } else if !base_warn.is_empty() {
+        check(
+            Kind::Base,
+            Status::Warn,
+            "加える字句が既に入っている（先行改正で手当て済み）",
+            base_warn,
+        )
+    } else {
+        check(
+            Kind::Base,
+            Status::Pass,
+            "改め文の指す条・項・字句が発射台にある",
+            vec![],
         )
     });
     // 順序と依存

@@ -570,20 +570,85 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     let a = phrases[0].clone();
     // 別表の行: 「別表第二X法（…）の項中「A」を「B」に、「C」を「D」に改め、「E」の下に「F」を加える」
     static APPDX: OnceLock<Regex> = OnceLock::new();
-    let appdx_re = APPDX.get_or_init(|| re(r"^(?P<table>別表(?:第{N})?)(?P<row>.+?)の項$"));
+    let appdx_re = APPDX.get_or_init(|| {
+        re(r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項(?P<sub>[イロハニホヘトチリヌルヲワカヨタレソツネナラム](?:[(（][^)）]{1,4}[)）])?|[(（][^)）]{1,4}[)）])?$")
+    });
+    let mut appdx_sub: Option<String> = None;
+    // 「同項ニ中」: 別表の行の先行詞 + 細目（本則の項ではない）
+    static APPDX_SAME: OnceLock<Regex> = OnceLock::new();
+    let appdx_same = APPDX_SAME.get_or_init(|| {
+        re(r"^同項(?P<sub>[イロハニホヘトチリヌルヲワカヨタレソツネナラム](?:[(（][^)）]{1,4}[)）])?|[(（][^)）]{1,4}[)）])?$")
+    });
+    if ante.article.is_none() && ante.appdx.is_some() {
+        if let Some(c) = loc_part.and_then(|l| appdx_same.captures(l)) {
+            appdx_sub = c.name("sub").map(|m| m.as_str().to_string());
+            let (table, row) = ante.appdx.clone().unwrap();
+            let mk = |from: String, to: String| Op::ReplaceAppdxRow {
+                table: table.clone(),
+                row: row.clone(),
+                sub: appdx_sub.clone(),
+                from,
+                to,
+            };
+            if let Some(r) = rest.strip_prefix("を") {
+                if r == "削り" || r == "削る" {
+                    return Ok(Some(PhraseOps(
+                        phrases.into_iter().map(|f| mk(f, String::new())).collect(),
+                    )));
+                }
+                if let Some((b, tail)) = take_quoted(r) {
+                    if matches!(tail, "に" | "に改め" | "に改める") {
+                        return Ok(Some(PhraseOps(
+                            phrases.into_iter().map(|f| mk(f, b.clone())).collect(),
+                        )));
+                    }
+                }
+            }
+            if let Some(r) = rest.strip_prefix("の下に") {
+                if let Some((b, tail)) = take_quoted(r) {
+                    if matches!(tail, "を" | "を加え" | "を加える") {
+                        return Ok(Some(PhraseOps(
+                            phrases
+                                .into_iter()
+                                .map(|f| mk(f.clone(), format!("{f}{b}")))
+                                .collect(),
+                        )));
+                    }
+                }
+            }
+        }
+    }
     let appdx: Option<(String, String)> = match loc_part {
-        Some(l) => appdx_re
-            .captures(l)
-            .map(|c| (c["table"].to_string(), c["row"].to_string())),
+        Some(l) => appdx_re.captures(l).map(|c| {
+            appdx_sub = c.name("sub").map(|m| m.as_str().to_string());
+            // 「同表の…の項」は直前の別表
+            let table = match &c["table"] {
+                "同表" => ante
+                    .appdx
+                    .as_ref()
+                    .map(|(t, _)| t.clone())
+                    .unwrap_or_default(),
+                t => t.to_string(),
+            };
+            (table, c["row"].to_string())
+        }),
         None if ante.article.is_none() && !ante.toc => ante.appdx.clone(),
         None => None,
     };
     if let Some((table, row)) = appdx {
+        // 位置を省いた続き（「別表第一一七の項ホ中「A」を削り、「B」を削り」）は直前の細目のまま。
+        // 別表の文脈では `ante.sub`（本則の号の下のイロハ）は使わないので、行の細目の先行詞として使う
+        if loc_part.is_none() {
+            appdx_sub = ante.sub.clone();
+        } else {
+            ante.sub = appdx_sub.clone();
+        }
         ante.appdx = Some((table.clone(), row.clone()));
         ante.article = None;
         let mk = |from: String, to: String| Op::ReplaceAppdxRow {
             table: table.clone(),
             row: row.clone(),
+            sub: appdx_sub.clone(),
             from,
             to,
         };
@@ -915,6 +980,26 @@ fn container_path_with_ante(
     full
 }
 
+/// 直前の容器のうち、`kind`（「節」）までの部分（「同節第一款」の「同節」）
+fn ante_container_upto(ante: &Ante, kind: char) -> Vec<(lawean_source::ContainerKind, String)> {
+    use lawean_source::ContainerKind::*;
+    let want = match kind {
+        '編' => Part,
+        '章' => Chapter,
+        '節' => Section,
+        '款' => Subsection,
+        _ => Division,
+    };
+    let mut out = Vec::new();
+    for (k, n) in &ante.container {
+        out.push((*k, n.clone()));
+        if *k == want {
+            break;
+        }
+    }
+    out
+}
+
 /// 直前の位置（条・項）を引き継ぐ
 fn ante_loc(ante: &Ante, seg: &str) -> Result<Loc, ParseError> {
     Ok(Loc {
@@ -936,7 +1021,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         [
             ("toc", r"^目次中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しは「中」の規則より先に（「第四十二条の見出し中「A」を「B」に改め」）
-            ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_replace", r"^(?P<loc>第{N}条(?:の{N})*|同条)の(?:前の)?見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しの中の字句の追加・削除: 「第九条の見出し中「A」の下に「B」を加え」「同条の見出し中「A」を削り」
             ("caption_insert", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
             ("caption_delete_phrase", r"^(?P<loc>第{N}条(?:の{N})*|同条)の見出し中「(?P<a>.+?)」を削(?:り|る)$"),
@@ -959,6 +1044,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("insert_sub_after", r"^(?P<loc>同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>[{K}])の次に次のように加え(?:る)?$"),
             ("insert_item_after", r"^(?P<loc>.+?)の(?P<side>次|前)に次の{N}号を加え(?:る)?$"),
             ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号)を加え(?:る)?$"),
+            ("insert_item_first", r"^(?P<loc>.+?)に第一号として次の{N}号を加え(?:る)?$"),
             // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
             ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
@@ -970,20 +1056,30 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
-            ("renumber_art", r"^(?:本則中|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)を(?P<qs>附則)?第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_art", r"^(?:本則中|(?:同編|同章|同節|同款|第{N}(?:編|章|節|款|目)(?:の{N})*)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)を(?P<qs>附則)?第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
             ("append_art", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}条を加え(?:る)?$"),
             ("append_suppl_arts", r"^附則に次の(?:見出し及び)?{N}条を加え(?:る)?$"),
             ("append_table", r"^(?P<loc>.+?)に次の表を加え(?:る)?$"),
-            ("delete_appdx", r"^(?P<list>別表(?:第{N})?(?:(?:及び|、)別表(?:第{N})?)*)を削(?:り|る)$"),
+            ("delete_appdx", r"^(?P<list>別表(?:第[一二三四五六七八九十百千]+)?(?:(?:及び|、)別表(?:第[一二三四五六七八九十百千]+)?)*)を削(?:り|る)$"),
+            // 別表の行: 全部改正・削除・番号の付け替え・行の追加・別表の追加・行の中の細目
+            ("appdx_row_whole", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項を次のように改め(?:る)?$"),
+            ("appdx_rows_delete", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<rows>.+?の項(?:(?:及び|、)(?:同表(?:の|中)?)?.+?の項)*)を削(?:り|る)$"),
+            ("appdx_row_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<from>.+?)の項|同項)を(?:同表(?:の|中)?)?(?P<to>.+?)の項と(?:し|する)$"),
+            ("appdx_rows_insert", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<after>.+?)の項|同項)の次に次のように加え(?:る)?$"),
+            ("append_appdx", r"^(?:附則の次に次の別表|附則の次に別表として次の{N}表|本則に次の別表)を加え(?:る)?$"),
+            ("rename_appdx", r"^(?P<from>別表(?:第[一二三四五六七八九十百千]+)?|同表)を(?P<to>別表(?:第[一二三四五六七八九十百千]+)?)と(?:し|する)$"),
+            ("insert_appdx_after", r"^(?P<after>別表(?:第[一二三四五六七八九十百千]+)?|同表)の次に次の{N}表を加え(?:る)?$"),
+            ("appdx_row_sub_delete", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<sub>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を削(?:り|る)$"),
+            ("appdx_row_sub_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<a>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を(?P<b>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])と(?:し|する)$"),
             ("append_containers", r"^(?P<path>本則|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             ("insert_arts_before", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の{N}条を加え(?:る)?$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
-            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同章|同節|同款)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
+            ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|(?:同編|同章|同節|同款)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
-            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同編|同章|同節|同款)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
             ("set_toc", r"^題名の次に次の目次を付する$"),
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
@@ -1011,18 +1107,24 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
     let mut ops = Vec::new();
     let segs: Vec<String> = split_segments(line);
     // 断片ごとの操作の始まり（読めない断片が出たとき、前の断片とつないで読み直すのに使う）
-    let mut op_start: Vec<usize> = Vec::new();
+    // 断片ごとの ops の先頭（読めない断片を前後とつないで読み直すときに、そこまで戻す）。
+    // 飛ばした断片は None
+    let mut op_start: Vec<Option<usize>> = vec![None; segs.len()];
     let mut skip_until = 0usize;
     for (si, seg) in segs.iter().enumerate() {
         if si < skip_until {
             continue;
         }
-        op_start.push(ops.len());
+        op_start[si] = Some(ops.len());
         let seg = seg.trim();
         // 字句そのものに「」に、「」が入る読替え規定の書き換えは「、」で切れてしまう。
         // 読めない断片は、前の断片（字句の操作）とつないで、改め・加え・削りで終わるところまで緩く読み直す
         let try_merge = |ops: &mut Vec<Op>, ante: &mut Ante| -> Option<usize> {
-            for start in (0..si).rev() {
+            // 今の断片から前に遡って（今の断片だけで後ろとつなぐ場合も含む）
+            for start in (0..=si).rev() {
+                let Some(from_op) = op_start[start] else {
+                    break;
+                };
                 if !segs[start].contains('「') {
                     break;
                 }
@@ -1049,7 +1151,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
                     if let Some(v) = parse_phrase_list_loose(&merged, &mut a2) {
-                        ops.truncate(op_start[start]);
+                        ops.truncate(from_op);
                         ops.extend(v);
                         return Some(end + 1);
                     }
@@ -1141,8 +1243,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         .iter()
                         .find_map(|s| tok.strip_suffix(s))
                     {
+                        let path = container_path(base);
+                        ante.container = path.clone();
                         ops.push(Op::ReplaceContainerTitle {
-                            path: container_path(base),
+                            path,
                             from: from.clone(),
                             to: to.clone(),
                         });
@@ -1230,6 +1334,46 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 "renumber_sub" | "shift_sub" | "insert_sub_after" => {
                     let l = g("loc");
                     let l = l.trim_end_matches('中');
+                    // 別表の行の中の細目（「別表第一の一一の二の項中ニをハとし」）
+                    static APPDX_ROW_LOC: OnceLock<Regex> = OnceLock::new();
+                    let appdx_row_loc = APPDX_ROW_LOC.get_or_init(|| {
+                        re(r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項$")
+                    });
+                    if *name == "renumber_sub" {
+                        if let Some(c) = appdx_row_loc.captures(l) {
+                            let table = match &c["table"] {
+                                "同表" => match &ante.appdx {
+                                    Some((t, _)) => t.clone(),
+                                    None => return Err(ParseError::NoAntecedent(seg.to_string())),
+                                },
+                                t => t.to_string(),
+                            };
+                            let row = c["row"].to_string();
+                            ante.appdx = Some((table.clone(), row.clone()));
+                            ante.article = None;
+                            ops.push(Op::RenumberAppdxRowSub {
+                                table,
+                                row,
+                                from: g("a"),
+                                to: g("b"),
+                            });
+                            break;
+                        }
+                    }
+                    // 「ニをハとし」（別表の行の先行詞）
+                    if l.is_empty() && ante.article.is_none() {
+                        if let Some((table, row)) = ante.appdx.clone() {
+                            if *name == "renumber_sub" {
+                                ops.push(Op::RenumberAppdxRowSub {
+                                    table,
+                                    row,
+                                    from: g("a"),
+                                    to: g("b"),
+                                });
+                                break;
+                            }
+                        }
+                    }
                     let mut at = if l.is_empty() {
                         ante_loc(&ante, seg)?
                     } else {
@@ -1325,6 +1469,10 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         }
                     }
                 }
+                "insert_item_first" => Op::InsertItemFirst {
+                    at: loc(&g("loc"), &mut ante)?,
+                    text: Vec::new(),
+                },
                 "append_item" | "append_subitems" => Op::AppendItem {
                     at: loc(&g("loc"), &mut ante)?,
                     text: Vec::new(),
@@ -1438,6 +1586,139 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     at: loc(&g("loc"), &mut ante)?,
                     text: Vec::new(),
                 },
+                "appdx_row_whole"
+                | "appdx_rows_delete"
+                | "appdx_row_renumber"
+                | "appdx_rows_insert"
+                | "appdx_row_sub_delete"
+                | "appdx_row_sub_renumber" => {
+                    // 別表と行の先行詞（「同表」「同項」）
+                    let table = match g("table").as_str() {
+                        "" | "同表" => match &ante.appdx {
+                            Some((t, _)) => t.clone(),
+                            None => return Err(ParseError::NoAntecedent(seg.to_string())),
+                        },
+                        t => t.to_string(),
+                    };
+                    let row_of = |r: &str, ante: &Ante| -> Result<String, ParseError> {
+                        if r == "同" || r.is_empty() {
+                            return ante
+                                .appdx
+                                .as_ref()
+                                .map(|(_, x)| x.clone())
+                                .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()));
+                        }
+                        Ok(r.to_string())
+                    };
+                    match *name {
+                        "appdx_row_whole" => {
+                            let row = row_of(&g("row"), &ante)?;
+                            ante.appdx = Some((table.clone(), row.clone()));
+                            ante.article = None;
+                            Op::ReplaceAppdxRowWhole {
+                                table,
+                                row,
+                                text: Vec::new(),
+                            }
+                        }
+                        "appdx_rows_delete" => {
+                            let rows: Vec<String> = g("rows")
+                                .split("及び")
+                                .flat_map(|x| x.split('、'))
+                                .filter_map(|x| {
+                                    x.trim()
+                                        .trim_start_matches("同表")
+                                        .trim_start_matches(['の', '中'])
+                                        .strip_suffix("の項")
+                                        .map(str::to_string)
+                                })
+                                .collect();
+                            if rows.is_empty() {
+                                return Err(ParseError::Unrecognized(seg.to_string()));
+                            }
+                            ante.appdx = Some((table.clone(), rows[0].clone()));
+                            ante.article = None;
+                            Op::DeleteAppdxRows { table, rows }
+                        }
+                        "appdx_row_renumber" => {
+                            // 「同項を同表の九の項とし」: from は直前の行
+                            let from = row_of(
+                                g("from")
+                                    .trim_start_matches("同表")
+                                    .trim_start_matches(['の', '中']),
+                                &ante,
+                            )?;
+                            let to = g("to")
+                                .trim_start_matches("同表")
+                                .trim_start_matches(['の', '中'])
+                                .to_string();
+                            ante.appdx = Some((table.clone(), to.clone()));
+                            ante.article = None;
+                            Op::RenumberAppdxRow { table, from, to }
+                        }
+                        "appdx_rows_insert" => {
+                            // 「同項の次に次のように加える」: 直前の行
+                            let after = row_of(&g("after"), &ante)?;
+                            ante.appdx = Some((table.clone(), after.clone()));
+                            ante.article = None;
+                            Op::InsertAppdxRowsAfter {
+                                table,
+                                after,
+                                text: Vec::new(),
+                            }
+                        }
+                        "appdx_row_sub_delete" => {
+                            let row = row_of(&g("row"), &ante)?;
+                            ante.appdx = Some((table.clone(), row.clone()));
+                            ante.article = None;
+                            Op::DeleteAppdxRowSub {
+                                table,
+                                row,
+                                sub: g("sub"),
+                            }
+                        }
+                        _ => {
+                            let row = row_of(&g("row"), &ante)?;
+                            ante.appdx = Some((table.clone(), row.clone()));
+                            ante.article = None;
+                            Op::RenumberAppdxRowSub {
+                                table,
+                                row,
+                                from: g("a"),
+                                to: g("b"),
+                            }
+                        }
+                    }
+                }
+                "append_appdx" => Op::AppendAppdx { text: Vec::new() },
+                "rename_appdx" => {
+                    let from = match g("from").as_str() {
+                        "同表" => ante
+                            .appdx
+                            .as_ref()
+                            .map(|(t, _)| t.clone())
+                            .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?,
+                        t => t.to_string(),
+                    };
+                    let to = g("to");
+                    ante.appdx = Some((to.clone(), String::new()));
+                    ante.article = None;
+                    Op::RenameAppdx { from, to }
+                }
+                "insert_appdx_after" => {
+                    let after = match g("after").as_str() {
+                        "同表" => ante
+                            .appdx
+                            .as_ref()
+                            .map(|(t, _)| t.clone())
+                            .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?,
+                        t => t.to_string(),
+                    };
+                    Op::InsertAppdxAfter {
+                        after,
+                        text: Vec::new(),
+                    }
+                }
                 "delete_appdx" => Op::DeleteAppdx {
                     tables: g("list")
                         .split("及び")
@@ -1461,11 +1742,16 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         suppl: l.suppl,
                     }
                 }
-                "container_title" => Op::ReplaceContainerTitle {
-                    path: container_path(&g("path")),
-                    from: g("a"),
-                    to: g("b"),
-                },
+                "container_title" => {
+                    let path = container_path(&g("path"));
+                    ante.container = path.clone();
+                    ante.article = None;
+                    Op::ReplaceContainerTitle {
+                        path,
+                        from: g("a"),
+                        to: g("b"),
+                    }
+                }
                 "set_title" => Op::SetTitle { text: Vec::new() },
                 "set_toc" => Op::SetToc { text: Vec::new() },
                 "set_container_title" => Op::SetContainerTitle {
@@ -1473,10 +1759,17 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     text: Vec::new(),
                 },
                 "insert_containers_after" => {
-                    let path = if g("path").starts_with('同') {
-                        ante.container.clone()
-                    } else {
-                        container_path_with_ante(&g("pre"), &g("path"), &mut ante)
+                    // 「同節第一款の次に」: 直前の容器のうち「節」までを取り、その中の「第一款」
+                    let path = match g("path").strip_prefix('同') {
+                        Some(rest) => {
+                            let kind = rest.chars().next().unwrap_or('章');
+                            let mut p = ante_container_upto(&ante, kind);
+                            p.extend(container_path(
+                                rest.trim_start_matches(['編', '章', '節', '款', '目']),
+                            ));
+                            p
+                        }
+                        None => container_path_with_ante(&g("pre"), &g("path"), &mut ante),
                     };
                     if g("side") == "前" {
                         Op::InsertContainersBefore {
@@ -1491,7 +1784,15 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                     }
                 }
                 "renumber_container" => {
-                    let path = container_path_with_ante(&g("pre"), &g("path"), &mut ante);
+                    // 「同節を同章第二節とし」: 直前の容器
+                    let path = if g("path").starts_with('同') {
+                        if ante.container.is_empty() {
+                            return Err(ParseError::NoAntecedent(seg.to_string()));
+                        }
+                        ante.container.clone()
+                    } else {
+                        container_path_with_ante(&g("pre"), &g("path"), &mut ante)
+                    };
                     // 「同節」は番号を変えた後の節
                     let mut after = path.clone();
                     let to = container_num(&g("q"), &g("qb"));
@@ -1606,6 +1907,40 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                 }
                 "delete" => {
                     let mut l = g("loc");
+                    // 別表の行の中の細目（「別表第一の一一の二の項中ハを削り」「同表の…の項中ハを削り」）
+                    static APPDX_SUB_DEL: OnceLock<Regex> = OnceLock::new();
+                    let appdx_sub_del = APPDX_SUB_DEL.get_or_init(|| {
+                        re(r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中(?P<sub>[{K}])$")
+                    });
+                    if let Some(c) = appdx_sub_del.captures(&l) {
+                        let table = match &c["table"] {
+                            "同表" => match &ante.appdx {
+                                Some((t, _)) => t.clone(),
+                                None => return Err(ParseError::NoAntecedent(seg.to_string())),
+                            },
+                            t => t.to_string(),
+                        };
+                        let row = c["row"].to_string();
+                        ante.appdx = Some((table.clone(), row.clone()));
+                        ante.article = None;
+                        ops.push(Op::DeleteAppdxRowSub {
+                            table,
+                            row,
+                            sub: c["sub"].to_string(),
+                        });
+                        break;
+                    }
+                    // 「ハを削り」（別表の行の先行詞）
+                    if l.chars().count() == 1 && KANA.contains(&l) && ante.article.is_none() {
+                        if let Some((table, row)) = ante.appdx.clone() {
+                            ops.push(Op::DeleteAppdxRowSub {
+                                table,
+                                row,
+                                sub: l.clone(),
+                            });
+                            break;
+                        }
+                    }
                     // 「第八条第二項中第三号から第六号までを削り」: 「X中」は号の列挙の入れ物。先に先行詞にして、残りを号として読む
                     if let Some((ctx, rest)) = l.split_once('中') {
                         if rest.starts_with('第') || rest.starts_with("同号") {
@@ -1879,6 +2214,21 @@ mod tests {
             matches!(&ops[1], Op::Replace { at, from, to } if at.paragraph == Some(ParaRef::Num(4)) && from == "、丙" && to.is_empty())
         );
         assert!(matches!(&ops[2], Op::Replace { at, .. } if at.paragraph == Some(ParaRef::Num(6))));
+    }
+
+    /// 読替え規定の書き換え（字句そのものに「」が入って釣り合わない）で、最初の断片から後ろとつないで読み直す。
+    /// 令5-53: 「第六十三条第二項中「）」とあるのは」を「）」とあるのは、」に改め、「、「電子調書」とあるのは…」を削る」
+    #[test]
+    fn loose_merge_starts_at_the_first_segment() {
+        let ops = parse_instruction(
+            "第六十三条第二項中「）」とあるのは」を「）」とあるのは、」に改め、「、「電子調書」とあるのは「調書」と」を削る。",
+        )
+        .unwrap();
+        assert_eq!(ops.len(), 2, "{ops:?}");
+        assert!(matches!(&ops[0], Op::Replace { from, to, .. }
+            if from == "）」とあるのは" && to == "）」とあるのは、"));
+        assert!(matches!(&ops[1], Op::Replace { from, to, .. }
+            if from == "、「電子調書」とあるのは「調書」と" && to.is_empty()));
     }
 
     /// 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は読み飛ばす。
