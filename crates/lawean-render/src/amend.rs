@@ -359,6 +359,9 @@ fn segment(op: &Op, last: bool) -> String {
             TableAction::Append { .. } => {
                 format!("{target}に次の改正規定を{}", end("加え", "加える"))
             }
+            TableAction::InsertBefore { .. } => {
+                format!("{target}の前に次のように{}", end("加え", "加える"))
+            }
             _ => format!("{target}を{}", end("改め", "改める")),
         },
         Op::ReplaceInAmendment {

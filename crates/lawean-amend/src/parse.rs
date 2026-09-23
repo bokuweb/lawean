@@ -2395,6 +2395,12 @@ pub fn normalize_instruction(line: &str) -> String {
         Some(r) if r.starts_with('「') => format!("本則中{r}"),
         _ => line,
     };
+    // 「同号イを同号ホとし、その次に次のように加える」: 「その」は移した先の細目
+    static SONO_SUB: OnceLock<Regex> = OnceLock::new();
+    let sono_sub = SONO_SUB.get_or_init(|| re(r"を同号({S})とし、その(次|前)に次のように加え"));
+    let line = sono_sub
+        .replace_all(&line, "を同号${1}とし、同号${1}の${2}に次のように加え")
+        .to_string();
     let line = line
         .replace('｡', "。")
         .replace('､', "、")
@@ -2656,6 +2662,13 @@ fn unmask(s: &str) -> String {
 /// 字句の中の「」は伏せる。置き換える前の字句（「中「」「、「」の後）は「を「」「を削る」「の下に「」…の前で、
 /// 置き換えた後の字句（「を「」「の下に「」の後）は「に改め、」「を加える」…の前で閉じる。
 /// 「「附則第五条第二項」と」を「…」: 最初の「」」の後は「と」なので字句の中、次の「」」の後が「を「」なので閉じ
+fn next_instr() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r"」(?:に改め|を削り|を加え|に)、(?:同|第|附則|別表|目次)[^「」]*?(?:中「|を削り|を加え|を次のように|とし)").unwrap()
+    })
+}
+
 fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
     static FROM: OnceLock<Regex> = OnceLock::new();
     static TO: OnceLock<Regex> = OnceLock::new();
@@ -2707,6 +2720,11 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
             }
             let after: String = chars[j + 1..].iter().collect();
             if !pat.is_match(&after) {
+                continue;
+            }
+            // 次の改正文まで呑み込む読み方は採らない
+            let inner: String = chars[k + 1..j].iter().collect();
+            if next_instr().is_match(&inner) {
                 continue;
             }
             any = true;
@@ -2766,7 +2784,7 @@ fn parse_instruction_split(
             ("container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名中「(?P<a>.+?)」(?:を(?:「(?P<b>.+?)」に(?:改め(?:る)?)?|削(?:り|る))|の下に「(?P<c>.+?)」を加え(?:る)?)$"),
             ("container_title_quoted", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を「(?P<a>[^「」]+)」に改め(?:る)?$"),
             // 改正法の改正規定そのもの: 「第十八条中X法第四十二条の三の改正規定を次のように改める」「同改正規定の次に次のように加える」
-            ("amend_edit", r"^(?P<t>[^「」]*?改正規定(?:（[^）]*）)?(?:のうち[^「」]*?(?:に係る部分)?)?)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の次に次の(?:ように|改正規定を)加え(?:る)?|に次のように加え(?:る)?)$"),
+            ("amend_edit", r"^(?P<t>[^「」]*?改正規定(?:（[^）]*）)?(?:(?:のうち|中)[^「」]*?(?:に係る部分)?)?)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?:次|前)に次の(?:ように|改正規定を)加え(?:る)?|に次のように加え(?:る)?)$"),
             ("amend_append", r"^(?P<t>(?:附則)?第{N}条(?:の{N})*)に次の改正規定を加え(?:る)?$"),
             // 「同条を第四章第三節中第三十六条とする」「第四章の二第三節を第四章の三第一節とする」「同条第二項を第百十三条の二の六とする」
             ("move_article", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)を(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
@@ -2792,7 +2810,7 @@ fn parse_instruction_split(
             ("shift_items", r"^(?P<loc>.+?中|同条|同項|第{N}条(?:の{N})*(?:第{N}項)?)?(?:第(?P<p>{N})号から第(?P<q>{N})号まで|第(?P<p2>{N})号以下|(?P<list>第{N}号(?:(?:及び|、)第{N}号)+))を(?:順次)?(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             // 号の下のイロハ: 「同号ロを同号ハとし」「同号中ヘをトとし」「ハからホまでをニからヘまでとし」「同号イの次に次のように加える」
             ("renumber_sub", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*|同条第{N}項第{N}号(?:の{N})*)?(?P<a>{S})を(?:同号)?(?P<b>{S})と(?:し|する)$"),
-            ("shift_sub", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>[{K}])から(?P<b>[{K}])までを(?:同号)?(?P<c>[{K}])から(?P<d>[{K}])までと(?:し|する)$"),
+            ("shift_sub", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>{S})から(?P<b>{S})までを(?:同号)?(?P<c>{S})から(?P<d>{S})までと(?:し|する)$"),
             ("insert_sub_after", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>{S})の次に次のように加え(?:る)?$"),
             // 「第二項の次に第三項として次の一項を加える」「同条に第二項として次の一項を加える」「第七号として次の一号を加える」
             // 「同項に第一号及び第二号として次のように加える」: 加えた後の番号を言う形
@@ -2805,11 +2823,13 @@ fn parse_instruction_split(
             ("add_as", r"^(?P<loc>.*?)(?:の(?P<side>次|前)に|に)?第(?P<n>{N})(?P<u>項|号)(?P<nb>(?:の{N})*)(?:(?:及び|、|乃至|から)第{N}(?:項|号)(?:の{N})*(?:まで)?)*として次の(?:{N}(?:項|号)を|ように)加え(?:る)?$"),
             ("insert_item_after", r"^(?P<loc>.+?)の(?P<side>次|前)に次の{N}号を加え(?:る)?$"),
             ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号|号)(?:及び{N}項)?を加え(?:る)?$"),
+            // 「同項に次のように加える」+ 列記の行（号番号の無い名称の並び）
+            ("append_lines", r"^(?P<loc>(?:第{N}条(?:の{N})*)?(?:第{N}項|同項))に次のように加え(?:る)?$"),
             ("insert_item_first", r"^(?P<loc>.+?)に第一号として次の{N}号を加え(?:る)?$"),
             // 「同号に次のように加える」+ イロハ: 号の下の列記を足す
             ("append_subitems", r"^(?P<loc>.+?号(?:の{N})*(?:{S})?)に次のように加え(?:る)?$"),
             // 「同条第二項に項番号を付する」: 1 項だけだった条の項に番号を付ける（番号は変わらない）
-            ("number_para", r"^(?P<loc>.+?第{N}項|同項)(?:から第(?P<q>{N})項まで|及び(?:同条)?第(?P<q2>{N})項)?に項番号を付(?:し|する)$"),
+            ("number_para", r"^(?P<loc>[^及]+?第{N}項|同項)(?:から第(?P<q>{N})項まで|及び(?:同条)?第(?P<q2>{N})項)?に項番号を付(?:し|する)$"),
             ("delete_suppl_note", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の付記を削(?:り|る)$"),
             ("set_suppl_note", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)(?:の付記を次のように改め(?:る)?|に付記として次のように加え(?:る)?)$"),
             ("shift_branch_items", r"^(?P<loc>.+?中|同条|同項)?第(?P<b>{N})号の(?P<p>{N})から第(?P<b2>{N})号の(?P<q>{N})までを(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
@@ -2837,17 +2857,19 @@ fn parse_instruction_split(
             // 「第五章に第一節として次の一節を加える」
             ("container_add_as", r"^(?P<path>同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に第(?P<n>{N})(?P<k>編|章|節|款|目)(?:(?:及び|から)第{N}(?:編|章|節|款|目)(?:まで)?)?として次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             ("shift_arts", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<pre>附則)?第(?P<p>{N})条から(?:附則)?第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
+            // 「第二十五条の二十二の二から第二十五条の二十二の四までを一条ずつ繰り下げ」: 枝番の下の枝番
+            ("shift_deep_branch_arts", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?第(?P<a>{N}条(?:の{N})+)の(?P<p>{N})から第(?P<a2>{N}条(?:の{N})+)の(?P<q>{N})までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("shift_branch_arts", r"^第(?P<b>{N})条の(?P<p>{N})から第(?P<b2>{N})条の(?P<q>{N})までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             // 「同項の前に次の一項を加える」
             ("insert_para_before", r"^(?P<loc>.+?)の前に次の{N}項を加え(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の(?:見出し及び)?{N}項を加え(?:る)?$"),
-            ("append_para", r"^(?P<loc>.+?)に次の(?:見出し及び)?{N}項を加え(?:る)?$"),
+            ("append_para", r"^(?P<loc>.+?)に次の(?:見出し及び)?{N}項(?:及び付記)?を加え(?:る)?$"),
             ("append_art", r"^(?P<path>本則|同編|同章|同節|同款|同目|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の(?:見出し及び)?{N}条を加え(?:る)?$"),
             // 「同条第三項を同条とする」: 残った 1 項を項番号の無い条の本文に（第一項に）
             ("para_to_article", r"^(?P<loc>.+?第{N}項|同項)を同条と(?:し|する)$"),
             // 「第二条に見出しとして「（X）」を加え」
             ("caption_attach2", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)に見出しとして「(?P<a>.+?)」を(?:加え(?:る)?|附(?:し|する)|付(?:し|する))$"),
-            ("append_suppl_arts", r"^附則に次の(?:見出し及び)?{N}条(?:及び{N}表)?を加え(?:る)?$"),
+            ("append_suppl_arts", r"^附則に次の(?:(?:{N}条|見出し)(?:、|及び|並びに))*{N}条(?:及び{N}表)?を加え(?:る)?$"),
             ("append_table", r"^(?P<loc>.+?)に次の表を加え(?:る)?$"),
             ("delete_appdx", r"^(?P<list>別表(?:第[一二三四五六七八九十百千]+)?(?:(?:及び|、)別表(?:第[一二三四五六七八九十百千]+)?)*)を削(?:り|る)$"),
             // 別表の行: 全部改正・削除・番号の付け替え・行の追加・別表の追加・行の中の細目
@@ -2860,12 +2882,12 @@ fn parse_instruction_split(
             ("insert_appdx_after", r"^(?P<after>別表(?:第[一二三四五六七八九十百千]+)?|同表)の次に次の{N}表を加え(?:る)?$"),
             ("appdx_row_sub_delete", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<sub>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を削(?:り|る)$"),
             ("appdx_row_sub_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<a>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を(?P<b>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])と(?:し|する)$"),
-            ("append_containers", r"^(?P<path>本則|同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}(?:編|章|節|款|目)(?:及び{N}(?:編|章|節|款|目))*を加え(?:る)?$"),
+            ("append_containers", r"^(?P<path>本則|同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の(?:{N}条及び)?{N}(?:編|章|節|款|目)(?:及び{N}(?:編|章|節|款|目))*を加え(?:る)?$"),
             ("insert_arts_before", r"^(?:(?:同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の(?:(?:{N}条|見出し)(?:、|及び))*{N}条を加え(?:る)?$"),
             // 「第八条の次に次の二章を加える」: 条の後ろに容器
             // 「第十五条の次に第四章及び第五章として次のように加える」
             ("containers_after_art_as", r"^(?P<loc>第{N}条(?:の{N})*|同条)の次に第{N}(?:編|章|節|款|目)(?:(?:及び|から)第{N}(?:編|章|節|款|目)(?:まで)?)?として次のように加え(?:る)?$"),
-            ("containers_after_art", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の{N}(?:編|章|節|款|目)(?:及び{N}(?:編|章|節|款|目))*を加え(?:る)?$"),
+            ("containers_after_art", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>第{N}条(?:の{N})*|同条)の次に次の(?:見出し及び)?(?:{N}条(?:及び|並びに))?{N}(?:編|章|節|款|目)(?:及び{N}(?:編|章|節|款|目))*を加え(?:る)?$"),
             // 「第一条の前に次の章名を加える」「題名の次に次の目次及び章名を附する」
             ("headings_before", r"^(?:(?:同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?:(?P<loc>第{N}条(?:の{N})*|同条)の(?P<side>前|次)|題名の次)に次の(?P<what>[^「」を]*?(?:編|章|節|款|目)名[^「」を]*?|{N}条(?:、|及び|並びに)[^「」を]*?{N}(?:編|章|節|款|目)[^「」を]*?)を(?:加え(?:る)?|付(?:し|する)|附(?:し|する))$"),
             // 「第二章の次に次の二章を加える」「第一章中第五節の次に次の二節を加える」「第五節の次に…」（章は直前のもの）
@@ -2875,7 +2897,7 @@ fn parse_instruction_split(
             // 表の中の位置への操作（上の別表の行の規則に当たらないもの）: 位置は字面のまま
             ("append_appdx_as", r"^(?:附則の次に)?別表として次のように加え(?:る)?$"),
             ("append_before_suppl", r"^附則の前に次の{N}条を加え(?:る)?$"),
-            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|様式|附則様式|付表|附録|付録|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号[^「」]*?|同欄[^「」]*?|同注[^「」]*?|同項|その|第[^「」]+?の式|第{N}条(?:の{N})*[^第の同中、「」][^「」、]*?の項)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に[^「」]*?として次のように加え(?:る)?|に[^「」]*?として次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する)|を(?P<k>{N})(?:号|項|条)ずつ繰り(?P<dir>下げ|上げ)(?:る)?)$"),
+            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|様式|附則様式|付表|附録|付録|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号[^「」]*?|同欄[^「」]*?|同注[^「」]*?|同項[^「」]*?|その|第[^「」]+?の式|第{N}条(?:の{N})*[^第の同中、「」][^「」、]*?の項)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に[^「」]*?として次のように加え(?:る)?|に[^「」]*?として次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する)|を(?P<k>{N})(?:号|項|条)ずつ繰り(?P<dir>下げ|上げ)(?:る)?)$"),
             ("title_and_toc", r"^(?:題名及び目次|目次及び題名)を次のように改め(?:る)?$"),
             ("delete_toc", r"^目次(?:及び(?P<rest>.+))?を削(?:り|る)$"),
             ("delete_title", r"^題名(?P<toc>及び目次(?:（[^）]*）)?)?を削(?:り|る)$"),
@@ -2903,8 +2925,8 @@ fn parse_instruction_split(
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
-            ("insert_arts_after", r"^(?:本則中|(?:同編|同章|同節|同款|同目|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の次に次の(?:(?:{N}条|見出し)(?:、|及び))*(?P<k>{N})条を加え(?:る)?$"),
-            ("append_sentence", r"^(?P<loc>.+?)(?:の下)?に(?:後段として次のように|ただし書として次のように|次のただし書(?:及び各号)?を|次の後段を|次のように後段を)加え(?:る)?$"),
+            ("insert_arts_after", r"^(?:本則中|(?:同編|同章|同節|同款|同目|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の次に次の(?:(?:{N}条|見出し)(?:、|及び|並びに))*(?P<k>{N})条を加え(?:る)?$"),
+            ("append_sentence", r"^(?P<loc>.+?)(?:の下)?(?:に|の)(?:後段として次のように|ただし書として次のように|次のただし書(?:及び各号)?を|次の後段(?:及び各号)?を|次のように後段を)加え(?:る)?$"),
             // 「同条に次の見出しを加え」+「（見出し）」
             ("caption_content", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)に次の見出しを(?:加え(?:る)?|付(?:し|する))$"),
             // 「本則を本則第一項とし」: 条の無い本則の 1 項に番号
@@ -3090,7 +3112,11 @@ fn parse_instruction_split(
                 || !seg.starts_with(['第', '同', '附', '別']) && seg.contains("の項"));
         let cont_seg;
         let seg = if table_cont {
-            cont_seg = format!("同表中{seg}");
+            // 表の行の中の号の続き（「同項中第十三号を第十二号とし、第十四号を第十三号とし」）はその行
+            let in_row = seg.starts_with('第')
+                && !matches!(&ante.tedit, Some((TableRef::InArticle(at), _)) if at.item.is_some())
+                && ante.tedit.as_ref().is_some_and(|(_, p)| p.contains("の項"));
+            cont_seg = format!("{}中{seg}", if in_row { "同項" } else { "同表" });
             cont_seg.as_str()
         } else {
             seg
@@ -3309,6 +3335,8 @@ fn parse_instruction_split(
                         TableAction::Delete
                     } else if act.starts_with("に次") {
                         TableAction::Append { text: Vec::new() }
+                    } else if act.starts_with("の前") {
+                        TableAction::InsertBefore { text: Vec::new() }
                     } else {
                         TableAction::InsertAfter { text: Vec::new() }
                     };
@@ -3495,6 +3523,50 @@ fn parse_instruction_split(
                             from: sub_of(&g("a")),
                             to: sub_of(&g("b")),
                         },
+                        // 「同号ニ(1)から(7)までを同号ニ(2)から(8)までとし」: 括弧の細目は一つずつ付け替える
+                        "shift_sub" if g("a").contains(['(', '（']) => {
+                            static PAREN: OnceLock<Regex> = OnceLock::new();
+                            let paren = PAREN
+                                .get_or_init(|| re(r"^(?P<h>.*)[（(](?P<n>[0-9０-９]+)[）)]$"));
+                            let split = |x: &str| -> Option<(String, u32)> {
+                                let c = paren.captures(x)?;
+                                let n: String = c["n"]
+                                    .chars()
+                                    .map(|d| {
+                                        char::from_digit(d.to_digit(10).unwrap_or(0), 10)
+                                            .unwrap_or('0')
+                                    })
+                                    .collect();
+                                Some((c["h"].to_string(), n.parse().ok()?))
+                            };
+                            let a = sub_of(&g("a"));
+                            let b = full_sub(&g("b"), Some(&a));
+                            let c = sub_of(&g("c"));
+                            let (Some((h, p)), Some((h2, q)), Some((h3, r))) =
+                                (split(&a), split(&b), split(&c))
+                            else {
+                                return Err(ParseError::Unrecognized(seg.to_string()));
+                            };
+                            if h != h2 || h != h3 || p > q {
+                                return Err(ParseError::Unrecognized(seg.to_string()));
+                            }
+                            let down = r >= p;
+                            let mut ns: Vec<u32> = (p..=q).collect();
+                            if down {
+                                ns.reverse();
+                            }
+                            let mut v: Vec<Op> = ns
+                                .into_iter()
+                                .map(|n| Op::RenumberSubitem {
+                                    at: at.clone(),
+                                    from: format!("{h}({n})"),
+                                    to: format!("{h}({})", n + r - p),
+                                })
+                                .collect();
+                            let last = v.pop().expect("範囲");
+                            ops.extend(v.into_iter().map(|o| o.in_suppl(ante.suppl)));
+                            last
+                        }
                         "shift_sub" => {
                             let by = kana_index(&g("c")) as i32 - kana_index(&g("a")) as i32;
                             Op::ShiftSubitems {
@@ -3898,7 +3970,7 @@ fn parse_instruction_split(
                     at: loc(&g("loc"), &mut ante)?,
                     text: Vec::new(),
                 },
-                "append_item" | "append_subitems" => Op::AppendItem {
+                "append_item" | "append_subitems" | "append_lines" => Op::AppendItem {
                     at: loc(&g("loc"), &mut ante)?,
                     text: Vec::new(),
                 },
@@ -4480,6 +4552,38 @@ fn parse_instruction_split(
                         path,
                         text: Vec::new(),
                     }
+                }
+                "shift_deep_branch_arts" => {
+                    if g("a") != g("a2") || num("p") > num("q") {
+                        return Err(ParseError::Unrecognized(seg.to_string()));
+                    }
+                    let ArticleNum::Single { base, branch } = art_num(&format!("第{}", g("a")))
+                    else {
+                        return Err(ParseError::Unrecognized(seg.to_string()));
+                    };
+                    let at = |n: u32| {
+                        let mut b = branch.clone();
+                        b.push(n);
+                        ArticleNum::Single { base, branch: b }
+                    };
+                    let k = num("k");
+                    // 送る先と重ならないよう、繰り下げは後ろから、繰り上げは前から
+                    let mut ns: Vec<u32> = (num("p")..=num("q")).collect();
+                    let down = g("dir") == "下げ";
+                    if down {
+                        ns.reverse();
+                    }
+                    let mut v: Vec<Op> = ns
+                        .into_iter()
+                        .map(|n| Op::RenumberArticle {
+                            from: at(n),
+                            to: at(if down { n + k } else { n - k }),
+                            suppl: false,
+                        })
+                        .collect();
+                    let last = v.pop().expect("範囲");
+                    ops.extend(v.into_iter().map(|o| o.in_suppl(ante.suppl)));
+                    last
                 }
                 "shift_branch_arts" => {
                     if num("b") != num("b2") {
