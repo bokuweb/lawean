@@ -882,6 +882,71 @@ fn container_scopes(l: &str, ante: &mut Ante) -> Result<Option<Vec<ContainerScop
     Ok(Some(out))
 }
 
+/// 容器の列挙の各断片の前の容器（外側からの道筋）。「同款」「第二款」だけの断片は直前の容器で補う
+fn container_contexts(tokens: &[&str], start: &ContainerPath) -> Vec<ContainerPath> {
+    use lawean_source::ContainerKind as K;
+    let depth = |k: K| match k {
+        K::Part => 0,
+        K::Chapter => 1,
+        K::Section => 2,
+        K::Subsection => 3,
+        K::Division => 4,
+    };
+    let kind_of = |c: char| match c {
+        '編' => Some(K::Part),
+        '章' => Some(K::Chapter),
+        '節' => Some(K::Section),
+        '款' => Some(K::Subsection),
+        '目' => Some(K::Division),
+        _ => None,
+    };
+    let mut out = Vec::new();
+    let mut cur: ContainerPath = start.clone();
+    for t in tokens {
+        out.push(cur.clone());
+        let base = ["の編名", "の章名", "の節名", "の款名", "の目名", "の"]
+            .iter()
+            .find_map(|x| t.strip_suffix(x))
+            .unwrap_or(t);
+        if base.contains('条') {
+            continue;
+        }
+        let path = if let Some(r) = base.strip_prefix('同') {
+            let Some(k) = r.chars().next().and_then(kind_of) else {
+                continue;
+            };
+            let mut p = cur.clone();
+            match p.iter().rposition(|(x, _)| *x == k) {
+                Some(i) => p.truncate(i + 1),
+                None => continue,
+            }
+            let rest = &r[r.chars().next().map_or(0, char::len_utf8)..];
+            p.extend(container_range(rest).pop().unwrap_or_default());
+            p
+        } else if base.starts_with('第') {
+            let own = container_range(base).pop().unwrap_or_default();
+            match own.first() {
+                Some((k0, _)) if depth(*k0) >= 1 => {
+                    let mut p: Vec<_> = cur
+                        .iter()
+                        .filter(|(x, _)| depth(*x) < depth(*k0))
+                        .cloned()
+                        .collect();
+                    p.extend(own);
+                    p
+                }
+                _ => own,
+            }
+        } else {
+            continue;
+        };
+        if !path.is_empty() {
+            cur = path;
+        }
+    }
+    out
+}
+
 /// 「第四百六条及び第四百二十四条の見出しを「（事業等の譲渡）」に改める」「第四十二条の付記及び第四十三条の付記を次のように改める」
 /// 「第四条第一項第五号及び第六条第二項第六号に次のように加える」: 位置ごとの断片に分ける（「次のように」の内容は各位置が同じものを受ける）
 fn distribute_list(seg: &str) -> Option<Vec<String>> {
@@ -1275,7 +1340,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     let s = s.strip_suffix("の規定").unwrap_or(s);
     // 「第四条第二項第四段」: 項の N 番目の文
     static NTH: OnceLock<Regex> = OnceLock::new();
-    let nth = NTH.get_or_init(|| re(r"^(?P<l>.+?項)第(?P<n>{N})段$"));
+    let nth = NTH.get_or_init(|| re(r"^(?P<l>.+?(?:項|条(?:の{N})*))第(?P<n>{N})段$"));
     if let Some(c) = nth.captures(s) {
         let n = kanji_to_u32(&c["n"]).unwrap_or(0);
         let mut l = loc(&c["l"], ante)?;
@@ -1283,6 +1348,20 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
         ante.part = l.part;
         return Ok(l);
     }
+    // 「同類第十四号」: 直前の号の類
+    let same_class;
+    let s = match s.find("同類第") {
+        Some(i) => {
+            let class = ante
+                .item
+                .as_deref()
+                .and_then(|it| ["甲類", "乙類"].into_iter().find(|c| it.starts_with(c)))
+                .ok_or_else(|| ParseError::NoAntecedent(s.to_string()))?;
+            same_class = format!("{}{class}{}", &s[..i], &s[i + "同類".len()..]);
+            same_class.as_str()
+        }
+        None => s,
+    };
     // 「第九条第一項甲類第九号」: 甲類・乙類に分けた号（家事審判法）。号の番号に類を冠する
     for class in ["甲類", "乙類"] {
         if let Some(i) = s.find(&format!("{class}第")) {
@@ -5653,7 +5732,7 @@ fn parse_instruction_split(
                         // 「第百二条及び第百三条を次のように改める」: 複数の条をまとめて（「削除」の条に）
                         // 「同条及び附則第十六条」: 附則の条どうし（本則と附則の混ざる列挙は読まない）
                         let locs = expand_locs(&l, &mut ante)?;
-                        if locs.iter().any(|x| x.suppl != locs[0].suppl) {
+                        if !locs[0].suppl && locs.iter().any(|x| x.suppl) {
                             return Err(ParseError::Unrecognized(seg.to_string()));
                         }
                         let articles = locs.into_iter().map(|x| x.article).collect();
@@ -5781,9 +5860,14 @@ fn parse_instruction_split(
                             || t.contains("まで")
                     }) || tokens.len() > 1;
                     if structural {
+                        // 各断片の前の容器（「第三章第二節第二款第四目、同款第五目の目名」の「同款」は直前の断片の款）
+                        let ctx_before = container_contexts(&tokens, &ante.container);
                         let mut last_container: Vec<(lawean_source::ContainerKind, String)> =
                             Vec::new();
-                        for t in tokens {
+                        for (ti, t) in tokens.iter().copied().enumerate() {
+                            if !ctx_before[ti].is_empty() {
+                                last_container = ctx_before[ti].clone();
+                            }
                             // 「第二十六条の前の見出し、同条から第二十六条の三まで…を削る」: 見出しも
                             // 「同項後段及び同条の付記を削る」
                             if let Some(base) = t.strip_suffix("の付記") {
@@ -5921,7 +6005,10 @@ fn parse_instruction_split(
                                     _ => lawean_source::ContainerKind::Division,
                                 };
                                 let mut path = last_container.clone();
-                                path.truncate(1);
+                                let ch = path.iter().rposition(|(x, _)| {
+                                    *x == lawean_source::ContainerKind::Chapter
+                                });
+                                path.truncate(ch.map_or(1, |i| i + 1));
                                 let from = kanji_to_u32(&c["p"]).unwrap_or(0);
                                 ops.push(Op::DeleteContainers {
                                     path,
@@ -5940,8 +6027,19 @@ fn parse_instruction_split(
                                     _ => lawean_source::ContainerKind::Division,
                                 };
                                 let from = kanji_to_u32(&c["p"]).unwrap_or(0);
+                                // 「第二章第一節及び第二節」の「第二節」: 直前の容器の外側の中
+                                let path = if c["pre"].is_empty() {
+                                    let d = |k: lawean_source::ContainerKind| k as u8;
+                                    last_container
+                                        .iter()
+                                        .filter(|(x, _)| d(*x) < d(kind))
+                                        .cloned()
+                                        .collect()
+                                } else {
+                                    container_path(&c["pre"])
+                                };
                                 ops.push(Op::DeleteContainers {
-                                    path: container_path(&c["pre"]),
+                                    path,
                                     kind,
                                     from,
                                     to: c
