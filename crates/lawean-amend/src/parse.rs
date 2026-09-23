@@ -1,7 +1,7 @@
 //! 改め文のパース。語彙は閉じている（docs/08-amendment.md §3）。
 
 use crate::op::*;
-use lawean_resolve::numeral::kanji_to_u32;
+use lawean_resolve::numeral::{kanji_to_u32, to_kanji};
 use lawean_source::ArticleNum;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -659,6 +659,30 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
     }
     // 「第五条第一項第五号、第十八条第一項第六号及び第五十二条第七号ロ中「A」を…」の「、」は位置の列挙。
     // 「」も動詞も含まない位置だけの断片は、次の断片につなぐ
+    // 「同項の表地上権、永小作権、賃借権又は採石権の…の登記の項の次に次のように加える」: 表の行の名前の中の「、」。
+    // 表の位置で始まり「の項」の無い断片は、「の項」を含む断片までつなぐ
+    static ROW_START: OnceLock<Regex> = OnceLock::new();
+    let row_start = ROW_START.get_or_init(|| {
+        re(r"^(?:同表|別表|(?:附則)?(?:第{N}条(?:の{N})*|同条)?(?:第{N}項|同項)?(?:第{N}号)?の表)[^「」]*$")
+    });
+    static OP_END: OnceLock<Regex> = OnceLock::new();
+    let op_end = OP_END.get_or_init(|| {
+        re(r"(?:とし|とする|を削り|を削る|に改め|改める|を加え|加える|繰り下げ|繰り上げ|を付し|を付する)$")
+    });
+    let mut out = out;
+    let mut i = 0;
+    while i < out.len() {
+        let s0 = &out[i];
+        if row_start.is_match(s0) && !s0.contains("の項") && !op_end.is_match(s0) {
+            let end = (i + 1..out.len().min(i + 12))
+                .find(|&k| out[k].split('「').next().unwrap_or("").contains("の項"));
+            if let Some(end) = end.filter(|&e| (i + 1..e).all(|k| !out[k].contains('「'))) {
+                let joined = out[i..=end].join("、");
+                out.splice(i..=end, [joined]);
+            }
+        }
+        i += 1;
+    }
     let mut merged: Vec<String> = Vec::new();
     let mut pending = String::new();
     for seg in out {
@@ -701,6 +725,56 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
         merged.push(pending.trim_end_matches('、').to_string());
     }
     merged
+}
+
+/// （）の外の区切りで分ける（行の名前「（整地・運搬・積込み用及び掘削用）」の中の「及び」は区切らない）
+fn split_outside_parens(s: &str, seps: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        if depth == 0 {
+            if let Some(sep) = seps.iter().find(|x| rest.starts_with(**x)) {
+                out.push(std::mem::take(&mut cur));
+                rest = &rest[sep.len()..];
+                continue;
+            }
+        }
+        match c {
+            '（' | '(' => depth += 1,
+            '）' | ')' => depth = (depth - 1).max(0),
+            _ => {}
+        }
+        cur.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out.push(cur);
+    out
+}
+
+/// 別表の行の範囲「八の三」から「八の五」まで（最後の番号だけが動く）
+fn row_range(a: &str, b: &str) -> Option<Vec<String>> {
+    let (pa, na) = a.rsplit_once('の').map_or(("", a), |(p, n)| (p, n));
+    let (pb, nb) = b.rsplit_once('の').map_or(("", b), |(p, n)| (p, n));
+    if pa != pb {
+        return None;
+    }
+    let (p, q) = (kanji_to_u32(na)?, kanji_to_u32(nb)?);
+    if p > q {
+        return None;
+    }
+    Some(
+        (p..=q)
+            .map(|n| {
+                if pa.is_empty() {
+                    to_kanji(n)
+                } else {
+                    format!("{pa}の{}", to_kanji(n))
+                }
+            })
+            .collect(),
+    )
 }
 
 /// 位置の列挙「第七条第一項及び第二項並びに第八条」「第三十一条から第三十三条までの規定及び第三十六条」
@@ -1239,7 +1313,9 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
             appdx_sub = c.name("sub").map(|m| m.as_str().to_string());
             Some((table, c["row"].to_string()))
         }),
-        None if ante.article.is_none() && !ante.toc => ante.appdx.clone(),
+        None if ante.article.is_none() && !ante.toc => {
+            ante.appdx.clone().filter(|(_, r)| !r.is_empty())
+        }
         None => None,
     };
     if let Some((table, row)) = appdx {
@@ -1466,6 +1542,12 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
             split_table_target(l, ante)?
         }
         None if ante.tedit.is_some() => ante.tedit.clone(),
+        // 行を削った後の「「A」を「B」に改め」: 別表の全体
+        None if ante.article.is_none() && !ante.toc => ante
+            .appdx
+            .clone()
+            .filter(|(_, r)| r.is_empty())
+            .map(|(t, _)| (TableRef::Appdx(t), String::new())),
         _ => None,
     };
     if let Some((table, path)) = generic {
@@ -1969,10 +2051,20 @@ fn split_table_target(
     }
     if target.starts_with("別表") || target.starts_with("附則別表") {
         let c = name.captures(target).expect("別表");
-        return Ok(Some((
-            TableRef::Appdx(c["t"].to_string()),
-            path_of(&c["rest"]),
-        )));
+        let (t, rest) = (&c["t"], &c["rest"]);
+        // 「別表第一の六の項」: 「の六」は枝番の表でなく行の番号
+        if rest.starts_with("の項") {
+            if let Some((head, row)) = t.rsplit_once(['の', 'ノ']) {
+                if head.contains('第') && row.chars().all(|c| "一二三四五六七八九十".contains(c))
+                {
+                    return Ok(Some((
+                        TableRef::Appdx(head.to_string()),
+                        format!("{row}{rest}"),
+                    )));
+                }
+            }
+        }
+        return Ok(Some((TableRef::Appdx(t.to_string()), path_of(rest))));
     }
     // 「表中」: 条の無い本則の表。「政府製造たばこ価格表中」: 名の付いた表
     if target == "表" || target.starts_with("表中") {
@@ -2874,7 +2966,7 @@ fn parse_instruction_split(
             ("delete_appdx", r"^(?P<list>別表(?:第[一二三四五六七八九十百千]+)?(?:(?:及び|、)別表(?:第[一二三四五六七八九十百千]+)?)*)を削(?:り|る)$"),
             // 別表の行: 全部改正・削除・番号の付け替え・行の追加・別表の追加・行の中の細目
             ("appdx_row_whole", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項を次のように改め(?:る)?$"),
-            ("appdx_rows_delete", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<rows>.+?の項(?:(?:及び|、)(?:同表(?:の|中)?)?.+?の項)*)を削(?:り|る)$"),
+            ("appdx_rows_delete", r"^(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<rows>.+?の項(?:から.+?の項まで)?(?:(?:及び|、)(?:同表(?:の|中)?)?.+?の項(?:から.+?の項まで)?)*)を削(?:り|る)$"),
             ("appdx_row_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<from>.+?)の項|同項)を(?:同表(?:の|中)?)?(?P<to>.+?)の項と(?:し|する)$"),
             ("appdx_rows_insert", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?)?(?:(?P<after>.+?)の項|同項)の次に次のように加え(?:る)?$"),
             ("append_appdx", r"^(?:附則の次に次の別表|附則の次に(?:附則)?別表として次の{N}表|附則の次に次の{N}表|本則に次の別表)を加え(?:る)?$"),
@@ -3077,6 +3169,28 @@ fn parse_instruction_split(
             }
         }
         let mut matched = false;
+        // 「北方領土問題対策協会の項、水資源開発公団の項及び労働福祉事業団の項を削る」: 直前の別表の行
+        static ROWS_DELETE: OnceLock<Regex> = OnceLock::new();
+        let rows_delete =
+            ROWS_DELETE.get_or_init(|| re(r"^[^「」第同附別][^「」]*の項(?:まで)?を削(?:り|る)$"));
+        let appdx_table =
+            ante.appdx
+                .as_ref()
+                .map(|(t, _)| t.clone())
+                .or_else(|| match &ante.tedit {
+                    Some((TableRef::Appdx(t), p)) if p.is_empty() => Some(t.clone()),
+                    _ => None,
+                });
+        let appdx_cont_seg;
+        let (seg, rows_cont) = match appdx_table {
+            Some(t) if rows_delete.is_match(seg) => {
+                ante.appdx = Some((t, String::new()));
+                ante.tedit = None;
+                appdx_cont_seg = format!("同表中{seg}");
+                (appdx_cont_seg.as_str(), true)
+            }
+            _ => (seg, false),
+        };
         // 直前の位置が表の中なら、「同号」はその表の号
         let in_table = ante.tedit.is_some()
             && (seg.starts_with("同号")
@@ -3110,6 +3224,23 @@ fn parse_instruction_split(
                     KANA.contains(c) || c.is_ascii_digit() || ('０'..='９').contains(&c)
                 })
                 || !seg.starts_with(['第', '同', '附', '別']) && seg.contains("の項"));
+        // 「同表中第一〇三項を削り、第一〇四項を第一〇三項とし」: 表の中の番号の項（関税率表など）の続き
+        let table_cont = table_cont
+            || !seg.contains('「')
+                && seg.starts_with('第')
+                && !seg.contains('条')
+                && ante.tedit.as_ref().is_some_and(|(_, p)| {
+                    p.starts_with('第') && p.ends_with('項') && !p.contains("の項")
+                });
+        // 「別表第一中六の項を八の項とし、二の項から五の項までを二項ずつ繰り下げ」: 別表の行の範囲
+        static ROWS_SHIFT: OnceLock<Regex> = OnceLock::new();
+        let rows_shift = ROWS_SHIFT.get_or_init(|| {
+            re(r"^[^「」第同附別]+の項から[^「」]+の項までを{N}項ずつ繰り(?:下げ|上げ)(?:る)?$")
+        });
+        let table_cont = table_cont
+            || ante.appdx.as_ref().is_some_and(|(_, r)| !r.is_empty()) && rows_shift.is_match(seg);
+        let table_cont = table_cont && !rows_cont;
+
         let cont_seg;
         let seg = if table_cont {
             // 表の行の中の号の続き（「同項中第十三号を第十二号とし、第十四号を第十三号とし」）はその行
@@ -4715,21 +4846,32 @@ fn parse_instruction_split(
                             }
                         }
                         "appdx_rows_delete" => {
-                            let rows: Vec<String> = g("rows")
-                                .split("及び")
-                                .flat_map(|x| x.split('、'))
-                                .filter_map(|x| {
-                                    x.trim()
-                                        .trim_start_matches("同表")
-                                        .trim_start_matches(['の', '中'])
-                                        .strip_suffix("の項")
-                                        .map(str::to_string)
-                                })
-                                .collect();
+                            let mut rows: Vec<String> = Vec::new();
+                            for x in split_outside_parens(&g("rows"), &["及び", "、"]) {
+                                let x = x.as_str();
+                                let x = x
+                                    .trim()
+                                    .trim_start_matches("同表")
+                                    .trim_start_matches(['の', '中']);
+                                // 「八の三の項から八の五の項まで」: 行の範囲
+                                if let Some((a, b)) = x
+                                    .strip_suffix("の項まで")
+                                    .and_then(|x| x.split_once("の項から"))
+                                {
+                                    match row_range(a, b) {
+                                        Some(v) => rows.extend(v),
+                                        // 名前の行の範囲（「公営企業金融公庫の項から中小企業金融公庫の項まで」）
+                                        None => rows.push(format!("{a}〜{b}")),
+                                    }
+                                } else if let Some(r) = x.strip_suffix("の項") {
+                                    rows.push(r.to_string());
+                                }
+                            }
                             if rows.is_empty() {
                                 return Err(ParseError::Unrecognized(seg.to_string()));
                             }
-                            ante.appdx = Some((table.clone(), rows[0].clone()));
+                            // 削った行は先行詞にならない（続く字句の改正は表の全体）
+                            ante.appdx = Some((table.clone(), String::new()));
                             ante.article = None;
                             Op::DeleteAppdxRows { table, rows }
                         }
@@ -5338,6 +5480,11 @@ fn parse_instruction_split(
         if matched {
             let from = op_start[si].unwrap_or(ops.len());
             let table_op = |o: &Op| {
+                // 附則の中の表の操作は Suppl に包まれる
+                let o = match o {
+                    Op::Suppl(inner) => inner.as_ref(),
+                    o => o,
+                };
                 matches!(
                     o,
                     Op::TableEdit { .. }

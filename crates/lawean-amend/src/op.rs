@@ -317,7 +317,8 @@ pub enum Op {
         row: String,
         text: Vec<String>,
     },
-    /// 「別表第一中九の項及び一〇の項を削り」「別表第一建築士法（…）の項を削り」
+    /// 「別表第一中九の項及び一〇の項を削り」「別表第一建築士法（…）の項を削り」。
+    /// 数えられない行の範囲（「Aの項からBの項まで」）は `A〜B`
     DeleteAppdxRows { table: String, rows: Vec<String> },
     /// 「同項を同表の九の項とし」「同表中一二の項を一一の項とし」: 別表の行の番号（上欄）の付け替え
     RenumberAppdxRow {

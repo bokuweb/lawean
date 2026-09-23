@@ -3089,9 +3089,24 @@ pub(crate) fn delete_appdx_rows(
     let ap = appdx_mut(doc, table)?;
     let body =
         table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let group = |body: &Vec<Node>, row: &str| {
+        row_group(body, row)
+            .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))
+    };
     for row in rows {
-        let (at, len) = row_group(body, row)
-            .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+        // 「Aの項からBの項まで」
+        if let Some((a, b)) = row.split_once('〜') {
+            let (at, _) = group(body, a)?;
+            let (bt, blen) = group(body, b)?;
+            if bt < at {
+                return Err(ApplyError::BadContent(format!(
+                    "{table}の「{row}」の順が逆"
+                )));
+            }
+            body.drain(at..bt + blen);
+            continue;
+        }
+        let (at, len) = group(body, row)?;
         body.drain(at..at + len);
     }
     Ok(())

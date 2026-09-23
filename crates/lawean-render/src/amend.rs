@@ -742,7 +742,10 @@ fn segment(op: &Op, last: bool) -> String {
         Op::DeleteAppdxRows { table, rows } => format!(
             "{table}中{}を{}",
             rows.iter()
-                .map(|r| format!("{r}の項"))
+                .map(|r| match r.split_once('〜') {
+                    Some((a, b)) => format!("{a}の項から{b}の項まで"),
+                    None => format!("{r}の項"),
+                })
                 .collect::<Vec<_>>()
                 .join("及び"),
             end("削り", "削る")
