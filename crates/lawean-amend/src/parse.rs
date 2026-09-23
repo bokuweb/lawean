@@ -112,8 +112,19 @@ pub fn kana_of(n: u32) -> String {
 pub fn normalize_source_text(s: &str) -> String {
     static RUBY: OnceLock<Regex> = OnceLock::new();
     let ruby = RUBY.get_or_init(|| Regex::new(r"\([ぁ-ゖ]+\)").unwrap());
-    ruby.replace_all(s, "")
-        .replace('剥', "剝")
+    // 「玩(がん)具」の振り仮名は落とす。「別表第二(に)項」（い・ろ・は…で番号を付けた項）は残す
+    let mut out = String::with_capacity(s.len());
+    let mut last = 0;
+    for m in ruby.find_iter(s) {
+        let label = m.as_str().chars().count() == 3 && s[m.end()..].starts_with('項');
+        out.push_str(&s[last..m.start()]);
+        if label {
+            out.push_str(m.as_str());
+        }
+        last = m.end();
+    }
+    out.push_str(&s[last..]);
+    out.replace('剥', "剝")
         .replace('｡', "。")
         .replace('､', "、")
         .replace('｢', "「")
@@ -597,11 +608,6 @@ pub(crate) fn looks_like_instruction(line: &str) -> bool {
         && !subject
 }
 
-/// 「、」で区切る。ただし「」（）の中は区切らない
-fn split_segments(s: &str) -> Vec<String> {
-    split_segments_with(s, false)
-}
-
 /// `strict`: 「」の深さによらず、動詞で終わり位置で始まる「、」（「…に改め、同条の次に…」）で切る。
 /// 字句そのものに「」が入っていて深さがずれる文を読み直すときに使う
 fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
@@ -715,7 +721,6 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
     let op_end = OP_END.get_or_init(|| {
         re(r"(?:とし|とする|を削り|を削る|に改め|改める|を加え|加える|繰り下げ|繰り上げ|を付し|を付する)$")
     });
-    let mut out = out;
     let mut i = 0;
     while i < out.len() {
         let s0 = &out[i];
@@ -1073,6 +1078,20 @@ fn amend_inner_edit(seg: &str, ante: &mut Ante) -> Option<Op> {
     };
     ante.amend = Some(base);
     Some(Op::AmendmentEdit { target, action })
+}
+
+/// 字句（前・後）から操作を作る（目次・章名・見出しの字句の操作を並べる）
+type PhraseOpMaker = Box<dyn Fn(&String, String) -> Op>;
+
+/// 表の行（「一一の項」「(い)項」）の終わりの位置（行を言わない位置なら None）
+fn table_row_end(p: &str) -> Option<usize> {
+    if let Some(i) = p.find("の項") {
+        return Some(i + "の項".len());
+    }
+    [")項", "）項"]
+        .iter()
+        .filter_map(|x| p.find(x).map(|i| i + x.len()))
+        .min()
 }
 
 /// 位置の列挙から「（…を除く。）」を外す。除く位置は、その前の位置（列挙の区切りから）と組にして返す
@@ -1917,13 +1936,9 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         }
     }
     if let Some(l) = loc_part.filter(|l| l.contains("改正規定")) {
-        let target = if l.starts_with("同改正規定") {
+        let target = if let Some(r) = l.strip_prefix("同改正規定") {
             match &ante.amend {
-                Some(t) => format!(
-                    "{}{}",
-                    t.split("のうち").next().unwrap_or(t),
-                    &l["同改正規定".len()..]
-                ),
+                Some(t) => format!("{}{r}", t.split("のうち").next().unwrap_or(t)),
                 None => l.to_string(),
             }
         } else {
@@ -2006,7 +2021,10 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         // 表の行の中（「同項第六号中」）、表の号の中（「同号下欄中」）
         Some(l)
             if l.starts_with("同項")
-                && ante.tedit.as_ref().is_some_and(|(_, p)| p.contains("の項"))
+                && ante
+                    .tedit
+                    .as_ref()
+                    .is_some_and(|(_, p)| table_row_end(p).is_some())
                 || l.starts_with("同号") && ante.tedit.is_some() =>
         {
             split_table_target(l, ante)?
@@ -2249,7 +2267,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         l => l,
     };
     // 「目次、第三章の章名及び第七条中」「第一条並びに第二条の見出し及び同条第一項中」: 目次・章名・見出しを分けて
-    let mut extra_ops: Vec<Box<dyn Fn(&String, String) -> Op>> = Vec::new();
+    let mut extra_ops: Vec<PhraseOpMaker> = Vec::new();
     let special_owned;
     let loc_part = match loc_part {
         Some(l)
@@ -2476,6 +2494,15 @@ fn split_table_target(
         && ante.tedit.is_some()
         && !has_article_table(target)
     {
+        // 「同表(ぬ)項第一号(一)中…、同号(三)中」: 直前の行の号の中
+        if let (Some(r), Some((t, p))) = (target.strip_prefix("同号"), ante.tedit.clone()) {
+            if let (Some(_), Some(i)) = (table_row_end(&p), p.rfind('号')) {
+                return Ok(Some((
+                    t,
+                    format!("{}{}", &p[..i + '号'.len_utf8()], path_of(r)),
+                )));
+            }
+        }
         return Ok(ante.tedit.clone().map(|(t, _)| (t, target.to_string())));
     }
     // 「同項の次に次のように加える」「同項第六号中」: 直前の表の行（の中）
@@ -2487,8 +2514,8 @@ fn split_table_target(
             .clone()
             .and_then(|(t, p)| {
                 // 行（「…の項」）か、表の中の項（「第二八・〇四項」）
-                let row = match p.find("の項") {
-                    Some(i) => &p[..i + "の項".len()],
+                let row = match table_row_end(&p) {
+                    Some(i) => &p[..i],
                     None if p.ends_with('項') => p.as_str(),
                     None => return None,
                 };
@@ -3375,6 +3402,7 @@ fn mask_inner_quotes(line: &str, limit: usize, late_first: bool) -> Vec<String> 
     });
     // 改正規定を改める文（字句に改め文を含む）
     let amend = line.contains("改正規定");
+    #[allow(clippy::too_many_arguments)]
     fn go(
         chars: &[char],
         i: usize,
@@ -3430,6 +3458,10 @@ fn mask_inner_quotes(line: &str, limit: usize, late_first: bool) -> Vec<String> 
             from_end
         };
         let mut any = false;
+        static NESTED_END: OnceLock<Regex> = OnceLock::new();
+        let nested_end = NESTED_END.get_or_init(|| {
+            Regex::new(r"^(?:を加え|に改め)(?:る?。?$|、[^「」]*改正規定)").unwrap()
+        });
         // 閉じ括弧の候補（先に閉じるものから。`late_first` なら後で閉じるものから）
         let mut js: Vec<usize> = (k + 1..chars.len()).filter(|&j| chars[j] == '」').collect();
         if late_first {
@@ -3456,10 +3488,6 @@ fn mask_inner_quotes(line: &str, limit: usize, late_first: bool) -> Vec<String> 
             }
             // 改め文そのものを加える字句（「同条第六項」の下に「中「A」を「B」に改め、…同項」を加え）は、
             // 閉じた後が文の終わりか次の改正規定まで（字句の中の「」を加え、「C」…」では閉じない）
-            static NESTED_END: OnceLock<Regex> = OnceLock::new();
-            let nested_end = NESTED_END.get_or_init(|| {
-                Regex::new(r"^(?:を加え|に改め)(?:る?。?$|、[^「」]*改正規定)").unwrap()
-            });
             if amend && is_to && inner.starts_with("中「") && !nested_end.is_match(&after) {
                 continue;
             }
@@ -3817,7 +3845,10 @@ fn parse_instruction_split(
                     || loc_part.starts_with(['(', '（'])))
             && !has_article_table(loc_part)
             && !(loc_part.starts_with("同項")
-                && ante.tedit.as_ref().is_some_and(|(_, p)| p.contains("の項")))
+                && ante
+                    .tedit
+                    .as_ref()
+                    .is_some_and(|(_, p)| table_row_end(p).is_some()))
             && !loc_part.starts_with("別表")
             && !loc_part.starts_with("附則別表")
             && !loc_part.starts_with("様式")
@@ -3889,7 +3920,7 @@ fn parse_instruction_split(
                     && ante
                         .tedit
                         .as_ref()
-                        .is_some_and(|(_, p)| p.contains("の項") || p.ends_with('項')))
+                        .is_some_and(|(_, p)| table_row_end(p).is_some() || p.ends_with('項')))
             || ante.appdx.as_ref().is_some_and(|(_, r)| !r.is_empty())
                 && seg.starts_with("同項の")
                 && !seg.contains('「');
@@ -3941,7 +3972,10 @@ fn parse_instruction_split(
             // 表の行の中の号の続き（「同項中第十三号を第十二号とし、第十四号を第十三号とし」）はその行
             let in_row = seg.starts_with('第')
                 && !matches!(&ante.tedit, Some((TableRef::InArticle(at), _)) if at.item.is_some())
-                && ante.tedit.as_ref().is_some_and(|(_, p)| p.contains("の項"));
+                && ante
+                    .tedit
+                    .as_ref()
+                    .is_some_and(|(_, p)| table_row_end(p).is_some());
             // 「同類の注２中（ａ）を（Ａ）とし、（ｂ）を（Ｂ）とし」: 直前と同じ注の中
             let in_note = seg
                 .starts_with(['(', '（'])

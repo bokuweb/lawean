@@ -508,7 +508,7 @@ pub(crate) fn apply_instruction(
                     to: &str,
                     n: &mut usize,
                     skip: &dyn Fn(&ArticleNum) -> bool,
-                    skip_title: &dyn Fn(&[(ContainerKind, String)]) -> bool,
+                    skip_title: &SkipTitle<'_>,
                     protect: &[String],
                 ) {
                     for p in ps {
@@ -2805,6 +2805,9 @@ pub(crate) fn replace_containers(
 /// 行は上欄が `row` の `TableRow`（`rowspan` や上欄の空欄で続く行も同じ項）。`sub` があればその細目の文だけ。
 /// 同じ文（改め文の 1 文）の中では行を一度だけ引く（最初の置換で上欄が変わっても、後の置換は同じ行）
 #[allow(clippy::too_many_arguments)]
+/// 容器の題名を字句の置換から外すか（外側からの道筋で）
+type SkipTitle<'a> = dyn Fn(&[(ContainerKind, String)]) -> bool + 'a;
+
 pub(crate) fn replace_appdx_row(
     doc: &mut LegalDocument,
     table: &str,
