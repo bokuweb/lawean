@@ -130,14 +130,25 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     // 「第N条　次に掲げる法律の規定中「A」を「B」に改める。」+「一　X法（…）第M条…」の列挙形（令4-68 第221条など）。
     // 号ごとに、その法律を改正する単位を作る
     static LIST_HEADER: OnceLock<Regex> = OnceLock::new();
-    let list_header = LIST_HEADER.get_or_init(|| {
-        re(r"^(第{N}条(?:の{N})*)　次に掲げる法律の規定中「(.+?)」(?:を「(.+?)」に改める|の下に「(.+?)」を加える|を削る)。$")
-    });
+    let list_header = LIST_HEADER
+        .get_or_init(|| re(r"^(第{N}条(?:の{N})*|[０-９]+)　次に掲げる法律の規定中(「.+)。$"));
     static LIST_ITEM: OnceLock<Regex> = OnceLock::new();
     // 位置の無い号（「一　法人ノ役員処罰ニ関スル法律（大正四年法律第十八号）」）は法律の全部（本則）
     let list_item =
-        LIST_ITEM.get_or_init(|| re(r"^{N}　(.+?)（[^）]*）((?:附則)?(?:第|別表).+)?$"));
-    let mut list: Option<(String, String, String)> = None;
+        LIST_ITEM.get_or_init(|| re(r"^{N}　(.+?（[^）]*）)((?:附則)?(?:第|別表).+|本則)?$"));
+    // 「二　X法（…）附則第六条第一項の規定によりなおその効力を有することとされる同法第四条の規定による改正前のY法（…）第N条」:
+    // 効力を残された旧法（名前は最後の法令番号まで）
+    static LIST_ITEM_KEPT: OnceLock<Regex> = OnceLock::new();
+    let list_item_kept = LIST_ITEM_KEPT.get_or_init(|| {
+        re(r"^{N}　(.+なおその効力を有する.+?(?:（[^）]*）|法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*|別表[^「」]*|本則)?$")
+    });
+    // 「一　一般職の任期付研究員の採用、給与及び勤務時間の特例に関する法律第七条第二項」: 法令番号の無い名前
+    static LIST_ITEM_BARE: OnceLock<Regex> = OnceLock::new();
+    let list_item_bare = LIST_ITEM_BARE
+        .get_or_init(|| re(r"^{N}　([^（）「」]+?(?:法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*|別表[^「」]*|本則)$"));
+    // 次に掲げる法律の規定の改正: 改正法の条と、位置の後に続ける改め文（「「A」を「B」に改める」）
+    let mut list: Option<(String, String)> = None;
+    let mut last_art = String::new();
     let mut units: Vec<AmendUnit> = Vec::new();
     let text = normalize_source_text(text);
     // 整備法の体裁: 条の見出し「（X法の一部改正）」と章の見出し「第二章　文部科学省関係」は改め文ではない。
@@ -298,27 +309,39 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             }
         }
         if let Some(c) = list_header.captures(line) {
-            // 「の下に「B」を加える」は「A」を「AB」に
-            let to = match (c.get(3), c.get(4)) {
-                (_, Some(b)) => format!("{}{}", &c[2], b.as_str()),
-                (Some(b), None) => b.as_str().to_string(),
-                (None, None) => String::new(),
+            // 「２　次に掲げる法律の規定中…」: 直前の条の第二項
+            let art = if c[1].starts_with('第') {
+                last_art = c[1].to_string();
+                c[1].to_string()
+            } else {
+                let n: u32 = c[1]
+                    .chars()
+                    .filter_map(|d| d.to_digit(10))
+                    .fold(0, |acc, d| acc * 10 + d);
+                format!("{last_art}第{}項", to_kanji(n))
             };
-            list = Some((c[1].to_string(), c[2].to_string(), to));
+            list = Some((art, c[2].to_string()));
             continue;
         }
-        if let (Some((art, a, b)), Some(c)) = (&list, list_item.captures(line)) {
-            if indent == 1 {
+        if let Some((art, tail)) = &list {
+            let c = list_item_kept
+                .captures(line)
+                .filter(|_| line.contains("なおその効力を有する"))
+                .or_else(|| list_item.captures(line))
+                .or_else(|| list_item_bare.captures(line));
+            // 号の字下げはページによって 1 字か 2 字
+            if let (Some(c), 1 | 2) = (c, indent) {
                 let at = c.get(2).map(|m| m.as_str()).unwrap_or("本則");
-                let text = if b.is_empty() {
-                    format!("{at}中「{a}」を削る。")
-                } else {
-                    format!("{at}中「{a}」を「{b}」に改める。")
-                };
+                let text = format!("{at}中{tail}。");
                 let ops = parse_instruction(&text)?;
+                // 名前の終わりの法令番号（「（昭和三十年法律第百五十六号）」）は題名に含めない
+                let title = match c[1].strip_suffix('）').and_then(|x| x.rfind('（')) {
+                    Some(i) => c[1][..i].to_string(),
+                    None => c[1].to_string(),
+                };
                 units.push(AmendUnit {
                     article_of_amending_law: art.clone(),
-                    target_title: c[1].to_string(),
+                    target_title: title,
                     instructions: vec![Instruction { text, ops }],
                 });
                 continue;
@@ -326,6 +349,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         }
         if let Some(c) = header.captures(line) {
             list = None;
+            last_art = c[1].to_string();
             unit_ante = Ante::empty();
             // 改め文は 2 字下げ。ページによって 1 字（字下げを 1 段深く読む）、字下げ無し（書き出しで見分ける）
             let next_indent = next_indent_of(li).unwrap_or(2);
