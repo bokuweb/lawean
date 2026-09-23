@@ -319,6 +319,17 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
+        Op::AmendmentEdit { target, action } => match action {
+            TableAction::Replace { .. } => format!("{target}を次のように{}", end("改め", "改める")),
+            TableAction::Delete => format!("{target}を{}", end("削り", "削る")),
+            TableAction::InsertAfter { .. } => {
+                format!("{target}の次に次のように{}", end("加え", "加える"))
+            }
+            TableAction::Append { .. } => {
+                format!("{target}に次の改正規定を{}", end("加え", "加える"))
+            }
+            _ => format!("{target}を{}", end("改め", "改める")),
+        },
         Op::ReplaceInAmendment {
             article,
             target,
@@ -956,6 +967,14 @@ fn content_of(op: &Op) -> &[String] {
             ..
         } => text,
         Op::Suppl(inner) => content_of(inner),
+        Op::AmendmentEdit {
+            action:
+                TableAction::Replace { text }
+                | TableAction::InsertAfter { text }
+                | TableAction::InsertBefore { text }
+                | TableAction::Append { text },
+            ..
+        } => text,
         Op::SubitemsEdit {
             text: Some(text), ..
         }

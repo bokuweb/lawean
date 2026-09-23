@@ -26,6 +26,7 @@ class P(HTMLParser):
         self.row = None
         self.cell = None
         self.skip = 0  # script/style
+        self.stack = []  # 入れ子の表: 外の表の (行の列, 行, 欄)
 
     def flush(self):
         t = "".join(self.cur)
@@ -41,6 +42,9 @@ class P(HTMLParser):
             self.skip += 1
         if tag == "table":
             self.flush()
+            if self.in_table and self.cell is not None:
+                # 欄の中の表（「 」の欄の中に目次の行を組んだ表など）: 外の欄の字句にする
+                self.stack.append((self.table_rows, self.row, self.cell))
             self.in_table += 1
             self.table_rows = []
         elif tag == "tr" and self.in_table:
@@ -65,6 +69,15 @@ class P(HTMLParser):
             if self.row:
                 self.table_rows.append(self.row)
             self.row = None
+        elif tag == "table" and self.in_table and self.stack:
+            self.flush()
+            if self.row:
+                self.table_rows.append(self.row)
+            ws = "\u3000 \xa0\n\r\t"
+            inner = "".join(c.strip(ws) for r in self.table_rows for c in r)
+            self.table_rows, self.row, self.cell = self.stack.pop()
+            self.cell.append(inner)
+            self.in_table -= 1
         elif tag == "table" and self.in_table:
             self.in_table -= 1
             rows = self.pending_rows + self.table_rows

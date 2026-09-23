@@ -1323,7 +1323,8 @@ impl Binder<'_> {
                 | Op::SetContainerTitles { .. }
                 | Op::DeleteArticleTitle { .. }
                 | Op::ReplaceSupplNote { .. }
-                | Op::ReplaceInAmendment { .. } => {
+                | Op::ReplaceInAmendment { .. }
+                | Op::AmendmentEdit { .. } => {
                     return Err(ApplyError::Unsupported(
                         "条の前後に容器を置く改正の id の対応".into(),
                     ))

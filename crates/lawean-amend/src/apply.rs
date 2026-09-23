@@ -573,6 +573,11 @@ pub(crate) fn apply_instruction(
                     });
                 }
             }
+            Op::AmendmentEdit { target, .. } => {
+                return Err(ApplyError::Unsupported(format!(
+                    "改正規定そのものの操作（{target}）"
+                )))
+            }
             Op::ReplaceInAmendment { .. } => {
                 return Err(ApplyError::Unsupported("改正法の改正規定の中の字句".into()))
             }

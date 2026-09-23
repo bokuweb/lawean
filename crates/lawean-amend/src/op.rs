@@ -247,6 +247,9 @@ pub enum Op {
         to: u32,
         by: i32,
     },
+    /// 「第十八条中X法第四十二条の三の改正規定を次のように改める」「…の改正規定を削る」「…の改正規定の次に次のように加える」
+    /// 「第九条に次の改正規定を加える」: 改正法の改正規定そのものの操作。`target` は位置の字面
+    AmendmentEdit { target: String, action: TableAction },
     /// 「第二条のうち、X法目次の改正規定中「A」を「B」に改める」: 改正法の改正規定の中の字句
     ReplaceInAmendment {
         article: ArticleNum,
@@ -509,6 +512,7 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::AmendmentEdit { .. }
             | Op::SetTitleAndToc { .. }
             | Op::ReplacePairs { .. }
             | Op::DeleteTitle
@@ -683,7 +687,7 @@ impl Op {
         {
             return text.is_empty();
         }
-        if let Op::TableEdit { action, .. } = self {
+        if let Op::TableEdit { action, .. } | Op::AmendmentEdit { action, .. } = self {
             return matches!(
                 action,
                 TableAction::Replace { .. }
@@ -782,6 +786,14 @@ impl Op {
             | Op::InsertHeadingsBefore { text, .. }
             | Op::SetContainerTitles { text, .. } => text.push(line),
             Op::TableEdit {
+                action:
+                    TableAction::Replace { text }
+                    | TableAction::InsertAfter { text }
+                    | TableAction::InsertBefore { text }
+                    | TableAction::Append { text },
+                ..
+            }
+            | Op::AmendmentEdit {
                 action:
                     TableAction::Replace { text }
                     | TableAction::InsertAfter { text }

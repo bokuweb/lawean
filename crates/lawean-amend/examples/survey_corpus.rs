@@ -92,6 +92,12 @@ fn main() {
         args.drain(i..=i + 1);
         p
     });
+    // 「--since 19890108」: 公布日（ファイル名の 4〜11 桁目）がこの日以後の法律だけ
+    let since = args.iter().position(|a| a == "--since").map(|i| {
+        let p = args[i + 1].clone();
+        args.drain(i..=i + 1);
+        p
+    });
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     for a in &args {
         let p = std::path::Path::new(a);
@@ -116,6 +122,12 @@ fn main() {
             continue;
         };
         let name = f.file_stem().unwrap().to_string_lossy().to_string();
+        if since
+            .as_deref()
+            .is_some_and(|d| name.get(3..11).is_none_or(|x| x < d))
+        {
+            continue;
+        }
         let session: u32 = name.get(0..3).and_then(|s| s.parse().ok()).unwrap_or(0);
         let bs = blocks(&text);
         if bs.is_empty() {
