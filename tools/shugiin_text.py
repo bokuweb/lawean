@@ -55,7 +55,7 @@ class P(HTMLParser):
             self.skip -= 1
         if tag in ("p", "div", "h1", "h2", "h3", "h4", "li"):
             self.flush()
-        elif tag == "td" and self.in_table:
+        elif tag == "td" and self.in_table and self.cell is not None:
             self.flush()
             if self.row is None:  # <tr> の無い <td>（古いページ）
                 self.row = []
