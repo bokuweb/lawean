@@ -93,6 +93,8 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     static SINGLE: OnceLock<Regex> = OnceLock::new();
     let single = SINGLE.get_or_init(|| re(r"^(.+?)(（[^）]*）)?の一部を次のように改正する。$"));
     let mut shift = 0usize;
+    // 改正単位ごとの先行詞（文をまたいで「同条第二項中…」と書く古い改め文のため）
+    let mut unit_ante = Ante::empty();
     // 字下げの無いページ（古い制定法律）: 改め文か追加する条文かを行の書き出しで見分ける
     let mut flat = false;
     let next_indent_of = |li: usize| -> Option<usize> {
@@ -157,6 +159,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         if let Some(c) = header.captures(line) {
             list = None;
             shift = 0;
+            unit_ante = Ante::empty();
             flat = indent == 0 && next_indent_of(li) == Some(0);
             units.push(AmendUnit {
                 article_of_amending_law: c[1].to_string(),
@@ -168,6 +171,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         if indent - shift <= 1 && !line.starts_with('第') {
             if let Some(c) = single.captures(line) {
                 list = None;
+                unit_ante = Ante::empty();
                 // 改め文の字下げはページによって 1 字か 2 字。見出しの次の行（最初の改め文）の字下げに合わせる
                 let next_indent = lines[li + 1..]
                     .iter()
@@ -179,7 +183,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
                     })
                     .unwrap_or(1);
                 shift = 2usize.saturating_sub(next_indent);
-                flat = indent == 0 && next_indent == 0;
+                flat = next_indent == 0;
                 units.push(AmendUnit {
                     article_of_amending_law: "本則".to_string(),
                     target_title: c[1].to_string(),
@@ -201,7 +205,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             indent == 2 && line.ends_with('。') && !line.starts_with('（') && !is_item_line
         };
         if is_instruction {
-            let ops = parse_instruction(line)?;
+            let ops = parse_instruction_with(line, &mut unit_ante)?;
             unit.instructions.push(Instruction {
                 text: line.to_string(),
                 ops,
@@ -395,6 +399,8 @@ impl Ante {
             suppl: false,
             sub: None,
             appdx: None,
+            fresh: false,
+            whole: false,
         }
     }
 }
@@ -462,6 +468,10 @@ struct Ante {
     sub: Option<String>,
     /// 直前の位置が別表の行（表, 行の上欄）
     appdx: Option<(String, String)>,
+    /// 文の最初の断片（位置を書かない字句の操作は本則の全部）
+    fresh: bool,
+    /// 直前の字句の操作が本則の全部（「本則中「A」を「B」に、「C」を「D」に改める」の続き）
+    whole: bool,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
@@ -583,6 +593,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
         _ => SentencePart::Chapeau,
     });
     // 位置を新しく言えば文の限定と列挙は解ける
+    ante.whole = false;
     ante.part = part;
     ante.locs.clear();
     ante.appdx = None;
@@ -790,14 +801,10 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         return Ok(None);
     }
     // 「本則中「A」を「B」に改める」、位置を書かない最初の字句（古い法律の「「勅令」を「政令」に改める」）: 本則の全部
-    let whole = loc_part == Some("本則")
-        || (loc_part.is_none()
-            && ante.article.is_none()
-            && !ante.toc
-            && ante.appdx.is_none()
-            && ante.container.is_empty());
+    let whole = loc_part == Some("本則") || (loc_part.is_none() && (ante.fresh || ante.whole));
     if whole {
         ante.article = None;
+        ante.whole = true;
         let mk = |from: &String, to: String| Op::ReplaceAll {
             from: from.clone(),
             to,
@@ -1181,6 +1188,11 @@ pub fn normalize_instruction(line: &str) -> String {
 }
 
 pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
+    parse_instruction_with(line, &mut Ante::empty())
+}
+
+/// 前の文の位置を引き継いで読む（古い改め文は文をまたいで「同条第二項中…」と書く）
+fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, ParseError> {
     let normalized = normalize_instruction(line);
     let line = normalized.as_str();
     static RULES: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
@@ -1259,18 +1271,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
         .map(|(n, s)| (*n, re(s)))
         .collect()
     });
-    let mut ante = Ante {
-        article: None,
-        paragraph: None,
-        item: None,
-        toc: false,
-        container: Vec::new(),
-        part: None,
-        locs: Vec::new(),
-        suppl: false,
-        sub: None,
-        appdx: None,
-    };
+    let mut ante = std::mem::replace(ante_in, Ante::empty());
     let mut ops = Vec::new();
     let segs: Vec<String> = split_segments(line);
     // 断片ごとの操作の始まり（読めない断片が出たとき、前の断片とつないで読み直すのに使う）
@@ -1283,6 +1284,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             continue;
         }
         op_start[si] = Some(ops.len());
+        ante.fresh = si == 0;
         let seg = seg.trim();
         // 字句そのものに「」に、「」が入る読替え規定の書き換えは「、」で切れてしまう。
         // 読めない断片は、前の断片（字句の操作）とつないで、改め・加え・削りで終わるところまで緩く読み直す
@@ -1314,6 +1316,8 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
                         suppl: ante.suppl,
                         sub: ante.sub.clone(),
                         appdx: ante.appdx.clone(),
+                        fresh: ante.fresh,
+                        whole: ante.whole,
                     };
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
@@ -2230,6 +2234,7 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
             return Err(ParseError::Unrecognized(seg.to_string()));
         }
     }
+    *ante_in = ante;
     Ok(ops)
 }
 
