@@ -140,12 +140,12 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     // 効力を残された旧法（名前は最後の法令番号まで）
     static LIST_ITEM_KEPT: OnceLock<Regex> = OnceLock::new();
     let list_item_kept = LIST_ITEM_KEPT.get_or_init(|| {
-        re(r"^{N}　(.+なおその効力を有する.+?(?:（[^）]*）|法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*|別表[^「」]*|本則)?$")
+        re(r"^{N}　(.+なおその効力を有する.+?(?:（[^）]*）|法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*(?:ただし書|本文|前段|後段|各号列記以外の部分)?|別表[^「」]*|本則)?$")
     });
     // 「一　一般職の任期付研究員の採用、給与及び勤務時間の特例に関する法律第七条第二項」: 法令番号の無い名前
     static LIST_ITEM_BARE: OnceLock<Regex> = OnceLock::new();
     let list_item_bare = LIST_ITEM_BARE
-        .get_or_init(|| re(r"^{N}　([^（）「」]+?(?:法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*|別表[^「」]*|本則)$"));
+        .get_or_init(|| re(r"^{N}　([^（）「」]+?(?:法律|法))((?:附則)?第{N}条(?:の{N})*(?:第{N}項)?(?:第{N}号(?:の{N})*)?(?:(?:及び|、|から|並びに)(?:第{N}(?:条|項|号)(?:の{N})*)+(?:まで)?)*(?:ただし書|本文|前段|後段|各号列記以外の部分)?|別表[^「」]*|本則)$"));
     // 次に掲げる法律の規定の改正: 改正法の条と、位置の後に続ける改め文（「「A」を「B」に改める」）
     let mut list: Option<(String, String)> = None;
     let mut last_art = String::new();
@@ -165,7 +165,7 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             Some(prev)
                 if (prev.ends_with('、')
                     || prev.ends_with('」') && next.starts_with(['を', 'に', '及', '並'])
-                    || prev.ends_with('を') && next.starts_with('「')
+                    || prev.ends_with(['を', '中']) && next.starts_with('「')
                     || !prev.ends_with('。')
                         && prev.matches('「').count() > prev.matches('」').count())
                     && prev
@@ -1923,7 +1923,10 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         // 表の形の条の行（「第二条海の日の項中」）、「同欄３中」
         Some(l) if has_article_table(l) && !l.contains("の表") => split_table_target(l, ante)?,
         Some(l)
-            if (l.starts_with("同欄") || l.starts_with("同注") || l.starts_with("同類"))
+            if (l.starts_with("同欄")
+                || l.starts_with("同注")
+                || l.starts_with("同類")
+                || l.starts_with("同部"))
                 && ante.tedit.is_some() =>
         {
             split_table_target(l, ante)?
@@ -2430,12 +2433,16 @@ fn split_table_target(
             return Ok(hit);
         }
     }
-    // 「同類の注２中」: 直前の表（関税率表）の同じ類
-    if let Some(r) = target.strip_prefix("同類") {
+    // 「同類の注２中」「同部の注２（ａ）中」: 直前の表（関税率表）の同じ類・部
+    if let Some((unit, r)) = target
+        .strip_prefix("同類")
+        .map(|r| ('類', r))
+        .or_else(|| target.strip_prefix("同部").map(|r| ('部', r)))
+    {
         if let Some((t, p)) = ante.tedit.clone() {
-            if let Some(i) = p.find('類') {
+            if let Some(i) = p.find(unit) {
                 let rest = path_of(r);
-                let head = &p[..i + '類'.len_utf8()];
+                let head = &p[..i + unit.len_utf8()];
                 return Ok(Some((
                     t,
                     if rest.is_empty() {
@@ -2496,7 +2503,7 @@ fn split_table_target(
         let c = name.captures(target).expect("別表");
         let (t, rest) = (&c["t"], &c["rest"]);
         // 「別表第七一類の注１」: 関税率表の類（表の番号でない）
-        if rest.starts_with('類') {
+        if rest.starts_with(['類', '部']) {
             if let Some(i) = t.find("別表") {
                 let head = &t[..i + "別表".len()];
                 return Ok(Some((
@@ -3467,7 +3474,7 @@ fn parse_instruction_split(
             // 表の中の位置への操作（上の別表の行の規則に当たらないもの）: 位置は字面のまま
             ("append_appdx_as", r"^(?:附則の次に)?別表として次のように加え(?:る)?$"),
             ("append_before_suppl", r"^附則の前に次の{N}条を加え(?:る)?$"),
-            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|様式|附則様式|付表|附録|付録|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号[^「」]*?|同欄[^「」]*?|同注[^「」]*?|同類[^「」]*?|同項[^「」]*?|その|第[^「」]+?の式|第{N}条(?:の{N})*[^第の同中、「」][^「」、]*?の項)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に[^「」]*?として次のように加え(?:る)?|として次のように加え(?:る)?|に[^「」]*?として次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する)|を(?P<k>{N})(?:号|項|条)ずつ繰り(?P<dir>下げ|上げ)(?:る)?)$"),
+            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|様式|附則様式|付表|附録|付録|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号[^「」]*?|同欄[^「」]*?|同注[^「」]*?|同類[^「」]*?|同部[^「」]*?|同項[^「」]*?|その|第[^「」]+?の式|第{N}条(?:の{N})*[^第の同中、「」][^「」、]*?の項)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に[^「」]*?として次のように加え(?:る)?|として次のように加え(?:る)?|に[^「」]*?として次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する)|を(?P<k>{N})(?:号|項|条)ずつ繰り(?P<dir>下げ|上げ)(?:る)?)$"),
             ("title_and_toc", r"^(?:題名及び目次|目次及び題名)を次のように改め(?:る)?$"),
             ("delete_toc", r"^目次(?:及び(?P<rest>.+))?を削(?:り|る)$"),
             ("delete_title", r"^題名(?P<toc>及び目次(?:（[^）]*）)?)?を削(?:り|る)$"),
@@ -3679,6 +3686,7 @@ fn parse_instruction_split(
                 || seg.starts_with("同欄")
                 || seg.starts_with("同注")
                 || seg.starts_with("同類")
+                || seg.starts_with("同部")
                 || seg.starts_with("同項")
                     && !matches!(&ante.tedit, Some((TableRef::InArticle(at), _)) if at.item.is_some())
                     && ante

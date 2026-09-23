@@ -34,6 +34,9 @@ class P(HTMLParser):
         if self.in_table and self.cell is not None:
             self.cell.append(t)
             return
+        # 「<<A NAME=…>」のようなタグの崩れから出た「<」だけの字は本文でない
+        if t.strip("　 \n\r\t") in ("<", ">"):
+            return
         if t.strip("　 \n\r\t"):
             # 閉じない「 の表の後に本文が来た: 続きの表ではなかったので、ためた行はそのまま出す
             if self.pending_rows and not self.in_table:
