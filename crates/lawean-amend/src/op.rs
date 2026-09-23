@@ -464,6 +464,10 @@ pub enum Op {
     /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
     /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
     Suppl(Box<Op>),
+    /// 「本則を第一条とし」: 条の無い本則を条にする
+    MainToArticle { to: ArticleNum },
+    /// 「第百一条から第百五条までを附則第一条から第五条までとし」: 本則の条を附則の条にする
+    ArticleToSuppl { from: ArticleNum, to: ArticleNum },
     /// 「同項（第三号を除く。）及び同条第三項第一号中「A」を「B」に改める」: 除く位置のある字句の操作（`except` は位置の中で除くところ）
     Except { op: Box<Op>, except: Vec<Loc> },
     /// 「第八条の次に次の二章を加える」「第十条の次に次の一款を加える」+ 章・款の内容: 条の後ろに容器を置く
@@ -557,6 +561,8 @@ impl Op {
             | Op::ReplaceInContainer { .. }
             | Op::SetContainerTitles { .. }
             | Op::Suppl(_)
+            | Op::MainToArticle { .. }
+            | Op::ArticleToSuppl { .. }
             | Op::Except { .. } => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::MoveArticle { from, .. } => Some(from),

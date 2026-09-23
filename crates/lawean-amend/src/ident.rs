@@ -1341,7 +1341,9 @@ impl Binder<'_> {
                 | Op::SetTitleAndToc { .. }
                 | Op::DeleteTitle
                 | Op::ParagraphToArticle { .. }
-                | Op::Except { .. } => {
+                | Op::Except { .. }
+                | Op::MainToArticle { .. }
+                | Op::ArticleToSuppl { .. } => {
                     let one = Instruction {
                         text: ins.text.clone(),
                         ops: vec![op.clone()],

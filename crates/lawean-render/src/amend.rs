@@ -777,6 +777,13 @@ fn segment(op: &Op, last: bool) -> String {
         ),
         Op::AppendAppdx { .. } => format!("附則の次に次の別表を{}", end("加え", "加える")),
         Op::RenameAppdx { from, to } => format!("{from}を{to}と{}", end("し", "する")),
+        Op::MainToArticle { to } => format!("本則を{}と{}", article_label(to), end("し", "する")),
+        Op::ArticleToSuppl { from, to } => format!(
+            "{}を附則{}と{}",
+            article_label(from),
+            article_label(to),
+            end("し", "する")
+        ),
         Op::InsertAppdxAfter { after, .. } => {
             format!("{after}の次に次の一表を{}", end("加え", "加える"))
         }

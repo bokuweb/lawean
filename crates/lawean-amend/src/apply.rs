@@ -629,6 +629,12 @@ pub(crate) fn apply_instruction(
                     "条の前に章名・目次を置く（条を容器に包み直す）".into(),
                 ))
             }
+            Op::MainToArticle { .. } => {
+                return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))
+            }
+            Op::ArticleToSuppl { .. } => {
+                return Err(ApplyError::Unsupported("本則の条を附則の条にする".into()))
+            }
             Op::Except { .. } => {
                 return Err(ApplyError::Unsupported(
                     "除く位置（「（第三号を除く。）」）のある字句の改正".into(),
