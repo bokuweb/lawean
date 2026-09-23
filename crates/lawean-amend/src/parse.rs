@@ -561,11 +561,33 @@ fn split_segments(s: &str) -> Vec<String> {
 fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
     // 「第百四十九条第四項にただし書を加え、同項を同条第六項とする改正規定中「A」を…」: 改正規定を言う位置の中の「、」は切らない
     const KEEP: char = '\u{E010}';
-    if let Some(i) = s.find("改正規定") {
-        let head = &s[..i];
-        // 「…を加え、…とする改正規定」: 改正規定の中身を言う動詞で終わる位置だけ
-        if !head.contains('「') && head.contains('、') && head.ends_with(['る', 'す']) {
-            let protected = format!("{}{}", head.replace('、', &KEEP.to_string()), &s[i..]);
+    if s.contains("改正規定") {
+        // 各「改正規定」の前の、字句を含まない説明（「…を加え、…とする」）の中の「、」を守る
+        let mut protected = String::new();
+        let mut last = 0usize;
+        let mut changed = false;
+        for (i, _) in s.match_indices("改正規定") {
+            let head = &s[last..i];
+            // 説明の始まり: 最後の「」」の後の最初の「、」の後（無ければ区切りの始まり）
+            let start = match head.rfind('」') {
+                Some(j) => match head[j..].find('、') {
+                    Some(k) => j + k + '、'.len_utf8(),
+                    None => head.len(),
+                },
+                None => 0,
+            };
+            let desc = &head[start..];
+            if !desc.contains('「') && desc.contains('、') && desc.ends_with(['る', 'す']) {
+                protected.push_str(&head[..start]);
+                protected.push_str(&desc.replace('、', &KEEP.to_string()));
+                changed = true;
+            } else {
+                protected.push_str(head);
+            }
+            last = i;
+        }
+        protected.push_str(&s[last..]);
+        if changed {
             return split_segments_with(&protected, strict)
                 .into_iter()
                 .map(|x| x.replace(KEEP, "、"))
@@ -661,6 +683,7 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
             || seg.ends_with("の項")
             // 「同改正規定のうち、…に係る部分」「…改め、同法第四十二条を第四十八条とし、…とする改正規定中」
             || seg.ends_with("のうち")
+            || seg.ends_with("改正規定")
             || seg.starts_with("同法"))
             && !seg.contains('「')
             && (!seg.ends_with(['し', 'る', 'め', 'え', 'り', 'げ']) || seg.ends_with("見出し"));
@@ -1660,6 +1683,93 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         }
         l => l,
     };
+    // 「目次、第三章の章名及び第七条中」「第一条並びに第二条の見出し及び同条第一項中」: 目次・章名・見出しを分けて
+    let mut extra_ops: Vec<Box<dyn Fn(&String, String) -> Op>> = Vec::new();
+    let special_owned;
+    let loc_part = match loc_part {
+        Some(l)
+            if (l.contains("及び") || l.contains('、') || l.contains("並びに"))
+                && (l.contains("目次") || l.contains("名") || l.contains("見出し")) =>
+        {
+            let mut rest: Vec<String> = Vec::new();
+            for tok in l
+                .split("並びに")
+                .flat_map(|x| x.split("及び"))
+                .flat_map(|x| x.split('、'))
+            {
+                if tok == "目次" {
+                    extra_ops.push(Box::new(|f: &String, t: String| Op::ReplaceToc {
+                        from: f.clone(),
+                        to: t,
+                    }));
+                } else if let Some(base) = ["の章名", "の節名", "の款名", "の編名", "の目名"]
+                    .iter()
+                    .find_map(|x| tok.strip_suffix(x))
+                {
+                    let path = match base.strip_prefix('同') {
+                        Some(r) => {
+                            let k = r.chars().next().unwrap_or('章');
+                            let mut p = ante_container_upto(ante, k);
+                            p.extend(container_path(&r[k.len_utf8()..]));
+                            p
+                        }
+                        None => container_path(base),
+                    };
+                    ante.container = path.clone();
+                    extra_ops.push(Box::new(move |f: &String, t: String| {
+                        Op::ReplaceContainerTitle {
+                            path: path.clone(),
+                            from: f.clone(),
+                            to: t,
+                        }
+                    }));
+                } else if let Some(base) = tok
+                    .strip_suffix("の前の見出し")
+                    .or_else(|| tok.strip_suffix("の見出し"))
+                {
+                    let l = loc(base, ante)?;
+                    extra_ops.push(Box::new(move |f: &String, t: String| {
+                        caption_op(
+                            l.clone(),
+                            CaptionEdit::Replace {
+                                from: f.clone(),
+                                to: t,
+                            },
+                        )
+                        .in_suppl(l.suppl)
+                    }));
+                } else {
+                    rest.push(tok.to_string());
+                }
+            }
+            if extra_ops.is_empty() {
+                Some(l)
+            } else {
+                // 残りの位置が無ければ None（名前の付いた位置の操作だけ）
+                special_owned = rest.join("及び");
+                Some(special_owned.as_str())
+            }
+        }
+        l => l,
+    };
+    if !extra_ops.is_empty() {
+        // 目次・章名・見出しの操作を並べ、最後に残りの位置の字句の操作
+        let mut v = Vec::new();
+        for mk in &extra_ops {
+            match phrase_tail(rest, &phrases, |f, t| mk(f, t)) {
+                Some(w) => v.extend(w),
+                None => return Ok(None),
+            }
+        }
+        let l = loc_part.unwrap_or("");
+        if !l.is_empty() {
+            match parse_phrase_op(&format!("{l}中{full_rest}"), ante)? {
+                Some(PhraseOps(w)) => v.extend(w),
+                None => return Ok(None),
+            }
+        }
+        return Ok(Some(PhraseOps(v)));
+    }
     let ats: Vec<Loc> = match loc_part {
         // 「同条第四項及び第六項中「A」を削る」: 位置の列挙（置換・追加の列挙は規則の側で展開する）
         Some(l) if l.contains("及び") || l.contains('、') || l.contains("まで") => {
@@ -2730,16 +2840,22 @@ fn parse_instruction_split(
         // 「第四章中第四十条の見出しを…」: 条を言う前の容器は先行詞にだけ（条の番号は法律で一意）
         static CPREFIX: OnceLock<Regex> = OnceLock::new();
         let cprefix = CPREFIX.get_or_init(|| {
-            re(r"^(?P<c>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中(?P<rest>第{N}条.*)$")
+            re(r"^(?P<same>同編|同章|同節|同款|同目)?(?P<c>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*)中(?P<rest>(?:第{N}条|第{N}(?:編|章|節|款|目)|同(?:編|章|節|款|目)[^中]).*)$")
         });
         let cstripped;
         let seg = match cprefix.captures(seg) {
-            Some(c) => {
-                ante.container = container_path(&c["c"]);
+            Some(c) if c.name("same").is_some() || !c["c"].is_empty() => {
+                // 「同節第二款中第百四十二条の八の次に…」: 直前の容器の中
+                let mut path = match c.name("same") {
+                    Some(m) => ante_container_upto(&ante, m.as_str().chars().nth(1).unwrap()),
+                    None => Vec::new(),
+                };
+                path.extend(container_path(&c["c"]));
+                ante.container = path;
                 cstripped = c["rest"].to_string();
                 cstripped.as_str()
             }
-            None => seg,
+            _ => seg,
         };
         // 字句そのものに「」に、「」が入る読替え規定の書き換えは「、」で切れてしまう。
         // 読めない断片は、前の断片（字句の操作）とつないで、改め・加え・削りで終わるところまで緩く読み直す
@@ -2801,8 +2917,14 @@ fn parse_instruction_split(
                 && !loc_part.starts_with("同表")
                 && !loc_part.contains("の表");
         if (!listed || seg.starts_with('「') || seg.ends_with("削り") || seg.ends_with("削る"))
-            && (!loc_part.contains("見出し") || loc_part.contains("（見出しを含む。）"))
-            && (!loc_part.ends_with("名") || loc_part == "題名")
+            && (!loc_part.contains("見出し")
+                || loc_part.contains("（見出しを含む。）")
+                || loc_part.contains("及び")
+                || loc_part.contains("並びに"))
+            && (!loc_part.ends_with("名")
+                || loc_part == "題名"
+                || loc_part.contains("及び")
+                || loc_part.contains('、'))
         {
             if let Some(PhraseOps(v)) = parse_phrase_op(seg, &mut ante)? {
                 ops.extend(v);
