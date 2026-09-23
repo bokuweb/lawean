@@ -2626,8 +2626,10 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         *ante_in = retry;
         return Ok(v);
     }
-    let masked = mask_inner_quotes(&normalize_instruction(line));
-    if masked.contains([MASK_O, MASK_C]) {
+    for masked in mask_inner_quotes(&normalize_instruction(line), 64) {
+        if !masked.contains([MASK_O, MASK_C]) {
+            continue;
+        }
         for strict in [false, true] {
             let mut retry = saved.clone();
             if let Ok(mut v) = parse_instruction_split(&masked, &mut retry, strict) {
@@ -2650,73 +2652,98 @@ fn unmask(s: &str) -> String {
     s.replace(MASK_O, "「").replace(MASK_C, "」")
 }
 
-/// 字句（「」で囲んだ部分）の閉じ括弧を、後ろに続く語で決める。字句の中の「」は伏せる。
+/// 字句（「」で囲んだ部分）の閉じ括弧を、後ろに続く語で決めた読み方の候補（先に閉じるものから、`limit` 個まで）。
+/// 字句の中の「」は伏せる。置き換える前の字句（「中「」「、「」の後）は「を「」「を削る」「の下に「」…の前で、
+/// 置き換えた後の字句（「を「」「の下に「」の後）は「に改め、」「を加える」…の前で閉じる。
 /// 「「附則第五条第二項」と」を「…」: 最初の「」」の後は「と」なので字句の中、次の「」」の後が「を「」なので閉じ
-fn mask_inner_quotes(line: &str) -> String {
-    const FOLLOW: [&str; 18] = [
-        "を「",
-        "を削",
-        "を加",
-        "を、",
-        "に改",
-        "に、",
-        "の下に「",
-        "の上に「",
-        "の次に「",
-        "、「",
-        "及び「",
-        "並びに「",
-        "とあるのは「",
-        "と、「",
-        "中「",
-        "を同",
-        "が",
-        "とする",
-    ];
-    let chars: Vec<char> = line.chars().collect();
-    let mut out = String::new();
-    let mut i = 0;
-    // 字句の外で「中「」「を「」などの後に開く「を字句の始まりとする
-    while i < chars.len() {
-        let c = chars[i];
-        if c != '「' {
-            out.push(c);
-            i += 1;
-            continue;
+fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
+    static FROM: OnceLock<Regex> = OnceLock::new();
+    static TO: OnceLock<Regex> = OnceLock::new();
+    let from_end = FROM.get_or_init(|| {
+        Regex::new(r"^(?:を「|を削(?:り|る)(?:、|。|$)|の(?:下|上|次)に「|、「|及び「|並びに「|とあるのは「|を同)").unwrap()
+    });
+    let to_end = TO.get_or_init(|| {
+        Regex::new(r"^(?:に改め(?:、|る?(?:。|$))|に(?:、|。|$)|を加え(?:、|る?(?:。|$))|を(?:、|。|$)|と、「|と(?:、|。|$))").unwrap()
+    });
+    fn go(
+        chars: &[char],
+        i: usize,
+        acc: &mut String,
+        out: &mut Vec<String>,
+        limit: usize,
+        from_end: &Regex,
+        to_end: &Regex,
+    ) {
+        if out.len() >= limit {
+            return;
         }
-        // 閉じ括弧の候補: 後ろが続きの語（または文の終わり「に。」「を。」…）
-        let mut close = None;
-        for j in i + 1..chars.len() {
+        // 次の「まで（字句の外）
+        let mut k = i;
+        while k < chars.len() && chars[k] != '「' {
+            k += 1;
+        }
+        // 字句の外に閉じ括弧が残る読み方は誤り（前の字句を早く閉じすぎた）
+        if chars[i..k].contains(&'」') {
+            return;
+        }
+        let len = acc.len();
+        acc.extend(&chars[i..k]);
+        if k >= chars.len() {
+            out.push(acc.clone());
+            acc.truncate(len);
+            return;
+        }
+        let before: String = chars[k.saturating_sub(4)..k].iter().collect();
+        let is_to = before.ends_with('を')
+            || before.ends_with("下に")
+            || before.ends_with("上に")
+            || before.ends_with("次に")
+            || before.ends_with("あるのは");
+        let pat = if is_to { to_end } else { from_end };
+        let mut any = false;
+        for j in k + 1..chars.len() {
             if chars[j] != '」' {
                 continue;
             }
-            let after: String = chars[j + 1..chars.len().min(j + 8)].iter().collect();
-            let end = after == ""
-                || after == "。"
-                || after.starts_with("に。")
-                || after.starts_with("を。")
-                || after.starts_with("に") && chars.len() - j <= 3;
-            if FOLLOW.iter().any(|f| after.starts_with(f)) || end {
-                close = Some(j);
+            let after: String = chars[j + 1..].iter().collect();
+            if !pat.is_match(&after) {
+                continue;
+            }
+            any = true;
+            let l2 = acc.len();
+            acc.push('「');
+            for &x in &chars[k + 1..j] {
+                acc.push(match x {
+                    '「' => MASK_O,
+                    '」' => MASK_C,
+                    x => x,
+                });
+            }
+            acc.push('」');
+            go(chars, j + 1, acc, out, limit, from_end, to_end);
+            acc.truncate(l2);
+            if out.len() >= limit {
                 break;
             }
         }
-        let Some(j) = close else {
-            out.push(c);
-            i += 1;
-            continue;
-        };
-        out.push('「');
-        for &x in &chars[i + 1..j] {
-            out.push(match x {
-                '「' => MASK_O,
-                '」' => MASK_C,
-                x => x,
-            });
+        if !any {
+            // 閉じ方が決まらない「は字句の外の字として残す
+            acc.push('「');
+            go(chars, k + 1, acc, out, limit, from_end, to_end);
         }
-        out.push('」');
-        i = j + 1;
+        acc.truncate(len);
     }
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = Vec::new();
+    go(
+        &chars,
+        0,
+        &mut String::new(),
+        &mut out,
+        limit,
+        from_end,
+        to_end,
+    );
     out
 }
 
