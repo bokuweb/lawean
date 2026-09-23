@@ -197,15 +197,31 @@ pub enum Op {
         to: u32,
         by: i32,
     },
-    /// 「第三章中「第五節　収容」を「第五節　収容及保管」に改める」: 容器の中の字句（容器の題名・条の本文）
+    /// 「第三章中「第五節　収容」を「第五節　収容及保管」に改める」: 容器の中の字句（容器の題名・条の本文）。
+    /// 「本則（第九条…を除く。）中」「第三章（第四十九条…を除く。）中」は `except` の条を除く（`path` が空なら本則）
     ReplaceInContainer {
         path: Vec<(lawean_source::ContainerKind, String)>,
+        except: Vec<Loc>,
         from: String,
         to: String,
     },
-    /// 「本則（第九条、第十条…を除く。）中「A」を「B」に改める」: 除く位置の外の本則の全部
-    ReplaceAllExcept {
-        except: Vec<Loc>,
+    /// 「第四章の章名及び同章第一節の節名を次のように改める」+ 題名の行（順に各容器へ）
+    SetContainerTitles {
+        paths: Vec<Vec<(lawean_source::ContainerKind, String)>>,
+        text: Vec<String>,
+    },
+    /// 「第一条の条名を削る」「附則第一条の見出し及び条名を削る」: 残った 1 条の「第N条」を外す（条の無い本則・附則に）
+    DeleteArticleTitle { article: ArticleNum },
+    /// 「第七十一条の付記中「A」を「B」に改める」: 条の付記（罰則の注記）の字句
+    ReplaceSupplNote {
+        article: ArticleNum,
+        from: String,
+        to: String,
+    },
+    /// 「第二条のうち、X法目次の改正規定中「A」を「B」に改める」: 改正法の改正規定の中の字句
+    ReplaceInAmendment {
+        article: ArticleNum,
+        target: String,
         from: String,
         to: String,
     },
@@ -458,9 +474,12 @@ impl Op {
             | Op::DeleteContainer { .. }
             | Op::ShiftBranchArticles { .. }
             | Op::ReplaceInContainer { .. }
-            | Op::ReplaceAllExcept { .. }
+            | Op::SetContainerTitles { .. }
             | Op::Suppl(_) => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
+            Op::DeleteArticleTitle { article }
+            | Op::ReplaceSupplNote { article, .. }
+            | Op::ReplaceInAmendment { article, .. } => Some(article),
             Op::TableEdit { table, .. } => match table {
                 TableRef::InArticle(at) => Some(&at.article),
                 TableRef::Appdx(_) => None,
@@ -654,6 +673,7 @@ impl Op {
                 | Op::ReplaceSentencePart { .. }
                 | Op::InsertContainersAfterArticle { .. }
                 | Op::InsertHeadingsBefore { .. }
+                | Op::SetContainerTitles { .. }
         )
     }
 
@@ -697,9 +717,9 @@ impl Op {
                 edit: CaptionEdit::Set(text),
                 ..
             } if text.is_empty() => *text = line.trim().to_string(),
-            Op::InsertContainersAfterArticle { text, .. } | Op::InsertHeadingsBefore { text, .. } => {
-                text.push(line)
-            }
+            Op::InsertContainersAfterArticle { text, .. }
+            | Op::InsertHeadingsBefore { text, .. }
+            | Op::SetContainerTitles { text, .. } => text.push(line),
             Op::TableEdit {
                 action:
                     TableAction::Replace { text }

@@ -362,10 +362,31 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                     )?;
                 }
             }
-            Op::ReplaceInContainer { path, from, to } => {
-                let c = container_mut(doc, path)?;
+            Op::ReplaceInContainer {
+                path,
+                except,
+                from,
+                to,
+            } => {
+                // 除く条（項・号の単位の除外はまだ当てない）
+                if except
+                    .iter()
+                    .any(|l| l.paragraph.is_some() || l.item.is_some())
+                {
+                    return Err(ApplyError::Unsupported(
+                        "（…を除く。）の項・号の単位の除外".into(),
+                    ));
+                }
+                let skip = |a: &ArticleNum| except.iter().any(|l| &l.article == a);
                 let mut n = 0;
-                fn go(ps: &mut [Provision], from: &str, to: &str, n: &mut usize) {
+                fn go(
+                    ps: &mut [Provision],
+                    from: &str,
+                    to: &str,
+                    n: &mut usize,
+                    skip: &dyn Fn(&ArticleNum) -> bool,
+                    protect: &[String],
+                ) {
                     for p in ps {
                         match p {
                             Provision::Container(c) => {
@@ -376,45 +397,65 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                                         *t = vec![Inline::Text(cur.replace(from, to))];
                                     }
                                 }
-                                go(&mut c.children, from, to, n);
+                                go(&mut c.children, from, to, n, skip, protect);
                             }
-                            Provision::Article(a) => {
-                                *n += replace_in_article_part(a, None, None, None, None, from, to, &[]);
+                            Provision::Article(a) if !skip(&a.num) => {
+                                *n += replace_in_article_part(a, None, None, None, None, from, to, protect);
                             }
                             _ => {}
                         }
                     }
                 }
-                go(&mut c.children, from, &mark(to), &mut n);
+                let list = children_mut(doc, path)?;
+                go(list, from, &mark(to), &mut n, &skip, &inserted);
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
-                        at: container_label(path),
+                        at: if path.is_empty() {
+                            "本則".into()
+                        } else {
+                            container_label(path)
+                        },
                         phrase: from.clone(),
                     });
                 }
                 inserted.push(to.clone());
             }
-            Op::ReplaceAllExcept { except, from, to } => {
+            Op::SetContainerTitles { paths, text } => {
+                let lines: Vec<&String> = text.iter().filter(|l| !l.trim().is_empty()).collect();
+                if lines.len() != paths.len() {
+                    return Err(ApplyError::BadContent(format!(
+                        "題名の行の数（{}）が容器の数（{}）と合わない",
+                        lines.len(),
+                        paths.len()
+                    )));
+                }
+                for (path, line) in paths.iter().zip(lines) {
+                    let c = container_mut(doc, path)?;
+                    c.title = Some(vec![Inline::Text(line.trim().to_string())]);
+                }
+            }
+            Op::DeleteArticleTitle { .. } => {
+                return Err(ApplyError::Unsupported("条名を削る（条を項に戻す）".into()))
+            }
+            Op::ReplaceSupplNote { article, from, to } => {
+                let art = article_mut(doc, article)?;
                 let mut n = 0;
-                for a in crate::numbering::article_nums(doc) {
-                    if except.iter().any(|l| l.paragraph.is_none() && l.item.is_none() && l.article == a) {
-                        continue;
+                for c in &mut art.children {
+                    if let ArticleChild::Raw(e) = c {
+                        if e.name == "SupplNote" {
+                            n += replace_text_in(e, from, to);
+                        }
                     }
-                    if except.iter().any(|l| l.article == a) {
-                        return Err(ApplyError::Unsupported(
-                            "本則（…を除く。）の項・号の単位の除外".into(),
-                        ));
-                    }
-                    let art = article_mut(doc, &a)?;
-                    n += replace_in_article_part(art, None, None, None, None, from, &mark(to), &inserted);
                 }
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
-                        at: "本則".into(),
+                        at: format!("{}の付記", article_label(article)),
                         phrase: from.clone(),
                     });
                 }
-                inserted.push(to.clone());
+            }
+            Op::ReplaceInAmendment { .. } => {
+                return Err(ApplyError::Unsupported("改正法の改正規定の中の字句".into()))
             }
             Op::InsertContainersAfterArticle { after, text } => {
                 let new = parse_containers(text)?;

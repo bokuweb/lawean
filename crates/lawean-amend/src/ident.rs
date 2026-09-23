@@ -1315,7 +1315,10 @@ impl Binder<'_> {
                 | Op::DeleteContainer { .. }
                 | Op::ShiftBranchArticles { .. }
                 | Op::ReplaceInContainer { .. }
-                | Op::ReplaceAllExcept { .. } => {
+                | Op::SetContainerTitles { .. }
+                | Op::DeleteArticleTitle { .. }
+                | Op::ReplaceSupplNote { .. }
+                | Op::ReplaceInAmendment { .. } => {
                     return Err(ApplyError::Unsupported(
                         "条の前後に容器を置く改正の id の対応".into(),
                     ))

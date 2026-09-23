@@ -182,17 +182,60 @@ fn segment(op: &Op, last: bool) -> String {
             },
             b = to_kanji(*base)
         ),
-        Op::ReplaceInContainer { path, from, to } if to.is_empty() => {
-            format!("{}中「{from}」を{}", path_label(path), end("削り", "削る"))
+        Op::ReplaceInContainer {
+            path,
+            except,
+            from,
+            to,
+        } => {
+            let scope = if path.is_empty() {
+                "本則".to_string()
+            } else {
+                path_label(path)
+            };
+            let ex = if except.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "（{}を除く。）",
+                    except.iter().map(loc_label).collect::<Vec<_>>().join("、")
+                )
+            };
+            if to.is_empty() {
+                format!("{scope}{ex}中「{from}」を{}", end("削り", "削る"))
+            } else {
+                format!("{scope}{ex}中「{from}」を「{to}」に{}", end("改め", "改める"))
+            }
         }
-        Op::ReplaceInContainer { path, from, to } => format!(
-            "{}中「{from}」を「{to}」に{}",
-            path_label(path),
+        Op::SetContainerTitles { paths, .. } => format!(
+            "{}を次のように{}",
+            paths
+                .iter()
+                .map(|p| format!(
+                    "{}の{}名",
+                    path_label(p),
+                    p.last().map(|(k, _)| kind_label(*k)).unwrap_or("")
+                ))
+                .collect::<Vec<_>>()
+                .join("及び"),
             end("改め", "改める")
         ),
-        Op::ReplaceAllExcept { except, from, to } => format!(
-            "本則（{}を除く。）中「{from}」を「{to}」に{}",
-            except.iter().map(loc_label).collect::<Vec<_>>().join("、"),
+        Op::DeleteArticleTitle { article } => {
+            format!("{}の条名を{}", article_label(article), end("削り", "削る"))
+        }
+        Op::ReplaceSupplNote { article, from, to } => format!(
+            "{}の付記中「{from}」を「{to}」に{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::ReplaceInAmendment {
+            article,
+            target,
+            from,
+            to,
+        } => format!(
+            "{}のうち、{target}中「{from}」を「{to}」に{}",
+            article_label(article),
             end("改め", "改める")
         ),
         Op::InsertHeadingsBefore {
@@ -813,7 +856,9 @@ fn content_of(op: &Op) -> &[String] {
             ..
         } => text,
         Op::Suppl(inner) => content_of(inner),
-        Op::InsertContainersAfterArticle { text, .. } | Op::InsertHeadingsBefore { text, .. } => text,
+        Op::InsertContainersAfterArticle { text, .. }
+        | Op::InsertHeadingsBefore { text, .. }
+        | Op::SetContainerTitles { text, .. } => text,
         _ => &[],
     }
 }
