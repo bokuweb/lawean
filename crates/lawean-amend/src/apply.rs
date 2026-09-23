@@ -328,6 +328,7 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                     CaptionEdit::Delete => p.caption = None,
                 }
             }
+            Op::DeleteToc => doc.toc = None,
             Op::InsertContainersAfterArticle { after, text } => {
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;

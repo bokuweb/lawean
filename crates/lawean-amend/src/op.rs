@@ -182,6 +182,8 @@ pub enum Op {
     SetTitle { text: Vec<String> },
     /// 「題名中「A」を「B」に改める」「題名中「A」の下に「B」を加える」（`to = A + B`）
     ReplaceTitle { from: String, to: String },
+    /// 「目次を削る」
+    DeleteToc,
     /// 「題名の次に次の目次を付する」+ 目次の行（「目次」「第一章　総則（第一条）」…「附則」）。目次の無い法律に目次を足す
     SetToc {
         text: Vec<String>,
@@ -368,6 +370,8 @@ pub enum Op {
     /// + 目次・章名の行: 条の前に容器の題名を置く（その条から次の題名までがその容器）。`before` が None なら本則の最初
     InsertHeadingsBefore {
         before: Option<ArticleNum>,
+        /// 「第三条の次に次の章名を付する」: 条の後ろ（次の条の前）
+        after: bool,
         with_toc: bool,
         text: Vec<String>,
     },
@@ -425,6 +429,7 @@ impl Op {
             | Op::RenumberAppdxRowSub { .. }
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
+            | Op::DeleteToc
             | Op::Suppl(_) => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::TableEdit { table, .. } => match table {

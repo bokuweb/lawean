@@ -163,14 +163,21 @@ fn segment(op: &Op, last: bool) -> String {
         Op::InsertContainersAfterArticle { after, .. } => {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }
+        Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
         Op::InsertHeadingsBefore {
             before,
+            after,
             with_toc,
             ..
         } => {
             let what = if *with_toc { "目次及び章名" } else { "章名" };
+            let side = if *after { "次" } else { "前" };
             match before {
-                Some(a) => format!("{}の前に次の{what}を{}", article_label(a), end("加え", "加える")),
+                Some(a) => format!(
+                    "{}の{side}に次の{what}を{}",
+                    article_label(a),
+                    end("加え", "加える")
+                ),
                 None => format!("題名の次に次の{what}を{}", end("付し", "付する")),
             }
         }
