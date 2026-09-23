@@ -36,6 +36,19 @@ impl Loc {
     }
 }
 
+/// 見出しの操作（項の見出しにも）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptionEdit {
+    /// 「見出し中「A」を「B」に改め」（削りは `to` が空、「の下に」は `to = A + B`）
+    Replace { from: String, to: String },
+    /// 「見出しを「（X）」に改め」「見出しを次のように改める」+「（X）」
+    Set(String),
+    /// 「見出しとして「（X）」を付する」
+    Attach(String),
+    /// 「見出しを削る」
+    Delete,
+}
+
 /// 表の在りか
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TableRef {
@@ -358,6 +371,8 @@ pub enum Op {
         with_toc: bool,
         text: Vec<String>,
     },
+    /// 「附則第十四項の見出し中「A」を「B」に改め」「附則第六項の前の見出しを削る」: 項の見出し
+    ParagraphCaption { at: Loc, edit: CaptionEdit },
     /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
     TableEdit {
         table: TableRef,
@@ -451,7 +466,8 @@ impl Op {
             | Op::AppendTable { at, .. }
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
-            | Op::InsertSubitemAfter { at, .. } => Some(&at.article),
+            | Op::InsertSubitemAfter { at, .. }
+            | Op::ParagraphCaption { at, .. } => Some(&at.article),
         }
     }
 
@@ -509,7 +525,8 @@ impl Op {
             | Op::AppendTable { at, .. }
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
-            | Op::InsertSubitemAfter { at, .. } => Some(at),
+            | Op::InsertSubitemAfter { at, .. }
+            | Op::ParagraphCaption { at, .. } => Some(at),
             Op::TableEdit {
                 table: TableRef::InArticle(at),
                 ..
@@ -549,6 +566,13 @@ impl Op {
         }
         // 「第二十四条の見出しを次のように改める」+「（見出し）」
         if let Op::SetCaption { text, .. } = self {
+            return text.is_empty();
+        }
+        if let Op::ParagraphCaption {
+            edit: CaptionEdit::Set(text),
+            ..
+        } = self
+        {
             return text.is_empty();
         }
         if let Op::TableEdit { action, .. } = self {
@@ -635,6 +659,10 @@ impl Op {
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             Op::Suppl(inner) => inner.push_content(line),
             Op::SetCaption { text, .. } if text.is_empty() => *text = line.trim().to_string(),
+            Op::ParagraphCaption {
+                edit: CaptionEdit::Set(text),
+                ..
+            } if text.is_empty() => *text = line.trim().to_string(),
             Op::InsertContainersAfterArticle { text, .. } | Op::InsertHeadingsBefore { text, .. } => {
                 text.push(line)
             }

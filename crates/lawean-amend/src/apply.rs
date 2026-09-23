@@ -307,6 +307,27 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 path,
                 action,
             } => table_edit_appdx(doc, t, path, action, &mut appdx_rows)?,
+            Op::ParagraphCaption { at, edit } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let p = paragraph_mut(art, idx);
+                match edit {
+                    CaptionEdit::Replace { from, to } => {
+                        let cur = p.caption.as_ref().map(|c| inline_text(c)).unwrap_or_default();
+                        if !cur.contains(from.as_str()) {
+                            return Err(ApplyError::PhraseNotFound {
+                                at: format!("{}の見出し", loc_name(at)),
+                                phrase: from.clone(),
+                            });
+                        }
+                        p.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
+                    }
+                    CaptionEdit::Set(t) | CaptionEdit::Attach(t) => {
+                        p.caption = Some(vec![Inline::Text(t.clone())]);
+                    }
+                    CaptionEdit::Delete => p.caption = None,
+                }
+            }
             Op::InsertContainersAfterArticle { after, text } => {
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;

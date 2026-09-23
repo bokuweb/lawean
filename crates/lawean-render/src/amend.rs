@@ -145,6 +145,21 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        Op::ParagraphCaption { at, edit } => match edit {
+            CaptionEdit::Replace { from, to } if to.is_empty() => {
+                format!("{}の見出し中「{from}」を{}", loc_label(at), end("削り", "削る"))
+            }
+            CaptionEdit::Replace { from, to } => format!(
+                "{}の見出し中「{from}」を「{to}」に{}",
+                loc_label(at),
+                end("改め", "改める")
+            ),
+            CaptionEdit::Set(t) => format!("{}の見出しを「{t}」に{}", loc_label(at), end("改め", "改める")),
+            CaptionEdit::Attach(t) => {
+                format!("{}の前に見出しとして「{t}」を{}", loc_label(at), end("付し", "付する"))
+            }
+            CaptionEdit::Delete => format!("{}の見出しを{}", loc_label(at), end("削り", "削る")),
+        },
         Op::InsertContainersAfterArticle { after, .. } => {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }

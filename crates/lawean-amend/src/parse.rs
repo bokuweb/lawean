@@ -228,6 +228,17 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         let is_item_line = line.split_once('\u{3000}').is_some_and(|(t, _)| {
             !t.is_empty() && t.chars().all(|c| "一二三四五六七八九十".contains(c))
         });
+        // 「〔次のよう略〕」: 衆議院の本文が内容を略した印。内容として受け、無ければ読み飛ばす
+        if line.starts_with('〔') && line.ends_with('〕') && line.contains('略') {
+            if let Some(op) = unit
+                .instructions
+                .last_mut()
+                .and_then(|ins| ins.ops.iter_mut().rev().find(|o| o.takes_content()))
+            {
+                op.push_content(line.to_string());
+            }
+            continue;
+        }
         // 内容を待つ操作の後は、字下げが改め文と同じでも、改め文の形でない行（「第四条　…」「２　…」）は内容
         let pending = unit
             .instructions
@@ -300,7 +311,7 @@ pub(crate) fn looks_like_instruction(line: &str) -> bool {
     static ARTICLE: OnceLock<Regex> = OnceLock::new();
     static END: OnceLock<Regex> = OnceLock::new();
     let head = HEAD.get_or_init(|| {
-        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名|この法律に|備考を|備考中)")
+        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名|この法律に|備考を|備考中|目録|[^「」、。第同]{1,40}?表(?:中|の|を))")
     });
     let article =
         ARTICLE.get_or_init(|| re(r"^第{N}(?:条|編|章|節|款|目)(?:の{N})*(?:（[^）]*）)?[　 ]"));
@@ -1005,6 +1016,13 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         let at = loc(&c["loc"], ante)?;
         // 行を言わない「第二十四条第一項の表中「A」を「B」に改める」は表の全部（row = ""）
         let row = c.name("row").map(|m| m.as_str().to_string()).unwrap_or_default();
+        // 続き（「「C」を「D」に」）と「同表」はこの表
+        let path = if row.is_empty() {
+            String::new()
+        } else {
+            format!("{row}の項")
+        };
+        ante.tedit = Some((TableRef::InArticle(at.clone()), path));
         let mk = |from: String, to: String| Op::ReplaceTableRow {
             at: at.clone(),
             row: row.clone(),
@@ -1124,6 +1142,10 @@ fn split_table_target(
             .trim_end_matches('中')
             .to_string()
     };
+    // 「同号を同表の第八号とし」「同号の前に次の三号を加える」: 直前の表の中の号
+    if target == "同号" {
+        return Ok(ante.tedit.clone());
+    }
     if let Some(r) = target.strip_prefix("同表") {
         let table = match (&ante.tedit, &ante.appdx) {
             (Some((t, _)), _) => t.clone(),
@@ -1179,6 +1201,36 @@ fn split_table_target(
         )));
     }
     Ok(None)
+}
+
+/// 「第百三十二条の前の見出し及び同条」「第六条及び同条の前の見出し」「附則第四項の前の見出し及び同項から附則第九項まで」:
+/// 条・項と一緒に見出しを削る・改める（見出しは内容の側にある）ので、位置は条・項だけにする
+fn without_caption_mention(l: &str) -> String {
+    static A: OnceLock<Regex> = OnceLock::new();
+    static B: OnceLock<Regex> = OnceLock::new();
+    let a = A.get_or_init(|| re(r"^(?P<x>.+?)の(?:前の)?見出し及び(?:同条|同項)(?P<rest>.*)$"));
+    let b = B.get_or_init(|| re(r"^(?P<x>.+?)及び同(?:条|項)の(?:前の)?見出し$"));
+    if let Some(c) = a.captures(l) {
+        return format!("{}{}", &c["x"], &c["rest"]);
+    }
+    if let Some(c) = b.captures(l) {
+        return c["x"].to_string();
+    }
+    l.to_string()
+}
+
+/// 見出しの操作。位置に項があれば項の見出し、無ければ条の見出し
+fn caption_op(l: Loc, edit: CaptionEdit) -> Op {
+    if l.paragraph.is_some() {
+        return Op::ParagraphCaption { at: l, edit };
+    }
+    let article = l.article;
+    match edit {
+        CaptionEdit::Replace { from, to } => Op::ReplaceCaption { article, from, to },
+        CaptionEdit::Set(text) => Op::SetCaption { article, text },
+        CaptionEdit::Attach(text) => Op::AttachCaption { article, text },
+        CaptionEdit::Delete => Op::DeleteCaption { article },
+    }
 }
 
 /// 「を削り」「を「B」に改め」「の下に「B」を加え」の尾を読み、字句ごとに `mk(字句, 置き換え後)` の操作にする
@@ -1509,17 +1561,17 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         [
             ("toc", r"^目次中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しは「中」の規則より先に（「第四十二条の見出し中「A」を「B」に改め」）
-            ("caption_replace", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_replace", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出し中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             // 見出しの中の字句の追加・削除: 「第九条の見出し中「A」の下に「B」を加え」「同条の見出し中「A」を削り」
-            ("caption_insert", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出し中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
-            ("caption_delete_phrase", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出し中「(?P<a>.+?)」を削(?:り|る)$"),
+            ("caption_insert", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出し中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
+            ("caption_delete_phrase", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出し中「(?P<a>.+?)」を削(?:り|る)$"),
             ("container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名中「(?P<a>.+?)」を(?:「(?P<b>.+?)」に(?:改め(?:る)?)?|削(?:り|る))$"),
-            ("caption_whole", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出しを次のように改め(?:る)?$"),
+            ("caption_whole", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出しを次のように改め(?:る)?$"),
             // 「第四十条の見出し、第一項及び第三項中「委員長」を「会長」に改め」: 見出しと項の両方
-            ("caption_and_phrase", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の見出し(?:及び|、)(?P<rest>[^「」]+?)中(?P<tail>「.+)$"),
-            ("caption_set", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出しを「(?P<a>.+?)」に(?:改め(?:る)?)?$"),
-            ("caption_attach", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の前に見出しとして「(?P<a>.+?)」を付(?:し|する)$"),
-            ("caption_delete", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の(?:前の)?見出しを削(?:り|る)$"),
+            ("caption_and_phrase", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出し(?:及び|、)(?P<rest>[^「」]+?)中(?P<tail>「.+)$"),
+            ("caption_set", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出しを「(?P<a>.+?)」に(?:改め(?:る)?)?$"),
+            ("caption_attach", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の前に見出しとして「(?P<a>.+?)」を付(?:し|する)$"),
+            ("caption_delete", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)の(?:前の)?見出しを削(?:り|る)$"),
             // 「改める」「加える」が付かない形は、同じ文の中で「、」で連なる列挙の途中（「A」を「B」に、「C」を「D」に改める）
             ("replace", r"^(?P<loc>.+?)中「(?P<a>.+?)」を「(?P<b>.+?)」に(?:改め(?:る)?)?$"),
             ("insert_phrase", r"^(?P<loc>.+?)中「(?P<a>.+?)」の下に「(?P<b>.+?)」を(?:加え(?:る)?)?$"),
@@ -1543,7 +1595,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("append_subitems", r"^(?P<loc>.+?号)に次のように加え(?:る)?$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             // 「同条を同条第二項とし」: 項番号の無い 1 項だけの条の本文を第二項に
-            ("renumber_whole_para", r"^(?P<loc>第{N}条(?:の{N})*|同条)を(?:同条)?第(?P<q>{N})項と(?:し|する)$"),
+            ("renumber_whole_para", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条|附則)を(?:同条|附則)?第(?P<q>{N})項と(?:し|する)$"),
             ("insert_para_first", r"^(?P<loc>第{N}条(?:の{N})*|同条)に第一項として次の一項を加え(?:る)?$"),
             // 「同条中第三項を第五項とし、第二項を第四項とし」の続き（条は直前のもの）
             ("renumber_para_cont", r"^第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
@@ -1562,7 +1614,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             // 「同条第三項を同条とする」: 残った 1 項を項番号の無い条の本文に（第一項に）
             ("para_to_article", r"^(?P<loc>.+?第{N}項|同項)を同条と(?:し|する)$"),
             // 「第二条に見出しとして「（X）」を加え」
-            ("caption_attach2", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)に見出しとして「(?P<a>.+?)」を(?:加え(?:る)?|附(?:し|する)|付(?:し|する))$"),
+            ("caption_attach2", r"^(?P<loc>(?:附則)?(?:第{N}条(?:の{N})*)?(?:第{N}項)?|同条|同項)に見出しとして「(?P<a>.+?)」を(?:加え(?:る)?|附(?:し|する)|付(?:し|する))$"),
             ("append_suppl_arts", r"^附則に次の(?:見出し及び)?{N}条を加え(?:る)?$"),
             ("append_table", r"^(?P<loc>.+?)に次の表を加え(?:る)?$"),
             ("delete_appdx", r"^(?P<list>別表(?:第[一二三四五六七八九十百千]+)?(?:(?:及び|、)別表(?:第[一二三四五六七八九十百千]+)?)*)を削(?:り|る)$"),
@@ -1588,7 +1640,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同編|同章|同節|同款)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             // 表の中の位置への操作（上の別表の行の規則に当たらないもの）: 位置は字面のまま
             ("append_appdx_as", r"^別表として次のように加え(?:る)?$"),
-            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する))$"),
+            ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する))$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
             ("set_title_quoted", r"^題名を「(?P<a>[^「」]+)」に改め(?:る)?$"),
             // 題名の無い古い法律に題名を付ける
@@ -1676,7 +1728,12 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             }
         }
         let mut matched = false;
+        // 直前の位置が表の中なら、「同号」はその表の号
+        let in_table = ante.tedit.is_some() && seg.starts_with("同号");
         for (name, r) in rules.iter() {
+            if in_table && *name != "table_edit" {
+                continue;
+            }
             let Some(c) = r.captures(seg) else { continue };
             matched = true;
             let g = |n: &str| {
@@ -1778,21 +1835,27 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         to: g("b"),
                     }
                 }
-                "caption_replace" => Op::ReplaceCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    from: g("a"),
-                    to: g("b"),
-                },
-                "caption_insert" => Op::ReplaceCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    from: g("a"),
-                    to: format!("{}{}", g("a"), g("b")),
-                },
-                "caption_delete_phrase" => Op::ReplaceCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    from: g("a"),
-                    to: String::new(),
-                },
+                "caption_replace" => caption_op(
+                    loc(&g("loc"), &mut ante)?,
+                    CaptionEdit::Replace {
+                        from: g("a"),
+                        to: g("b"),
+                    },
+                ),
+                "caption_insert" => caption_op(
+                    loc(&g("loc"), &mut ante)?,
+                    CaptionEdit::Replace {
+                        from: g("a"),
+                        to: format!("{}{}", g("a"), g("b")),
+                    },
+                ),
+                "caption_delete_phrase" => caption_op(
+                    loc(&g("loc"), &mut ante)?,
+                    CaptionEdit::Replace {
+                        from: g("a"),
+                        to: String::new(),
+                    },
+                ),
                 "containers_after_art" => Op::InsertContainersAfterArticle {
                     after: loc(&g("loc"), &mut ante)?.article,
                     text: Vec::new(),
@@ -1805,21 +1868,23 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     with_toc: !g("toc").is_empty(),
                     text: Vec::new(),
                 },
-                "caption_whole" => Op::SetCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    text: String::new(),
-                },
+                "caption_whole" => {
+                    caption_op(loc(&g("loc"), &mut ante)?, CaptionEdit::Set(String::new()))
+                }
                 "caption_and_phrase" => {
                     let l = loc(&g("loc"), &mut ante)?;
                     let tail = g("tail");
                     let Some((a, r)) = take_quoted(&tail) else {
                         return Err(ParseError::Unrecognized(seg.to_string()));
                     };
-                    let article = l.article.clone();
-                    let Some(caps) = phrase_tail(r, &[a], |from, to| Op::ReplaceCaption {
-                        article: article.clone(),
-                        from: from.clone(),
-                        to,
+                    let Some(caps) = phrase_tail(r, &[a], |from, to| {
+                        caption_op(
+                            l.clone(),
+                            CaptionEdit::Replace {
+                                from: from.clone(),
+                                to,
+                            },
+                        )
                     }) else {
                         return Err(ParseError::Unrecognized(seg.to_string()));
                     };
@@ -1837,17 +1902,11 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     }
                     last.clone()
                 }
-                "caption_set" => Op::SetCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    text: g("a"),
-                },
-                "caption_attach" => Op::AttachCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                    text: g("a"),
-                },
-                "caption_delete" => Op::DeleteCaption {
-                    article: loc(&g("loc"), &mut ante)?.article,
-                },
+                "caption_set" => caption_op(loc(&g("loc"), &mut ante)?, CaptionEdit::Set(g("a"))),
+                "caption_attach" => {
+                    caption_op(loc(&g("loc"), &mut ante)?, CaptionEdit::Attach(g("a")))
+                }
+                "caption_delete" => caption_op(loc(&g("loc"), &mut ante)?, CaptionEdit::Delete),
                 "replace" => Op::Replace {
                     at: loc(&g("loc"), &mut ante)?,
                     from: g("a"),
@@ -2336,11 +2395,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     }
                 }
                 "caption_attach2" => {
-                    let l = loc(&g("loc"), &mut ante)?;
-                    Op::AttachCaption {
-                        article: l.article,
-                        text: g("a"),
-                    }
+                    caption_op(loc(&g("loc"), &mut ante)?, CaptionEdit::Attach(g("a")))
                 }
                 "append_art" => Op::AppendArticle {
                     path: container_path(&g("path")),
@@ -2576,7 +2631,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                 }
                 "replace_whole" => {
                     // 「第九条第二項及び第三項を次のように改める」: 位置の列挙は最初の項に付け、内容の番号で各項に当てる
-                    let l = g("loc");
+                    let l = without_caption_mention(&g("loc"));
                     let l = match l.split_once("及び") {
                         Some((first, _)) if l.contains('項') && !l.ends_with('号') => {
                             first.to_string()
@@ -2695,7 +2750,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     }
                 }
                 "delete" => {
-                    let mut l = g("loc");
+                    let mut l = without_caption_mention(&g("loc"));
                     // 別表の行の中の細目（「別表第一の一一の二の項中ハを削り」「同表の…の項中ハを削り」）
                     static APPDX_SUB_DEL: OnceLock<Regex> = OnceLock::new();
                     let appdx_sub_del = APPDX_SUB_DEL.get_or_init(|| {
