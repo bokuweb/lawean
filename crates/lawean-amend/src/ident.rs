@@ -1314,6 +1314,7 @@ impl Binder<'_> {
                 | Op::InsertHeadingsBefore { .. }
                 | Op::DeleteContainer { .. }
                 | Op::ShiftBranchArticles { .. }
+                | Op::ShiftContainers { .. }
                 | Op::ReplaceInContainer { .. }
                 | Op::SetContainerTitles { .. }
                 | Op::DeleteArticleTitle { .. }

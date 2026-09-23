@@ -334,6 +334,33 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 return Err(ApplyError::Unsupported("附則の項を条にする".into()))
             }
             Op::DeleteContainer { path } => delete_container(doc, path)?,
+            Op::ShiftContainers {
+                path,
+                kind,
+                from,
+                to,
+                by,
+            } => {
+                let mut nums: Vec<u32> = children_mut(doc, path)?
+                    .iter()
+                    .filter_map(|p| match p {
+                        Provision::Container(c) if c.kind == *kind => {
+                            c.num.as_deref().and_then(|n| n.parse::<u32>().ok())
+                        }
+                        _ => None,
+                    })
+                    .filter(|n| n >= from && n <= to)
+                    .collect();
+                nums.sort();
+                if *by > 0 {
+                    nums.reverse();
+                }
+                for n in nums {
+                    let mut p = path.clone();
+                    p.push((*kind, n.to_string()));
+                    renumber_container(doc, &p, &((n as i32 + by) as u32).to_string())?;
+                }
+            }
             Op::ShiftBranchArticles {
                 base,
                 from,

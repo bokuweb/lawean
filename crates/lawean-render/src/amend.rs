@@ -172,6 +172,34 @@ fn segment(op: &Op, last: bool) -> String {
             end("し", "する")
         ),
         Op::DeleteContainer { path } => format!("{}を{}", path_label(path), end("削り", "削る")),
+        Op::ShiftContainers {
+            path,
+            kind,
+            from,
+            to,
+            by,
+        } => {
+            let unit = kind_label(*kind);
+            let range = if *to == u32::MAX {
+                format!("第{}{unit}以下", to_kanji(*from))
+            } else {
+                format!("第{}{unit}から第{}{unit}まで", to_kanji(*from), to_kanji(*to))
+            };
+            let pre = if path.is_empty() {
+                String::new()
+            } else {
+                format!("{}中", path_label(path))
+            };
+            format!(
+                "{pre}{range}を{}{unit}ずつ繰り{}",
+                to_kanji(by.unsigned_abs()),
+                if *by > 0 {
+                    end("下げ", "下げる")
+                } else {
+                    end("上げ", "上げる")
+                }
+            )
+        }
         Op::ShiftBranchArticles {
             base,
             from,

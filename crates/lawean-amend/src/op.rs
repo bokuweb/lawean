@@ -194,6 +194,14 @@ pub enum Op {
     DeleteContainer {
         path: Vec<(lawean_source::ContainerKind, String)>,
     },
+    /// 「第六章を第七章とし、以下順次一章ずつ繰り下げ」: 容器（`path` の中の `kind`）の番号の範囲を `by` 動かす
+    ShiftContainers {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        kind: lawean_source::ContainerKind,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
     /// 「第十三条の十一から第十三条の十五までを一条ずつ繰り下げ」: 枝番の条の範囲の枝番を `by` 動かす
     ShiftBranchArticles {
         base: u32,
@@ -479,6 +487,7 @@ impl Op {
             | Op::ParagraphToArticle { .. }
             | Op::DeleteContainer { .. }
             | Op::ShiftBranchArticles { .. }
+            | Op::ShiftContainers { .. }
             | Op::ReplaceInContainer { .. }
             | Op::SetContainerTitles { .. }
             | Op::Suppl(_) => None,
