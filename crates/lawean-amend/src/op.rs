@@ -667,6 +667,53 @@ impl Op {
         }
     }
 
+    /// 字句（置換の前後・加える字句・表の中の位置…）に `f` を当てる（字句の中で伏せた「」を戻すのに使う）
+    pub fn map_strings(&mut self, f: &dyn Fn(&str) -> String) {
+        let m = |x: &mut String| *x = f(x);
+        match self {
+            Op::ReplaceToc { from, to }
+            | Op::ReplaceAll { from, to }
+            | Op::Replace { from, to, .. }
+            | Op::ReplaceTitle { from, to }
+            | Op::ReplaceCaption { from, to, .. }
+            | Op::ReplaceContainerTitle { from, to, .. }
+            | Op::ReplaceSupplNote { from, to, .. }
+            | Op::ReplaceInContainer { from, to, .. }
+            | Op::ReplaceAppdxRow { from, to, .. }
+            | Op::ReplaceInAmendment { from, to, .. } => {
+                m(from);
+                m(to);
+            }
+            Op::ReplaceTableRow { row, from, to, .. } => {
+                m(row);
+                m(from);
+                m(to);
+            }
+            Op::InsertAfterPhrase { anchor, text, .. } => {
+                m(anchor);
+                m(text);
+            }
+            Op::ParagraphCaption {
+                edit: CaptionEdit::Replace { from, to },
+                ..
+            } => {
+                m(from);
+                m(to);
+            }
+            Op::TableEdit { path, action, .. } => {
+                m(path);
+                if let TableAction::Phrase { from, to } = action {
+                    m(from);
+                    m(to);
+                }
+            }
+            Op::AmendmentEdit { target, .. } => m(target),
+            Op::SetCaption { text, .. } | Op::AttachCaption { text, .. } => m(text),
+            Op::Suppl(inner) => inner.map_strings(f),
+            _ => {}
+        }
+    }
+
     /// 原始附則に向けた操作（`suppl`）を `Op::Suppl` に包む。附則を自分で扱う操作（字句の置換・条の追加・条ずれ）はそのまま
     pub fn in_suppl(mut self, suppl: bool) -> Op {
         let suppl = match self.loc_mut() {

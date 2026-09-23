@@ -1885,11 +1885,14 @@ fn split_table_target(
             .to_string()
     };
     // 「同号を同表の第八号とし」「同号の前に次の三号を加える」: 直前の表の中の号
-    if target == "同号" || target == "その" {
+    if (target == "同号" || target == "その") && ante.tedit.is_some() {
         return Ok(ante.tedit.clone());
     }
     // 「同号（二）イ」: 直前の表の号の中。「同欄」: 直前の表の欄
-    if target.starts_with("同号") || target.starts_with("同欄") {
+    if (target.starts_with("同号") || target.starts_with("同欄"))
+        && ante.tedit.is_some()
+        && !has_article_table(target)
+    {
         return Ok(ante.tedit.clone().map(|(t, _)| (t, target.to_string())));
     }
     // 「同項の次に次のように加える」「同項第六号中」: 直前の表の行（の中）
@@ -2611,21 +2614,110 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
 
 /// 前の文の位置を引き継いで読む（古い改め文は文をまたいで「同条第二項中…」と書く）
 fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, ParseError> {
-    // 字句に「」が入って切れ目がずれる文は、動詞の後の「、」で切り直して読む
+    // 字句に「」が入って切れ目がずれる文は、動詞の後の「、」で切り直して読む。
+    // それでも読めなければ、字句の閉じ括弧を後ろに続く語（「を「」「に改め」…）で決め、字句の中の「」を伏せて読む
     let saved = ante_in.clone();
-    match parse_instruction_split(line, ante_in, false) {
-        Ok(v) => Ok(v),
-        Err(e) => {
-            let mut retry = saved;
-            match parse_instruction_split(line, &mut retry, true) {
-                Ok(v) => {
-                    *ante_in = retry;
-                    Ok(v)
+    let first = match parse_instruction_split(line, ante_in, false) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    let mut retry = saved.clone();
+    if let Ok(v) = parse_instruction_split(line, &mut retry, true) {
+        *ante_in = retry;
+        return Ok(v);
+    }
+    let masked = mask_inner_quotes(&normalize_instruction(line));
+    if masked.contains([MASK_O, MASK_C]) {
+        for strict in [false, true] {
+            let mut retry = saved.clone();
+            if let Ok(mut v) = parse_instruction_split(&masked, &mut retry, strict) {
+                for op in &mut v {
+                    op.map_strings(&unmask);
                 }
-                Err(_) => Err(e),
+                *ante_in = retry;
+                return Ok(v);
             }
         }
     }
+    Err(first)
+}
+
+/// 字句の中の「」を伏せる字（私用領域）
+const MASK_O: char = '\u{E030}';
+const MASK_C: char = '\u{E031}';
+
+fn unmask(s: &str) -> String {
+    s.replace(MASK_O, "「").replace(MASK_C, "」")
+}
+
+/// 字句（「」で囲んだ部分）の閉じ括弧を、後ろに続く語で決める。字句の中の「」は伏せる。
+/// 「「附則第五条第二項」と」を「…」: 最初の「」」の後は「と」なので字句の中、次の「」」の後が「を「」なので閉じ
+fn mask_inner_quotes(line: &str) -> String {
+    const FOLLOW: [&str; 18] = [
+        "を「",
+        "を削",
+        "を加",
+        "を、",
+        "に改",
+        "に、",
+        "の下に「",
+        "の上に「",
+        "の次に「",
+        "、「",
+        "及び「",
+        "並びに「",
+        "とあるのは「",
+        "と、「",
+        "中「",
+        "を同",
+        "が",
+        "とする",
+    ];
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    // 字句の外で「中「」「を「」などの後に開く「を字句の始まりとする
+    while i < chars.len() {
+        let c = chars[i];
+        if c != '「' {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // 閉じ括弧の候補: 後ろが続きの語（または文の終わり「に。」「を。」…）
+        let mut close = None;
+        for j in i + 1..chars.len() {
+            if chars[j] != '」' {
+                continue;
+            }
+            let after: String = chars[j + 1..chars.len().min(j + 8)].iter().collect();
+            let end = after == ""
+                || after == "。"
+                || after.starts_with("に。")
+                || after.starts_with("を。")
+                || after.starts_with("に") && chars.len() - j <= 3;
+            if FOLLOW.iter().any(|f| after.starts_with(f)) || end {
+                close = Some(j);
+                break;
+            }
+        }
+        let Some(j) = close else {
+            out.push(c);
+            i += 1;
+            continue;
+        };
+        out.push('「');
+        for &x in &chars[i + 1..j] {
+            out.push(match x {
+                '「' => MASK_O,
+                '」' => MASK_C,
+                x => x,
+            });
+        }
+        out.push('」');
+        i = j + 1;
+    }
+    out
 }
 
 fn parse_instruction_split(
