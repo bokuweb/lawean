@@ -579,6 +579,9 @@ pub fn parse_scope_locs(scope: &str) -> Result<Vec<Loc>, ParseError> {
     Ok(out)
 }
 
+/// 外側から辿った容器（章・節…と番号）
+type ContainerPath = Vec<(lawean_source::ContainerKind, String)>;
+
 #[derive(Clone)]
 struct Ante {
     article: Option<ArticleNum>,
@@ -607,7 +610,7 @@ struct Ante {
     /// 直前の位置が表の中（「別表第四表名称の欄中「A」を「B」に、「C」を「D」に改め」の続き、「同表」）
     tedit: Option<(TableRef, String)>,
     /// 直前の字句の操作の範囲（「第三章（第四十九条を除く。）中「A」を「B」に、「C」を「D」に改める」の続き）
-    scope: Option<(Vec<(lawean_source::ContainerKind, String)>, Vec<Loc>)>,
+    scope: Option<(ContainerPath, Vec<Loc>)>,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
