@@ -698,6 +698,41 @@ pub(crate) fn article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,
 ) -> Result<&'a mut Article, ApplyError> {
+    // 「第一項中」: 条の無い本則（項だけ）。項を仮の条（第0条）に束ねて扱う（出力では項に戻す）
+    if matches!(num, ArticleNum::Single { base: 0, .. })
+        && doc
+            .main_provision
+            .iter()
+            .any(|p| matches!(p, Provision::Paragraph(_)))
+    {
+        let pos = doc
+            .main_provision
+            .iter()
+            .position(|p| matches!(p, Provision::Paragraph(_)))
+            .unwrap();
+        let paras: Vec<Paragraph> = doc
+            .main_provision
+            .iter()
+            .filter_map(|p| match p {
+                Provision::Paragraph(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect();
+        doc.main_provision
+            .retain(|p| !matches!(p, Provision::Paragraph(_)));
+        let stable_id = paras[0].stable_id.clone();
+        doc.main_provision.insert(
+            pos,
+            Provision::Article(Article {
+                stable_id,
+                num: num.clone(),
+                caption: None,
+                title: None,
+                children: paras.into_iter().map(ArticleChild::Paragraph).collect(),
+                attrs: Vec::new(),
+            }),
+        );
+    }
     find_article(&mut doc.main_provision, num)
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
 }

@@ -559,6 +559,19 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     let r = LOC.get_or_init(|| {
         re(r"^(附則)?(?:(第{N}条(?:の{N})*)|同条)?(?:第({N})項|(同項))?(?:第({N}号(?:の{N})*)|(同号))?([イロハニホヘトチリヌルヲワカヨタレソツネナラム])?(?:各号)?(ただし書|各号列記以外の部分|本文|前段|後段)?$")
     });
+    // 「本則第二項」: 条の無い本則の項
+    let s = match s.strip_prefix("本則") {
+        Some(r) if r.starts_with('第') && !r.contains('条') => r,
+        _ => s,
+    };
+    // 「第十四条第三項中第五号」「同条中第二項」: 位置の中の位置
+    let joined;
+    let s = if !r.is_match(s) && s.contains("中第") {
+        joined = s.replacen("中第", "第", 1);
+        joined.as_str()
+    } else {
+        s
+    };
     let Some(c) = r.captures(s) else {
         return Err(ParseError::Unrecognized(s.to_string()));
     };
@@ -580,6 +593,16 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             ante.article = Some(n.clone());
             ante.toc = false;
             ante.suppl = true;
+            n
+        }
+        // 「第一項中」「本則第二項中」で先行する条が無い: 条の無い本則（項だけ）。仮の条（第0条）
+        None if c.get(3).is_some() && ante.article.is_none() && !ante.suppl => {
+            let n = ArticleNum::Single {
+                base: 0,
+                branch: vec![],
+            };
+            ante.article = Some(n.clone());
+            ante.toc = false;
             n
         }
         None => ante
@@ -1383,6 +1406,9 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("renumber_sub", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*|同条第{N}項第{N}号(?:の{N})*)?(?P<a>[{K}])を(?:同号)?(?P<b>[{K}])と(?:し|する)$"),
             ("shift_sub", r"^(?P<loc>.+?中|同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>[{K}])から(?P<b>[{K}])までを(?P<c>[{K}])から(?P<d>[{K}])までと(?:し|する)$"),
             ("insert_sub_after", r"^(?P<loc>同号|第{N}条(?:の{N})*(?:第{N}項)?第{N}号(?:の{N})*|同項第{N}号(?:の{N})*)?(?P<a>[{K}])の次に次のように加え(?:る)?$"),
+            // 「第二項の次に第三項として次の一項を加える」「同条に第二項として次の一項を加える」「第七号として次の一号を加える」
+            // 「同項に第一号及び第二号として次のように加える」: 加えた後の番号を言う形
+            ("add_as", r"^(?P<loc>.*?)(?:の(?P<side>次|前)に|に)?第(?P<n>{N})(?P<u>項|号)(?P<nb>(?:の{N})*)(?:(?:及び|、|乃至|から)第{N}(?:項|号)(?:の{N})*(?:まで)?)*として次の(?:{N}(?:項|号)を|ように)加え(?:る)?$"),
             ("insert_item_after", r"^(?P<loc>.+?)の(?P<side>次|前)に次の{N}号を加え(?:る)?$"),
             ("append_item", r"^(?P<loc>.+?)に次の(?:{N}号|各号)を加え(?:る)?$"),
             ("insert_item_first", r"^(?P<loc>.+?)に第一号として次の{N}号を加え(?:る)?$"),
@@ -1779,6 +1805,76 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         from: num("p"),
                         to: num("q"),
                         by: if g("dir") == "下げ" { k } else { -k },
+                    }
+                }
+                "add_as" => {
+                    let l = if g("loc").is_empty() {
+                        ante_loc(&ante, seg)?
+                    } else {
+                        loc(&g("loc"), &mut ante)?
+                    };
+                    let n = num("n");
+                    let branched = !g("nb").is_empty();
+                    if g("u") == "号" {
+                        let at = Loc {
+                            item: None,
+                            ..l.clone()
+                        };
+                        let after = match g("side").as_str() {
+                            "次" => l.item.clone(),
+                            "前" => {
+                                let before = l
+                                    .item
+                                    .clone()
+                                    .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?;
+                                ops.push(
+                                    Op::InsertItemBefore {
+                                        at,
+                                        before,
+                                        text: Vec::new(),
+                                    }
+                                    .in_suppl(ante.suppl),
+                                );
+                                break;
+                            }
+                            _ if branched => Some(n.to_string()),
+                            _ if n > 1 => Some((n - 1).to_string()),
+                            _ => None,
+                        };
+                        match after {
+                            Some(after) => Op::InsertItemAfter {
+                                at,
+                                after,
+                                text: Vec::new(),
+                            },
+                            None => Op::InsertItemFirst {
+                                at,
+                                text: Vec::new(),
+                            },
+                        }
+                    } else {
+                        let after = match g("side").as_str() {
+                            "次" => l.paragraph.clone(),
+                            "前" => match l.paragraph.clone() {
+                                Some(ParaRef::Num(p)) if p > 1 => Some(ParaRef::Num(p - 1)),
+                                Some(_) => None,
+                                None => return Err(ParseError::NoAntecedent(seg.to_string())),
+                            },
+                            _ if branched => Some(ParaRef::Num(n)),
+                            _ if n > 1 => Some(ParaRef::Num(n - 1)),
+                            _ => None,
+                        };
+                        match after {
+                            Some(after) => Op::InsertParagraphAfter {
+                                article: l.article,
+                                after,
+                                text: Vec::new(),
+                            },
+                            None => Op::InsertParagraphFirst {
+                                article: l.article,
+                                text: Vec::new(),
+                            },
+                        }
                     }
                 }
                 "insert_item_after" => {
