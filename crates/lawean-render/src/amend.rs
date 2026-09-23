@@ -21,13 +21,14 @@ pub fn article_label(n: &ArticleNum) -> String {
     }
 }
 
-fn part_label(p: SentencePart) -> &'static str {
+fn part_label(p: SentencePart) -> String {
     match p {
-        SentencePart::Front => "前段",
-        SentencePart::Back => "後段",
-        SentencePart::Proviso => "ただし書",
-        SentencePart::Main => "本文",
-        SentencePart::Chapeau => "各号列記以外の部分",
+        SentencePart::Front => "前段".into(),
+        SentencePart::Back => "後段".into(),
+        SentencePart::Proviso => "ただし書".into(),
+        SentencePart::Main => "本文".into(),
+        SentencePart::Chapeau => "各号列記以外の部分".into(),
+        SentencePart::Nth(n) => format!("第{}段", to_kanji(n)),
     }
 }
 
@@ -112,7 +113,7 @@ fn loc_label(l: &Loc) -> String {
         s.push_str(k);
     }
     if let Some(p) = l.part {
-        s.push_str(part_label(p));
+        s.push_str(&part_label(p));
     }
     s
 }

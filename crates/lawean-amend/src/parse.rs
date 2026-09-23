@@ -700,7 +700,13 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
             pending.push('、');
             continue;
         }
+        // 「第一号ニ、ホ、ヘ(11)及びチ中」の「ホ」: 細目だけの断片も位置
+        static SUB_ONLY: OnceLock<Regex> = OnceLock::new();
+        let sub_only = SUB_ONLY
+            .get_or_init(|| re(r"^[{K}](?:[（(][^）)「」、]{1,6}[）)])*(?:$|及び|から|並びに)"));
         let loc_only = (seg.starts_with('第')
+            || (!pending.is_empty() || merged.last().is_some_and(|m| !m.ends_with(['し', 'る', 'め', 'え', 'り', 'げ'])))
+                && sub_only.is_match(&seg)
             || seg == "目次"
             || seg.starts_with('同')
             || seg.starts_with("附則")
@@ -1267,6 +1273,29 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     });
     let s = s.strip_suffix('中').unwrap_or(s);
     let s = s.strip_suffix("の規定").unwrap_or(s);
+    // 「第四条第二項第四段」: 項の N 番目の文
+    static NTH: OnceLock<Regex> = OnceLock::new();
+    let nth = NTH.get_or_init(|| re(r"^(?P<l>.+?項)第(?P<n>{N})段$"));
+    if let Some(c) = nth.captures(s) {
+        let n = kanji_to_u32(&c["n"]).unwrap_or(0);
+        let mut l = loc(&c["l"], ante)?;
+        l.part = Some(SentencePart::Nth(n));
+        ante.part = l.part;
+        return Ok(l);
+    }
+    // 「第九条第一項甲類第九号」: 甲類・乙類に分けた号（家事審判法）。号の番号に類を冠する
+    for class in ["甲類", "乙類"] {
+        if let Some(i) = s.find(&format!("{class}第")) {
+            let plain = format!("{}{}", &s[..i], &s[i + class.len()..]);
+            let mut l = loc(&plain, ante)?;
+            if let Some(it) = l.item.take() {
+                let it = format!("{class}{it}");
+                ante.item = Some(it.clone());
+                l.item = Some(it);
+            }
+            return Ok(l);
+        }
+    }
     // 「第五章中第三十五条」: 容器の中の条（条の番号は法律で一意なので容器は先行詞にだけ）
     static CPRE: OnceLock<Regex> = OnceLock::new();
     let cpre =
@@ -1401,6 +1430,8 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             Some(it)
         }
         None if c.get(6).is_some() => ante.item.clone(),
+        // 「第一号イ、ロ(11)及びハ」の「ハ」: 細目だけなら直前の号の中
+        None if (1..=6).all(|i| c.get(i).is_none()) && c.get(7).is_some() => ante.item.clone(),
         None => {
             if c.get(2).is_some() || c.get(3).is_some() {
                 ante.item = None;
@@ -5938,9 +5969,17 @@ fn parse_instruction_split(
                             at: loc(&base, &mut ante)?,
                             part,
                         },
-                        None => Op::Delete {
-                            at: loc(&l, &mut ante)?,
-                        },
+                        None => {
+                            let at = loc(&l, &mut ante)?;
+                            // 「第四条第二項第四段を削る」: 項の文の一つ
+                            match at.part {
+                                Some(part @ SentencePart::Nth(_)) => Op::DeleteSentencePart {
+                                    at: Loc { part: None, ..at },
+                                    part,
+                                },
+                                _ => Op::Delete { at },
+                            }
+                        }
                     }
                 }
                 "insert_arts_after" => {

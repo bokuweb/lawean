@@ -513,6 +513,8 @@ pub enum SentencePart {
     Main,
     /// 各号列記以外の部分（項の文。号を除く）
     Chapeau,
+    /// 「第四段」: 項の N 番目の文（ただし書を除いて数える）
+    Nth(u32),
 }
 
 impl Op {

@@ -1916,6 +1916,11 @@ pub(crate) fn replace_in_article_part(
                     .position(|s| s.function == SentenceFunction::Proviso)
                     .into_iter()
                     .collect(),
+                SentencePart::Nth(n) => mains
+                    .get((n as usize).saturating_sub(1))
+                    .copied()
+                    .into_iter()
+                    .collect(),
             };
             for k in targets {
                 n += replace_in_sentence(ss[k], from, to, protect);
@@ -3878,6 +3883,7 @@ pub(crate) fn sentence_part_index(p: &Paragraph, part: SentencePart) -> Option<u
     match part {
         SentencePart::Front | SentencePart::Main | SentencePart::Chapeau => mains.first().copied(),
         SentencePart::Back => mains.get(1).copied().or_else(|| mains.last().copied()),
+        SentencePart::Nth(n) => mains.get((n as usize).saturating_sub(1)).copied(),
         SentencePart::Proviso => p
             .sentences
             .iter()
