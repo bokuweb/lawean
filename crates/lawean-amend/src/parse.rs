@@ -104,11 +104,15 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     let mut joined: Vec<String> = Vec::new();
     for l in text.lines() {
         match joined.last_mut() {
+            // 「目次中「A」」の行の次が「を「B」に改める。」: 字句の後で切れた改め文
             Some(prev)
-                if prev.ends_with('、')
+                if (prev.ends_with('、')
+                    || prev.ends_with('」')
+                        && l.trim_start_matches(['\u{3000}', ' '])
+                            .starts_with(['を', 'に', '及', '並']))
                     && prev
                         .trim_start_matches(['\u{3000}', ' '])
-                        .starts_with(['第', '同', '附', '別', '「']) =>
+                        .starts_with(['第', '同', '附', '別', '「', '目', '題', '本']) =>
             {
                 prev.push_str(l.trim_start_matches(['\u{3000}', ' ']));
             }
@@ -296,6 +300,26 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         }
         let Some(unit) = units.last_mut() else {
             return Err(ParseError::NoHeader);
+        };
+        // 「(1)　第八十七条を次のように改める。」: 番号を振った改め文
+        static NUMBERED: OnceLock<Regex> = OnceLock::new();
+        let numbered =
+            NUMBERED.get_or_init(|| re(r"^[(（][０-９0-9一二三四五六七八九十]+[)）][　 ]+"));
+        let unnumbered;
+        let line = match numbered.find(line) {
+            Some(m) if looks_like_instruction(&line[m.end()..]) => {
+                unnumbered = line[m.end()..].to_string();
+                unnumbered.as_str()
+            }
+            _ => line,
+        };
+        // 句点の落ちた改め文（「第三百十条第一項中「本款」を「本節」に改める」）
+        let with_period;
+        let line = if !line.ends_with('。') && looks_like_instruction(&format!("{line}。")) {
+            with_period = format!("{line}。");
+            with_period.as_str()
+        } else {
+            line
         };
         // 古い改め文は位置の前に法律名を冠する（「会計法目次中「A」を「B」に改める」「地方自治法第二条中…」）
         let line = match line.strip_prefix(unit.target_title.as_str()) {

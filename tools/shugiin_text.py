@@ -97,12 +97,24 @@ class P(HTMLParser):
 
 
 def merge_blocks(lines):
-    """「…」だけの行を、前の行（…を／…に／…中）と次の行（に改める。／を…）につなぐ"""
+    """「…」だけの行を、前の行（…を／…に／…中）と次の行（に改める。／を…）につなぐ。
+    表で組んだ字句の間の「及び」「並びに」だけの行も前後とつなぐ"""
     out = []
     i = 0
     while i < len(lines):
         l = lines[i]
-        if l.startswith("「") and l.endswith("」") and out and re.search(r"(を|に|中|、)$", out[-1]):
+        # 「…」」の後の「及び」「並びに」だけの行: 前の行につなぎ、次の「…」も続ける
+        if out and out[-1].endswith("」") and l.strip("　 ") in ("及び", "並びに", "、"):
+            out[-1] += l.strip("　 ")
+            i += 1
+            if i < len(lines) and lines[i].startswith("「"):
+                out[-1] += lines[i]
+                i += 1
+                if i < len(lines) and re.match(r"^　?(に|を|、|と|及び)", lines[i]):
+                    out[-1] += lines[i].strip("　")
+                    i += 1
+            continue
+        if l.startswith("「") and l.endswith("」") and out and re.search(r"(を|に|中|、|及び|並びに)$", out[-1]):
             out[-1] += l
             # 次の行が続き（字下げ 1 の「に改める。」「を「…」に改める。」）なら同じ行に
             j = i + 1
