@@ -35,6 +35,10 @@ class P(HTMLParser):
             self.cell.append(t)
             return
         if t.strip("　 \n\r\t"):
+            # 閉じない「 の表の後に本文が来た: 続きの表ではなかったので、ためた行はそのまま出す
+            if self.pending_rows and not self.in_table:
+                self.lines.extend(self.table_lines(self.pending_rows))
+                self.pending_rows = []
             self.lines.append(t.rstrip())
 
     def handle_starttag(self, tag, attrs):
@@ -84,7 +88,7 @@ class P(HTMLParser):
             self.table_rows = []
             # 「 が閉じないまま表が終わる（行ごとに表を分けて組んだ「 」）: 」の表まで続けて 1 つの字句に
             ws = "\u3000 \xa0\n\r\t"
-            cells = [c.strip(ws) for r in rows for c in r]
+            cells = [c.strip(ws).replace("｢", "「").replace("｣", "」") for r in rows for c in r]
             if cells.count("「") > cells.count("」"):
                 self.pending_rows = rows
                 return
@@ -100,7 +104,7 @@ class P(HTMLParser):
     def table_lines(rows):
         """rowspan の「 」の表なら 1 行の「…」に。それ以外（読替え表など）は欄ごとに 1 行（lawean-amend は表の欄を行で受け取る）"""
         ws = "\u3000 \xa0\n\r\t"
-        cells = [c.strip(ws) for r in rows for c in r]
+        cells = [c.strip(ws).replace("｢", "「").replace("｣", "」") for r in rows for c in r]
         opens = [c for c in cells if c == "「"]
         closes = [c for c in cells if c == "」"]
         body = [c for c in cells if c not in ("「", "」", "")]
@@ -129,13 +133,17 @@ def merge_blocks(lines):
             continue
         if l.startswith("「") and l.endswith("」") and out and re.search(r"(を|に|中|、|及び|並びに)$", out[-1]):
             out[-1] += l
-            # 次の行が続き（字下げ 1 の「に改める。」「を「…」に改める。」）なら同じ行に
+            # 次の行が続き（字下げ 1 の「に改める。」「を」+「…」の表 +「に改める。」）なら同じ行に。
+            # つなぎの語と「…」の行が交互に続く間つなぐ
             j = i + 1
-            while j < len(lines) and lines[j].startswith("「") and lines[j].endswith("」"):
-                out[-1] += lines[j]
-                j += 1
-            if j < len(lines) and re.match(r"^　?(に|を|、|と)", lines[j]):
-                out[-1] += lines[j].strip("　")
+            while j < len(lines):
+                nxt = lines[j]
+                if nxt.startswith("「") and nxt.endswith("」") and re.search(r"(を|に|中|、|及び|並びに|」)$", out[-1]):
+                    out[-1] += nxt
+                elif re.match(r"^　?(に|を|、|と|及び|並びに)", nxt) and out[-1].endswith("」"):
+                    out[-1] += nxt.strip("　")
+                else:
+                    break
                 j += 1
             i = j
             continue
