@@ -249,7 +249,8 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             })
     };
     static AMENDING_CHAPTER: OnceLock<Regex> = OnceLock::new();
-    let amending_chapter = AMENDING_CHAPTER.get_or_init(|| re(r"^第{N}(?:編|章|節)　[^（）]+$"));
+    let amending_chapter =
+        AMENDING_CHAPTER.get_or_init(|| re(r"^第{N}(?:編|章|節|款|目)　[^（）]+$"));
     // 単独の一部改正法（「X法（…）の一部を次のように改正する。」だけで条の見出しが無い）は、改め文が 1 字下げ・
     // 加える条文が字下げ無し（整備法より 1 段浅い）。その形の見出しの後は字下げを 1 段深く読む
     static SINGLE: OnceLock<Regex> = OnceLock::new();
@@ -259,6 +260,9 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     let mut unit_ante = Ante::empty();
     // 字下げの無いページ（古い制定法律）: 改め文か追加する条文かを行の書き出しで見分ける
     let mut flat = false;
+    // 単位の見出し（「第N条　X法の一部を次のように改正する。」）の字下げ。字下げ無しのページで、
+    // 条を加える改め文の内容として字下げして書いた「第二十四条　Y法の一部を次のように改正する。」は内容
+    let mut header_raw_indent: Option<usize> = None;
     let next_indent_of = |li: usize| -> Option<usize> {
         lines[li + 1..]
             .iter()
@@ -288,10 +292,23 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         {
             break;
         }
-        if line.is_empty()
-            || line.starts_with('（') && indent == 0
-            || caption.is_match(line)
-            || any_caption(li)
+        let raw_indent = indent - shift;
+        let awaiting_content = header_raw_indent == Some(0)
+            && raw_indent >= 1
+            && units
+                .last()
+                .and_then(|u| u.instructions.last())
+                .and_then(|i| i.ops.last())
+                .is_some_and(Op::takes_content);
+        // 内容の中の見出し・単位の見出しの形の行（字下げした「（Y法の一部改正）」「第二十四条　Y法の一部を…」）
+        let nested = awaiting_content
+            && (caption.is_match(line) && next_indent_of(li) == Some(1)
+                || header.is_match(line) && raw_indent == 1);
+        if !nested
+            && (line.is_empty()
+                || line.starts_with('（') && indent == 0
+                || caption.is_match(line)
+                || any_caption(li))
         {
             continue;
         }
@@ -350,9 +367,10 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
                 continue;
             }
         }
-        if let Some(c) = header.captures(line) {
+        if let Some(c) = header.captures(line).filter(|_| !nested) {
             list = None;
             last_art = c[1].to_string();
+            header_raw_indent = Some(raw_indent);
             unit_ante = Ante::empty();
             // 改め文は 2 字下げ。ページによって 1 字（字下げを 1 段深く読む）、字下げ無し（書き出しで見分ける）
             let next_indent = next_indent_of(li).unwrap_or(2);

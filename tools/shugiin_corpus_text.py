@@ -5,7 +5,7 @@
 
 出力: <cache>/txt/<14 桁>.txt（HTML と変換（shugiin_text.py）と誤記表より新しければ作り直さない）
 
-衆議院のページの誤記は tools/shugiin_errata.tsv（ページの 14 桁、誤、正、注[、回数]）で直してから平文にする。
+衆議院のページの誤記は tools/shugiin_errata.tsv（ページの 14 桁、誤、正、注[、回数[、範囲の始め、範囲の終わり]]）で直してから平文にする。
 行をまたぐ字句は「\\n」で改行を書く。誤の字句はそのページにちょうど「回数」（省けば 1）回現れなければならない（違えば止める）
 """
 import os
@@ -32,7 +32,10 @@ for ln in open(errata_path, encoding="utf-8"):
     # 行をまたぐ誤記は「\\n」で改行を書く
     lid, wrong, right = (c.replace("\\n", "\n") for c in cols[:3])
     times = int(cols[4]) if len(cols) > 4 and cols[4] else 1
-    errata.setdefault(lid, []).append((wrong, right, times))
+    # 範囲（省けば全体）: 始めの字句の最初の出現から、その後の終わりの字句の最初の出現まで
+    start = cols[5] if len(cols) > 5 else ""
+    end = cols[6] if len(cols) > 6 else ""
+    errata.setdefault(lid, []).append((wrong, right, times, start, end))
 n = 0
 for f in sorted(os.listdir(src)):
     if not f.endswith(".htm"):
@@ -45,11 +48,15 @@ for f in sorted(os.listdir(src)):
     except Exception as e:  # noqa: BLE001
         print(f"skip {f}: {e}")
         continue
-    for wrong, right, times in errata.get(f[:-4], []):
-        k = text.count(wrong)
+    for wrong, right, times, start, end in errata.get(f[:-4], []):
+        lo = text.find(start) if start else 0
+        hi = text.find(end, lo) if end else len(text)
+        if lo < 0 or hi < 0:
+            sys.exit(f"errata {f[:-4]}: 範囲「{start}」〜「{end}」が無い")
+        k = text[lo:hi].count(wrong)
         if k != times:
             sys.exit(f"errata {f[:-4]}: 「{wrong}」が {k} 回（{times} 回でなければならない）")
-        text = text.replace(wrong, right)
+        text = text[:lo] + text[lo:hi].replace(wrong, right) + text[hi:]
     with open(out, "w") as fh:
         fh.write(text)
     n += 1
