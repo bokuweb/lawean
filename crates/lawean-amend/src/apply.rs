@@ -307,6 +307,26 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 path,
                 action,
             } => table_edit_appdx(doc, t, path, action, &mut appdx_rows)?,
+            Op::TableEdit {
+                table: TableRef::Preamble,
+                path,
+                action,
+            } => match (path.as_str(), action, doc.preamble.as_mut()) {
+                ("", TableAction::Phrase { from, to }, Some(p)) => {
+                    if replace_text_in(p, from, to) == 0 {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: "前文".into(),
+                            phrase: from.clone(),
+                        });
+                    }
+                }
+                _ => return Err(ApplyError::Unsupported(format!("前文{path}"))),
+            },
+            Op::ReplacePairs { scope, .. } => {
+                return Err(ApplyError::Unsupported(format!(
+                    "{scope}中の表の上欄の字句を下欄の字句に改める"
+                )))
+            }
             Op::ParagraphCaption { at, edit } => {
                 let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);

@@ -56,6 +56,8 @@ pub enum TableRef {
     Appdx(String),
     /// 条・項の中の表（「第十三条第一項の表」）
     InArticle(Loc),
+    /// 前文（「前文のうち第五項中」）。表ではないが字面の位置で改める
+    Preamble,
 }
 
 /// 表の中の位置への操作
@@ -435,6 +437,8 @@ pub enum Op {
         subs: Vec<String>,
         text: Option<Vec<String>>,
     },
+    /// 「第N条中次の表の上欄に掲げる字句を同表の下欄に掲げる字句に改める」+ 字句の対の表。`scope` は位置の字面
+    ReplacePairs { scope: String, text: Vec<String> },
     /// 「附則第十四項の見出し中「A」を「B」に改め」「附則第六項の前の見出しを削る」: 項の見出し
     ParagraphCaption { at: Loc, edit: CaptionEdit },
     /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
@@ -490,6 +494,7 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::ReplacePairs { .. }
             | Op::DeleteTitle
             | Op::ParagraphToArticle { .. }
             | Op::DeleteContainer { .. }
@@ -504,7 +509,7 @@ impl Op {
             | Op::ReplaceInAmendment { article, .. } => Some(article),
             Op::TableEdit { table, .. } => match table {
                 TableRef::InArticle(at) => Some(&at.article),
-                TableRef::Appdx(_) => None,
+                TableRef::Appdx(_) | TableRef::Preamble => None,
             },
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
@@ -648,6 +653,9 @@ impl Op {
         if let Op::SubitemsEdit { text, .. } = self {
             return text.is_some();
         }
+        if let Op::ReplacePairs { .. } = self {
+            return true;
+        }
         if let Op::ParagraphCaption {
             edit: CaptionEdit::Set(text),
             ..
@@ -742,7 +750,8 @@ impl Op {
             Op::SetCaption { text, .. } if text.is_empty() => *text = line.trim().to_string(),
             Op::SubitemsEdit {
                 text: Some(text), ..
-            } => text.push(line),
+            }
+            | Op::ReplacePairs { text, .. } => text.push(line),
             Op::ParagraphCaption {
                 edit: CaptionEdit::Set(text),
                 ..

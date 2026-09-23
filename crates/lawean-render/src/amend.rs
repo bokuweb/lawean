@@ -164,6 +164,10 @@ fn segment(op: &Op, last: bool) -> String {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::ReplacePairs { scope, .. } => format!(
+            "{scope}中次の表の上欄に掲げる字句を同表の下欄に掲げる字句に{}",
+            end("改め", "改める")
+        ),
         Op::SubitemsEdit { at, subs, text } => format!(
             "{}{}を{}",
             loc_label(at),
@@ -307,6 +311,7 @@ fn segment(op: &Op, last: bool) -> String {
             let t = match table {
                 TableRef::Appdx(t) => t.clone(),
                 TableRef::InArticle(at) => format!("{}の表", loc_label(at)),
+                TableRef::Preamble => "前文".to_string(),
             };
             let p = path.clone();
             match action {
@@ -902,7 +907,8 @@ fn content_of(op: &Op) -> &[String] {
         Op::Suppl(inner) => content_of(inner),
         Op::SubitemsEdit {
             text: Some(text), ..
-        } => text,
+        }
+        | Op::ReplacePairs { text, .. } => text,
         Op::InsertContainersAfterArticle { text, .. }
         | Op::InsertHeadingsBefore { text, .. }
         | Op::SetContainerTitles { text, .. } => text,
