@@ -1024,6 +1024,56 @@ fn distribute_list(seg: &str) -> Option<Vec<String>> {
     ok.then(|| pieces.iter().map(|p| format!("{p}{tail}")).collect())
 }
 
+/// 改正規定の中（`ante.amend`）の位置の改め: 「同改正規定中同条の表…の項の次に次のように加える」
+/// 「同項中第四号を第五号とし」「第三号の次に次の一号を加える」「同条第二項に係る部分を次のように改める」
+fn amend_inner_edit(seg: &str, ante: &mut Ante) -> Option<Op> {
+    let base = ante.amend.clone()?;
+    if seg.contains('「') {
+        return None;
+    }
+    static EDIT: OnceLock<Regex> = OnceLock::new();
+    let edit = EDIT.get_or_init(|| {
+        re(r"^(?P<t>[^「」]+?)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+?を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に次の[^「」]+?を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する))$")
+    });
+    let c = edit.captures(seg)?;
+    let t = &c["t"];
+    let head = base.split("のうち").next().unwrap_or(&base).to_string();
+    let target = if let Some(r) = t.strip_prefix("同改正規定") {
+        format!("{head}{r}")
+    } else if t.starts_with('同')
+        || t.starts_with('第') && !t.contains('条')
+        || t.chars()
+            .next()
+            .is_some_and(|c| KANA.contains(c) || c == '(' || c == '（')
+    {
+        format!("{head}のうち{t}")
+    } else {
+        return None;
+    };
+    let act = &c["act"];
+    let action = if act.starts_with("を次のように改め") {
+        TableAction::Replace { text: Vec::new() }
+    } else if act.starts_with("を削") {
+        TableAction::Delete
+    } else if c
+        .name("side")
+        .or(c.name("side2"))
+        .is_some_and(|m| m.as_str() == "次")
+    {
+        TableAction::InsertAfter { text: Vec::new() }
+    } else if c.name("side").or(c.name("side2")).is_some() {
+        TableAction::InsertBefore { text: Vec::new() }
+    } else if act.starts_with('に') {
+        TableAction::Append { text: Vec::new() }
+    } else {
+        TableAction::Renumber {
+            to: c["to"].to_string(),
+        }
+    };
+    ante.amend = Some(base);
+    Some(Op::AmendmentEdit { target, action })
+}
+
 /// 位置の列挙から「（…を除く。）」を外す。除く位置は、その前の位置（列挙の区切りから）と組にして返す
 fn strip_exceptions(l: &str) -> (String, Vec<(String, String)>) {
     static EX: OnceLock<Regex> = OnceLock::new();
@@ -3249,6 +3299,8 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
     let to_end = TO.get_or_init(|| {
         Regex::new(r"^(?:に改め(?:、|る?(?:。|$))|に(?:、|。|$)|を加え(?:、|る?(?:。|$))|を(?:、|。|$)|と、「|と(?:、|。|$))").unwrap()
     });
+    // 改正規定を改める文（字句に改め文を含む）
+    let amend = line.contains("改正規定");
     fn go(
         chars: &[char],
         i: usize,
@@ -3257,6 +3309,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         limit: usize,
         from_end: &Regex,
         to_end: &Regex,
+        amend: bool,
     ) {
         if out.len() >= limit {
             return;
@@ -3293,9 +3346,9 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
             if !pat.is_match(&after) {
                 continue;
             }
-            // 次の改正文まで呑み込む読み方は採らない
+            // 次の改正文まで呑み込む読み方は採らない（改正規定を改める文の字句は改め文を含む）
             let inner: String = chars[k + 1..j].iter().collect();
-            if next_instr().is_match(&inner) {
+            if !amend && next_instr().is_match(&inner) {
                 continue;
             }
             any = true;
@@ -3309,7 +3362,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
                 });
             }
             acc.push('」');
-            go(chars, j + 1, acc, out, limit, from_end, to_end);
+            go(chars, j + 1, acc, out, limit, from_end, to_end, amend);
             acc.truncate(l2);
             if out.len() >= limit {
                 break;
@@ -3318,7 +3371,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         if !any {
             // 閉じ方が決まらない「は字句の外の字として残す
             acc.push('「');
-            go(chars, k + 1, acc, out, limit, from_end, to_end);
+            go(chars, k + 1, acc, out, limit, from_end, to_end, amend);
         }
         acc.truncate(len);
     }
@@ -3332,6 +3385,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         limit,
         from_end,
         to_end,
+        amend,
     );
     out
 }
@@ -3680,8 +3734,15 @@ fn parse_instruction_split(
             }
             _ => (seg, false),
         };
+        // 改正規定の中の位置の改め（「同改正規定中同条第六項第一号ニを同号ホとし」「同項中第四号を第五号とし」）:
+        // 位置は字面のまま、改正規定の改めとして
+        if let Some(op) = amend_inner_edit(seg, &mut ante) {
+            ops.push(op);
+            continue;
+        }
         // 直前の位置が表の中なら、「同号」はその表の号
-        let in_table = ante.tedit.is_some()
+        let in_table = !seg.contains("改正規定")
+            && ante.tedit.is_some()
             && (seg.starts_with("同号")
                 || seg.starts_with("その次")
                 || seg.starts_with("同欄")
@@ -3700,7 +3761,9 @@ fn parse_instruction_split(
         // 別表・同表の中の位置（「同表中第十号を第十一号とし」「別表第一第一号の次に次の一号を加える」）は表の規則だけで読む
         let pre_quote = seg.split('「').next().unwrap_or("");
         // 条の中の表（「第一条の表中Xの項の次に次のように加える」）は表の規則だけで読む（別表の行の規則は別表のもの）
-        let article_table_seg = has_article_table(pre_quote);
+        // 「…改正規定を削る」: 改正法の改正規定（中に表の位置を言っても表の改め文でない）
+        let amend_seg = pre_quote.contains("改正規定");
+        let article_table_seg = has_article_table(pre_quote) && !amend_seg;
         let table_seg = seg.starts_with("同表")
             || seg.starts_with("別表")
             || seg.starts_with("附則別表")
