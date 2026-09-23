@@ -428,6 +428,13 @@ pub enum Op {
         with_toc: bool,
         text: Vec<String>,
     },
+    /// 「同号イからニまでを次のように改める」「同号イ及びロを削る」: 号（`at` の item）の下のイロハの列挙。
+    /// `text` が None なら削る
+    SubitemsEdit {
+        at: Loc,
+        subs: Vec<String>,
+        text: Option<Vec<String>>,
+    },
     /// 「附則第十四項の見出し中「A」を「B」に改め」「附則第六項の前の見出しを削る」: 項の見出し
     ParagraphCaption { at: Loc, edit: CaptionEdit },
     /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
@@ -535,6 +542,7 @@ impl Op {
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. }
+            | Op::SubitemsEdit { at, .. }
             | Op::ParagraphCaption { at, .. } => Some(&at.article),
         }
     }
@@ -594,6 +602,7 @@ impl Op {
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. }
+            | Op::SubitemsEdit { at, .. }
             | Op::ParagraphCaption { at, .. } => Some(at),
             Op::TableEdit {
                 table: TableRef::InArticle(at),
@@ -635,6 +644,9 @@ impl Op {
         // 「第二十四条の見出しを次のように改める」+「（見出し）」
         if let Op::SetCaption { text, .. } = self {
             return text.is_empty();
+        }
+        if let Op::SubitemsEdit { text, .. } = self {
+            return text.is_some();
         }
         if let Op::ParagraphCaption {
             edit: CaptionEdit::Set(text),
@@ -728,6 +740,9 @@ impl Op {
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             Op::Suppl(inner) => inner.push_content(line),
             Op::SetCaption { text, .. } if text.is_empty() => *text = line.trim().to_string(),
+            Op::SubitemsEdit {
+                text: Some(text), ..
+            } => text.push(line),
             Op::ParagraphCaption {
                 edit: CaptionEdit::Set(text),
                 ..

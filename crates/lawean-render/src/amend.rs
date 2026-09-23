@@ -164,6 +164,15 @@ fn segment(op: &Op, last: bool) -> String {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::SubitemsEdit { at, subs, text } => format!(
+            "{}{}を{}",
+            loc_label(at),
+            subs.join("及び"),
+            match text {
+                Some(_) => format!("次のように{}", end("改め", "改める")),
+                None => end("削り", "削る"),
+            }
+        ),
         Op::DeleteTitle => format!("題名を{}", end("削り", "削る")),
         Op::ParagraphToArticle { from, to } => format!(
             "附則第{}項を附則{}と{}",
@@ -891,6 +900,9 @@ fn content_of(op: &Op) -> &[String] {
             ..
         } => text,
         Op::Suppl(inner) => content_of(inner),
+        Op::SubitemsEdit {
+            text: Some(text), ..
+        } => text,
         Op::InsertContainersAfterArticle { text, .. }
         | Op::InsertHeadingsBefore { text, .. }
         | Op::SetContainerTitles { text, .. } => text,
