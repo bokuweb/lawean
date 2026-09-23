@@ -1419,7 +1419,9 @@ impl Binder<'_> {
                     }
                 }
                 // 題名は本文ではない
-                Op::ReplaceTitle { from, to } => crate::apply::replace_title(&mut self.doc, from, to)?,
+                Op::ReplaceTitle { from, to } => {
+                    crate::apply::replace_title(&mut self.doc, from, to)?
+                }
                 Op::SetTitle { text } => {
                     let t = text.join("").trim().to_string();
                     self.doc.title = Some(LawTitle {

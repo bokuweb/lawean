@@ -46,7 +46,10 @@ pub fn apply_unit(
 }
 
 /// 1 文の中の項番号は文の始まりの番号（改正前）で解釈する
-pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), ApplyError> {
+pub(crate) fn apply_instruction(
+    doc: &mut LegalDocument,
+    ins: &Instruction,
+) -> Result<(), ApplyError> {
     // 条ごとに、文の始まりの項ラベル
     let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
     // この文で加えた字句（後の置換はその中を指さない）
@@ -333,7 +336,11 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 let p = paragraph_mut(art, idx);
                 match edit {
                     CaptionEdit::Replace { from, to } => {
-                        let cur = p.caption.as_ref().map(|c| inline_text(c)).unwrap_or_default();
+                        let cur = p
+                            .caption
+                            .as_ref()
+                            .map(|c| inline_text(c))
+                            .unwrap_or_default();
                         if !cur.contains(from.as_str()) {
                             return Err(ApplyError::PhraseNotFound {
                                 at: format!("{}の見出し", loc_name(at)),
@@ -350,7 +357,9 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
             }
             Op::DeleteToc => doc.toc = None,
             Op::SubitemsEdit { .. } => {
-                return Err(ApplyError::Unsupported("号の下のイロハの列挙の改め・削り".into()))
+                return Err(ApplyError::Unsupported(
+                    "号の下のイロハの列挙の改め・削り".into(),
+                ))
             }
             Op::DeleteTitle => doc.title = None,
             Op::ParagraphToArticle { .. } => {
@@ -384,12 +393,7 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                     renumber_container(doc, &p, &((n as i32 + by) as u32).to_string())?;
                 }
             }
-            Op::ShiftBranchArticles {
-                base,
-                from,
-                to,
-                by,
-            } => {
+            Op::ShiftBranchArticles { base, from, to, by } => {
                 let mut nums: Vec<ArticleNum> = crate::numbering::article_nums(doc)
                     .into_iter()
                     .filter(|n| {
@@ -454,7 +458,9 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                                 go(&mut c.children, from, to, n, skip, protect);
                             }
                             Provision::Article(a) if !skip(&a.num) => {
-                                *n += replace_in_article_part(a, None, None, None, None, from, to, protect);
+                                *n += replace_in_article_part(
+                                    a, None, None, None, None, from, to, protect,
+                                );
                             }
                             _ => {}
                         }
@@ -1099,7 +1105,10 @@ pub(crate) fn delete_container(
     let before = list.len();
     list.retain(|p| !matches!(p, Provision::Container(c) if c.kind == *kind && c.num.as_deref() == Some(num.as_str())));
     if list.len() == before {
-        return Err(ApplyError::BadContent(format!("{}が無い", container_label(path))));
+        return Err(ApplyError::BadContent(format!(
+            "{}が無い",
+            container_label(path)
+        )));
     }
     Ok(())
 }
@@ -1170,7 +1179,9 @@ pub(crate) fn table_edit_appdx(
     appdx_rows: &mut BTreeMap<(String, String), usize>,
 ) -> Result<(), ApplyError> {
     let unsupported = || ApplyError::Unsupported(format!("{table}{path}"));
-    let row = path.strip_suffix("の項").filter(|r| !r.contains("及び") && !r.contains('、'));
+    let row = path
+        .strip_suffix("の項")
+        .filter(|r| !r.contains("及び") && !r.contains('、'));
     match action {
         TableAction::Phrase { from, to } if path.is_empty() => {
             let ap = appdx_mut(doc, table)?;
@@ -1242,7 +1253,9 @@ pub(crate) fn table_edit_in_paragraph(
     protect: &[String],
 ) -> Result<(), ApplyError> {
     let unsupported = || ApplyError::Unsupported(format!("表{path}"));
-    let row = path.strip_suffix("の項").filter(|r| !r.contains("及び") && !r.contains('、'));
+    let row = path
+        .strip_suffix("の項")
+        .filter(|r| !r.contains("及び") && !r.contains('、'));
     match action {
         TableAction::Phrase { from, to } if path.is_empty() => {
             replace_table_row(p, "", from, to, protect)
@@ -1255,7 +1268,9 @@ pub(crate) fn table_edit_in_paragraph(
             let rows = table_rows_of(path).ok_or_else(unsupported)?;
             fn remove(e: &mut Element, key: &str) -> bool {
                 let before = e.children.len();
-                e.children.retain(|c| !matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key));
+                e.children.retain(
+                    |c| !matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key),
+                );
                 if e.children.len() != before {
                     return true;
                 }
@@ -1281,7 +1296,11 @@ pub(crate) fn table_edit_in_paragraph(
 }
 
 /// 「題名中「A」を「B」に改める」
-pub(crate) fn replace_title(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
+pub(crate) fn replace_title(
+    doc: &mut LegalDocument,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
     let cur = doc
         .title
         .as_ref()
@@ -1293,7 +1312,11 @@ pub(crate) fn replace_title(doc: &mut LegalDocument, from: &str, to: &str) -> Re
             phrase: from.to_string(),
         });
     }
-    let attrs = doc.title.as_ref().map(|x| x.attrs.clone()).unwrap_or_default();
+    let attrs = doc
+        .title
+        .as_ref()
+        .map(|x| x.attrs.clone())
+        .unwrap_or_default();
     doc.title = Some(LawTitle {
         text: vec![Inline::Text(cur.replace(from, to))],
         attrs,
@@ -3333,7 +3356,10 @@ pub(crate) fn replace_table_row(
     }
     // 行を言わない「第二十四条第一項の表中「A」を「B」に改める」: 表の全部の行
     if key.is_empty() {
-        let n: usize = all.into_iter().map(|r| replace_in(r, from, to, protect)).sum();
+        let n: usize = all
+            .into_iter()
+            .map(|r| replace_in(r, from, to, protect))
+            .sum();
         if n == 0 {
             return Err(ApplyError::PhraseNotFound {
                 at: "表".into(),

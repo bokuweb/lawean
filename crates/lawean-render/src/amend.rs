@@ -147,21 +147,37 @@ fn segment(op: &Op, last: bool) -> String {
     match op {
         Op::ParagraphCaption { at, edit } => match edit {
             CaptionEdit::Replace { from, to } if to.is_empty() => {
-                format!("{}の見出し中「{from}」を{}", loc_label(at), end("削り", "削る"))
+                format!(
+                    "{}の見出し中「{from}」を{}",
+                    loc_label(at),
+                    end("削り", "削る")
+                )
             }
             CaptionEdit::Replace { from, to } => format!(
                 "{}の見出し中「{from}」を「{to}」に{}",
                 loc_label(at),
                 end("改め", "改める")
             ),
-            CaptionEdit::Set(t) => format!("{}の見出しを「{t}」に{}", loc_label(at), end("改め", "改める")),
+            CaptionEdit::Set(t) => format!(
+                "{}の見出しを「{t}」に{}",
+                loc_label(at),
+                end("改め", "改める")
+            ),
             CaptionEdit::Attach(t) => {
-                format!("{}の前に見出しとして「{t}」を{}", loc_label(at), end("付し", "付する"))
+                format!(
+                    "{}の前に見出しとして「{t}」を{}",
+                    loc_label(at),
+                    end("付し", "付する")
+                )
             }
             CaptionEdit::Delete => format!("{}の見出しを{}", loc_label(at), end("削り", "削る")),
         },
         Op::InsertContainersAfterArticle { after, .. } => {
-            format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
+            format!(
+                "{}の次に次のように{}",
+                article_label(after),
+                end("加え", "加える")
+            )
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
         Op::ReplacePairs { scope, .. } => format!(
@@ -196,7 +212,11 @@ fn segment(op: &Op, last: bool) -> String {
             let range = if *to == u32::MAX {
                 format!("第{}{unit}以下", to_kanji(*from))
             } else {
-                format!("第{}{unit}から第{}{unit}まで", to_kanji(*from), to_kanji(*to))
+                format!(
+                    "第{}{unit}から第{}{unit}まで",
+                    to_kanji(*from),
+                    to_kanji(*to)
+                )
             };
             let pre = if path.is_empty() {
                 String::new()
@@ -213,12 +233,7 @@ fn segment(op: &Op, last: bool) -> String {
                 }
             )
         }
-        Op::ShiftBranchArticles {
-            base,
-            from,
-            to,
-            by,
-        } => format!(
+        Op::ShiftBranchArticles { base, from, to, by } => format!(
             "第{b}条の{}から第{b}条の{}までを{}条ずつ繰り{}",
             to_kanji(*from),
             to_kanji(*to),
@@ -252,7 +267,10 @@ fn segment(op: &Op, last: bool) -> String {
             if to.is_empty() {
                 format!("{scope}{ex}中「{from}」を{}", end("削り", "削る"))
             } else {
-                format!("{scope}{ex}中「{from}」を「{to}」に{}", end("改め", "改める"))
+                format!(
+                    "{scope}{ex}中「{from}」を「{to}」に{}",
+                    end("改め", "改める")
+                )
             }
         }
         Op::SetContainerTitles { paths, .. } => format!(
@@ -292,7 +310,11 @@ fn segment(op: &Op, last: bool) -> String {
             with_toc,
             ..
         } => {
-            let what = if *with_toc { "目次及び章名" } else { "章名" };
+            let what = if *with_toc {
+                "目次及び章名"
+            } else {
+                "章名"
+            };
             let side = if *after { "次" } else { "前" };
             match before {
                 Some(a) => format!(
@@ -319,7 +341,11 @@ fn segment(op: &Op, last: bool) -> String {
                     format!("{t}{}中「{from}」を{}", sep(&p), end("削り", "削る"))
                 }
                 TableAction::Phrase { from, to } => {
-                    format!("{t}{}中「{from}」を「{to}」に{}", sep(&p), end("改め", "改める"))
+                    format!(
+                        "{t}{}中「{from}」を「{to}」に{}",
+                        sep(&p),
+                        end("改め", "改める")
+                    )
                 }
                 TableAction::Replace { .. } => {
                     format!("{t}{}を次のように{}", sep(&p), end("改め", "改める"))
