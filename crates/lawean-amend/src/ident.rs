@@ -1332,6 +1332,7 @@ impl Binder<'_> {
                 Op::TableEdit { .. }
                 | Op::ParagraphCaption { .. }
                 | Op::DeleteToc
+                | Op::SetTitleAndToc { .. }
                 | Op::DeleteTitle
                 | Op::ParagraphToArticle { .. } => {
                     let one = Instruction {

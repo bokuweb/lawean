@@ -397,6 +397,24 @@ pub(crate) fn apply_instruction(
                 }
             }
             Op::DeleteToc => doc.toc = None,
+            Op::SetTitleAndToc { text } => {
+                // 最初の行が題名、「目次」の行から後が目次
+                let at = text
+                    .iter()
+                    .position(|l| l.trim() == "目次")
+                    .ok_or_else(|| ApplyError::BadContent("目次の行が無い".into()))?;
+                let title: String = text[..at].join("").trim().to_string();
+                let attrs = doc
+                    .title
+                    .as_ref()
+                    .map(|x| x.attrs.clone())
+                    .unwrap_or_default();
+                doc.title = Some(LawTitle {
+                    text: vec![Inline::Text(title)],
+                    attrs,
+                });
+                set_toc(doc, &text[at..]);
+            }
             Op::SubitemsEdit { .. } => {
                 return Err(ApplyError::Unsupported(
                     "号の下のイロハの列挙の改め・削り".into(),

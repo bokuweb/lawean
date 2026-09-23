@@ -188,6 +188,8 @@ pub enum Op {
     ReplaceTitle { from: String, to: String },
     /// 「目次を削る」
     DeleteToc,
+    /// 「題名及び目次を次のように改める」+ 題名の行と目次の行
+    SetTitleAndToc { text: Vec<String> },
     /// 「題名を削る」
     DeleteTitle,
     /// 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則の項を条に（原始附則）
@@ -507,6 +509,7 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::SetTitleAndToc { .. }
             | Op::ReplacePairs { .. }
             | Op::DeleteTitle
             | Op::ParagraphToArticle { .. }
@@ -669,7 +672,8 @@ impl Op {
         if let Op::SubitemsEdit { text, .. } = self {
             return text.is_some();
         }
-        if let Op::ReplacePairs { .. } | Op::SetSupplNote { .. } = self {
+        if let Op::ReplacePairs { .. } | Op::SetSupplNote { .. } | Op::SetTitleAndToc { .. } = self
+        {
             return true;
         }
         if let Op::ParagraphCaption {
@@ -768,7 +772,8 @@ impl Op {
                 text: Some(text), ..
             }
             | Op::ReplacePairs { text, .. }
-            | Op::SetSupplNote { text, .. } => text.push(line),
+            | Op::SetSupplNote { text, .. }
+            | Op::SetTitleAndToc { text } => text.push(line),
             Op::ParagraphCaption {
                 edit: CaptionEdit::Set(text),
                 ..

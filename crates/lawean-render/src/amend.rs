@@ -180,6 +180,7 @@ fn segment(op: &Op, last: bool) -> String {
             )
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::SetTitleAndToc { .. } => format!("題名及び目次を次のように{}", end("改め", "改める")),
         Op::SetSupplNote { article, .. } => format!(
             "{}の付記を次のように{}",
             article_label(article),
@@ -959,7 +960,8 @@ fn content_of(op: &Op) -> &[String] {
             text: Some(text), ..
         }
         | Op::ReplacePairs { text, .. }
-        | Op::SetSupplNote { text, .. } => text,
+        | Op::SetSupplNote { text, .. }
+        | Op::SetTitleAndToc { text } => text,
         Op::InsertContainersAfterArticle { text, .. }
         | Op::InsertHeadingsBefore { text, .. }
         | Op::SetContainerTitles { text, .. } => text,

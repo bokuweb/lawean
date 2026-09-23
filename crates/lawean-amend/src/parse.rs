@@ -455,7 +455,7 @@ pub(crate) fn looks_like_instruction(line: &str) -> bool {
     static ARTICLE: OnceLock<Regex> = OnceLock::new();
     static END: OnceLock<Regex> = OnceLock::new();
     let head = HEAD.get_or_init(|| {
-        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名|この法律に|備考を|備考中|目録|[^「」、。第同]{1,40}?表(?:中|の|を))")
+        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名|この法律に|備考を|備考中|目録|[^「」、。第同こ　 ]{1,40}?表(?:中|を))")
     });
     let article =
         ARTICLE.get_or_init(|| re(r"^第{N}(?:条|編|章|節|款|目)(?:の{N})*(?:（[^）]*）)?[　 ]"));
@@ -567,6 +567,17 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
             let (a, b) = (c["a"].to_string(), c["b"].to_string());
             let la = loc(&a, ante)?;
             let lb = loc(&b, ante)?;
+            // 「同号イからハまで」: イロハの範囲
+            let kana_end = |x: &str| x.chars().last().is_some_and(|c| KANA.contains(c));
+            if let (Some(sa), Some(sb), true) = (&la.sub, &lb.sub, kana_end(&a) && kana_end(&b)) {
+                for k in kana_index(sa)..=kana_index(sb) {
+                    out.push(Loc {
+                        sub: Some(kana_of(k)),
+                        ..la.clone()
+                    });
+                }
+                continue;
+            }
             // 「第一号から第四号まで」: 号の範囲（同じ項の中）
             if let (Some(ia), Some(ib)) = (&la.item, &lb.item) {
                 // 「第十六号から第十九号の二まで」: 枝番の端は基数の範囲の後に足す（中の枝番は当てるときに）
@@ -1304,7 +1315,14 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     }
     ante.title = false;
     // 目次の字句: 「目次中「A」を削り」「目次中「A」を「B」に、「C」を「D」に改め」
-    if loc_part == Some("目次") || (loc_part.is_none() && ante.toc) {
+    // 「目次第二章第一節第三款中…に改め、同節第七款中「A」を「B」に改める」: 目次の中の位置の続き
+    let toc_cont = ante.toc
+        && loc_part.is_some_and(|l| {
+            static TC: OnceLock<Regex> = OnceLock::new();
+            TC.get_or_init(|| re(r"^(?:同(?:編|章|節|款))?(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+$"))
+                .is_match(l)
+        });
+    if loc_part == Some("目次") || (loc_part.is_none() && ante.toc) || toc_cont {
         ante.toc = true;
         if rest.starts_with("の下に") {
             return Ok(phrase_tail(rest, &phrases, |from, to| Op::ReplaceToc {
@@ -1774,6 +1792,7 @@ fn container_range(t: &str) -> Vec<ContainerPath> {
 
 /// 「第四章及び第五章」「第二章の二」「第三章第二節から第四節まで」: 容器の列挙
 fn is_container_list(l: &str) -> bool {
+    let l = &l.replace("中第", "第");
     static C: OnceLock<Regex> = OnceLock::new();
     C.get_or_init(|| {
         re(r"^(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+(?:(?:及び|、|から)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+(?:まで)?)*$")
@@ -2138,6 +2157,9 @@ pub fn normalize_instruction(line: &str) -> String {
         });
         // 「第五章を六章とし」（第の落ち）、「第四条第二頂」
         // 「同条十二号」（第の落ち）
+        static NO_NO: OnceLock<Regex> = OnceLock::new();
+        let no_no = NO_NO.get_or_init(|| re(r"(条の{N})見出し"));
+        let t = no_no.replace_all(&t, "${1}の見出し");
         static SAME_NO_DAI: OnceLock<Regex> = OnceLock::new();
         let same_no_dai = SAME_NO_DAI.get_or_init(|| re(r"(同条|同項)({N})(号|項)"));
         let t = same_no_dai.replace_all(&t, "${1}第${2}${3}");
@@ -2206,6 +2228,8 @@ pub fn normalize_instruction(line: &str) -> String {
             .replace("項表以外の部分", "項の表以外の部分")
             .replace("までの各号", "まで")
             .replace("までの各項", "まで")
+            .replace("その次に次のように加え", "同号の次に次のように加え")
+            .replace("本則中、別に定める場合を除き、", "本則中")
             .replace("の前の次の", "の前に次の")
             .replace("のうち「", "中「")
             .replace("見出中", "見出し中")
@@ -2321,7 +2345,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("append_subitems", r"^(?P<loc>.+?号(?:の{N})*[{K}]?)に次のように加え(?:る)?$"),
             // 「同条第二項に項番号を付する」: 1 項だけだった条の項に番号を付ける（番号は変わらない）
             ("number_para", r"^(?P<loc>.+?第{N}項|同項)に項番号を付(?:し|する)$"),
-            ("set_suppl_note", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)の付記を次のように改め(?:る)?$"),
+            ("set_suppl_note", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条)(?:の付記を次のように改め(?:る)?|に付記として次のように加え(?:る)?)$"),
             ("shift_branch_items", r"^(?P<loc>.+?中|同条|同項)?第(?P<b>{N})号の(?P<p>{N})から第(?P<b2>{N})号の(?P<q>{N})までを(?P<k>{N})号ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("renumber_items_each", r"^(?P<loc>.+?中|同条|同項)?第(?P<a>{N})号及び第(?P<b>{N})号をそれぞれ第(?P<c>{N})号及び第(?P<d>{N})号と(?:し|する)$"),
             ("append_structure", r"^本則に次の{N}条及び{N}(?:編|章|節)を加え(?:る)?$"),
@@ -2371,7 +2395,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("appdx_row_sub_delete", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<sub>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を削(?:り|る)$"),
             ("appdx_row_sub_renumber", r"^(?:(?P<table>別表(?:第[一二三四五六七八九十百千]+)?|同表)(?:の|中)?(?P<row>.+?)の項中)?(?P<a>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])を(?P<b>[イロハニホヘトチリヌルヲワカヨタレソツネナラム])と(?:し|する)$"),
             ("append_containers", r"^(?P<path>本則|同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
-            ("insert_arts_before", r"^(?:(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の(?:(?:{N}条|見出し)(?:、|及び))*{N}条を加え(?:る)?$"),
+            ("insert_arts_before", r"^(?:(?:同編|同章|同節|同款|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)の前に次の(?:(?:{N}条|見出し)(?:、|及び))*{N}条を加え(?:る)?$"),
             // 「第八条の次に次の二章を加える」: 条の後ろに容器
             // 「第十五条の次に第四章及び第五章として次のように加える」
             ("containers_after_art_as", r"^(?P<loc>第{N}条(?:の{N})*|同条)の次に第{N}(?:編|章|節|款|目)(?:(?:及び|から)第{N}(?:編|章|節|款|目)(?:まで)?)?として次のように加え(?:る)?$"),
@@ -2386,6 +2410,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("append_appdx_as", r"^(?:附則の次に)?別表として次のように加え(?:る)?$"),
             ("append_before_suppl", r"^附則の前に次の{N}条を加え(?:る)?$"),
             ("table_edit", r"^(?P<target>(?:別表|同表|附則別表|様式|附則様式|備考)[^「」]*?|[^「」]+?の表[^「」]*?|表[^「」]*?|[^「」第同附別]+?表[^「」]*?|同号[^「」]*?|同欄[^「」]*?|同項|その|第[^「」]+?の式|第{N}条(?:の{N})*[^第の同中、「」][^「」]*?の項)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|の(?P<side2>次|前)に次のように加え(?:る)?|に[^「」]*?として次のように加え(?:る)?|に[^「」]*?として次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する)|を(?P<k>{N})(?:号|項|条)ずつ繰り(?P<dir>下げ|上げ)(?:る)?)$"),
+            ("title_and_toc", r"^(?:題名及び目次|目次及び題名)を次のように改め(?:る)?$"),
             ("delete_toc", r"^目次(?:及び(?P<rest>.+))?を削(?:り|る)$"),
             ("delete_title", r"^題名(?P<toc>及び目次(?:（[^）]*）)?)?を削(?:り|る)$"),
             // 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則を条に
@@ -3439,6 +3464,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         action,
                     }
                 }
+                "title_and_toc" => Op::SetTitleAndToc { text: Vec::new() },
                 "delete_toc" => {
                     if !g("rest").is_empty() {
                         // 「目次及び第一章の章名を削る」
@@ -4190,7 +4216,8 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         let paths = l
                             .split("及び")
                             .flat_map(|x| x.split('、'))
-                            .flat_map(container_range)
+                            .map(|t| t.replace("中第", "第"))
+                            .flat_map(|t| container_range(&t))
                             .collect();
                         Op::ReplaceContainers {
                             paths,
@@ -4341,7 +4368,8 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         re(r"^(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*第{N}(?:編|章|節|款|目)(?:の{N})+$")
                     });
                     let structural = tokens.iter().any(|t| {
-                        t.ends_with('名')
+                        t.starts_with("別表")
+                            || t.ends_with('名')
                             || t.ends_with("見出し")
                             || crange.is_match(t)
                             || csingle.is_match(t)
@@ -4355,6 +4383,13 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                             Vec::new();
                         for t in tokens {
                             // 「第二十六条の前の見出し、同条から第二十六条の三まで…を削る」: 見出しも
+                            // 「第六条から第十二条まで及び別表を削る」
+                            if t.starts_with("別表") || t.starts_with("附則別表") {
+                                ops.push(Op::DeleteAppdx {
+                                    tables: vec![t.to_string()],
+                                });
+                                continue;
+                            }
                             if let Some(base) = t
                                 .strip_suffix("の前の見出し")
                                 .or_else(|| t.strip_suffix("の見出し"))
