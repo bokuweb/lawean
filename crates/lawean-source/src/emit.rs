@@ -222,6 +222,16 @@ fn suppl_provision(s: &SupplProvision) -> Element {
     }
     for ch in &s.children {
         match ch {
+            // 条の無い附則（項だけ）を改めるときに束ねた仮の条（第0条）は、項に戻して出す
+            SupplChild::Provision(Provision::Article(a))
+                if matches!(&a.num, ArticleNum::Single { base: 0, .. }) =>
+            {
+                for c in &a.children {
+                    if let ArticleChild::Paragraph(p) = c {
+                        el.push(paragraph(p));
+                    }
+                }
+            }
             SupplChild::Provision(p) => el.push(provision(p)),
             SupplChild::Paragraph(p) => el.push(paragraph(p)),
             SupplChild::Raw(e) => el.push(e.clone()),

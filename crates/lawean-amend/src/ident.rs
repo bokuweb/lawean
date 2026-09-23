@@ -653,6 +653,26 @@ impl Binder<'_> {
                     }
                     inserted.push(to.clone());
                 }
+                // 本則の全部: 字句を含む条ごとに
+                Op::ReplaceAll { from, to } => {
+                    let mut hit = false;
+                    for a in crate::numbering::article_nums(&self.doc) {
+                        let has = paragraphs(article_mut(&mut self.doc, &a)?)
+                            .iter()
+                            .any(|p| crate::apply::para_text(p).contains(from.as_str()));
+                        if has {
+                            hit = true;
+                            self.replace(&Loc::new(a, None), from, to, &mut snapshots, &inserted)?;
+                        }
+                    }
+                    if !hit {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: "本則".into(),
+                            phrase: from.clone(),
+                        });
+                    }
+                    inserted.push(to.clone());
+                }
                 Op::InsertAfterPhrase { at, anchor, text } => {
                     self.replace(
                         at,

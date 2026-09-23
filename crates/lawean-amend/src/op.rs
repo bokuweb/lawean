@@ -40,6 +40,8 @@ impl Loc {
 pub enum Op {
     /// 「目次中「A」を「B」に改める」
     ReplaceToc { from: String, to: String },
+    /// 「本則中「A」を「B」に改める」、古い法律の位置を書かない「「勅令」を「政令」に改める」: 本則の全部の条で置き換える
+    ReplaceAll { from: String, to: String },
     /// 「第N条[第M項]中「A」を「B」に改める」— 対象内の全出現
     Replace { at: Loc, from: String, to: String },
     /// 「第N条[第M項]中「A」の下に「B」を加える」
@@ -326,6 +328,7 @@ impl Op {
     pub fn article(&self) -> Option<&ArticleNum> {
         match self {
             Op::ReplaceToc { .. }
+            | Op::ReplaceAll { .. }
             | Op::SetToc { .. }
             | Op::AppendSupplArticles { .. }
             | Op::AppendContainers { .. }

@@ -53,6 +53,29 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
     for op in &ins.ops {
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
+            Op::ReplaceAll { from, to } => {
+                let mut n = 0;
+                for a in crate::numbering::article_nums(doc) {
+                    let art = article_mut(doc, &a)?;
+                    n += replace_in_article_part(
+                        art,
+                        None,
+                        None,
+                        None,
+                        None,
+                        from,
+                        &mark(to),
+                        &inserted,
+                    );
+                }
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: "本則".into(),
+                        phrase: from.clone(),
+                    });
+                }
+                inserted.push(to.clone());
+            }
             Op::Replace { at, from, to } => {
                 for at in expand_range(doc, at) {
                     let art = loc_article_mut(doc, &at)?;
@@ -707,6 +730,62 @@ pub(crate) fn suppl_article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,
 ) -> Result<&'a mut Article, ApplyError> {
+    // 「附則第三項中」: 条の無い附則（項だけ）。項を仮の条（第0条）に束ねて扱う（出力では項に戻す）
+    if matches!(num, ArticleNum::Single { base: 0, .. }) {
+        let sp = doc
+            .suppl_provisions
+            .iter_mut()
+            .find(|s| s.amend_law_num.is_none())
+            .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()))?;
+        let bundled = sp.children.iter().any(|c| {
+            matches!(c, SupplChild::Provision(Provision::Article(a))
+                if matches!(&a.num, ArticleNum::Single { base: 0, .. }))
+        });
+        if !bundled {
+            let paras: Vec<Paragraph> = sp
+                .children
+                .iter()
+                .filter_map(|c| match c {
+                    SupplChild::Paragraph(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .collect();
+            if paras.is_empty() {
+                return Err(ApplyError::ArticleNotFound("附則の項".into()));
+            }
+            let pos = sp
+                .children
+                .iter()
+                .position(|c| matches!(c, SupplChild::Paragraph(_)))
+                .unwrap();
+            sp.children
+                .retain(|c| !matches!(c, SupplChild::Paragraph(_)));
+            let stable_id = paras[0].stable_id.clone();
+            sp.children.insert(
+                pos,
+                SupplChild::Provision(Provision::Article(Article {
+                    stable_id,
+                    num: num.clone(),
+                    caption: None,
+                    title: None,
+                    attrs: vec![],
+                    children: paras.into_iter().map(ArticleChild::Paragraph).collect(),
+                })),
+            );
+        }
+        return sp
+            .children
+            .iter_mut()
+            .find_map(|c| match c {
+                SupplChild::Provision(Provision::Article(a))
+                    if matches!(&a.num, ArticleNum::Single { base: 0, .. }) =>
+                {
+                    Some(a)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()));
+    }
     for sp in doc
         .suppl_provisions
         .iter_mut()

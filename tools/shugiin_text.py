@@ -56,6 +56,8 @@ class P(HTMLParser):
             self.flush()
         elif tag == "td" and self.in_table:
             self.flush()
+            if self.row is None:  # <tr> の無い <td>（古いページ）
+                self.row = []
             self.row.append("".join(self.cell).strip("\n\r\t "))
             self.cell = None
         elif tag == "tr" and self.in_table:
@@ -108,14 +110,8 @@ def merge_blocks(lines):
     return out
 
 
-def main():
-    args = sys.argv[1:]
-    article = None
-    if "--article" in args:
-        k = args.index("--article")
-        article = args[k + 1]
-        del args[k : k + 2]
-    data = open(args[0], "rb").read()
+def convert(data, article=None):
+    """HTML のバイト列 → 平文（本文の始まり「◎題名」の次から。`article` を与えればその条だけ）"""
     # meta は Shift_JIS と言っていても UTF-8 のページがある。UTF-8 として読めればそれ
     try:
         raw = data.decode("utf-8")
@@ -138,7 +134,17 @@ def main():
         # 直前の見出し「（X法の一部改正）」は含めない、末尾の見出しも落とす
         while lines and re.match(r"^　*(（.+）|第[一二三四五六七八九十]+[編章節]　[^（）]+)$", lines[-1]):
             lines.pop()
-    sys.stdout.write("\n".join(lines) + "\n")
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    args = sys.argv[1:]
+    article = None
+    if "--article" in args:
+        k = args.index("--article")
+        article = args[k + 1]
+        del args[k : k + 2]
+    sys.stdout.write(convert(open(args[0], "rb").read(), article))
 
 
 if __name__ == "__main__":

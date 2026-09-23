@@ -88,12 +88,34 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     };
     static AMENDING_CHAPTER: OnceLock<Regex> = OnceLock::new();
     let amending_chapter = AMENDING_CHAPTER.get_or_init(|| re(r"^第{N}(?:編|章|節)　[^（）]+$"));
+    // 単独の一部改正法（「X法（…）の一部を次のように改正する。」だけで条の見出しが無い）は、改め文が 1 字下げ・
+    // 加える条文が字下げ無し（整備法より 1 段浅い）。その形の見出しの後は字下げを 1 段深く読む
+    static SINGLE: OnceLock<Regex> = OnceLock::new();
+    let single = SINGLE.get_or_init(|| re(r"^(.+?)(（[^）]*）)?の一部を次のように改正する。$"));
+    let mut shift = 0usize;
+    // 字下げの無いページ（古い制定法律）: 改め文か追加する条文かを行の書き出しで見分ける
+    let mut flat = false;
+    let next_indent_of = |li: usize| -> Option<usize> {
+        lines[li + 1..]
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| {
+                l.chars()
+                    .take_while(|c| *c == '\u{3000}' || *c == ' ')
+                    .count()
+            })
+    };
     for (li, raw) in lines.iter().enumerate() {
         let indent = raw
             .chars()
             .take_while(|c| *c == '\u{3000}' || *c == ' ')
-            .count();
+            .count()
+            + shift;
         let line = raw.trim_start_matches(['\u{3000}', ' ']).trim_end();
+        // 附則から先は改め文ではない（見出しは「附　則」と字を空ける。目次の行の「附則」とは別）
+        if line == "附\u{3000}則" || line == "附 則" {
+            break;
+        }
         if line.is_empty()
             || line.starts_with('（') && indent == 0
             || caption.is_match(line)
@@ -134,12 +156,37 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         }
         if let Some(c) = header.captures(line) {
             list = None;
+            shift = 0;
+            flat = indent == 0 && next_indent_of(li) == Some(0);
             units.push(AmendUnit {
                 article_of_amending_law: c[1].to_string(),
                 target_title: c[2].to_string(),
                 instructions: Vec::new(),
             });
             continue;
+        }
+        if indent - shift <= 1 && !line.starts_with('第') {
+            if let Some(c) = single.captures(line) {
+                list = None;
+                // 改め文の字下げはページによって 1 字か 2 字。見出しの次の行（最初の改め文）の字下げに合わせる
+                let next_indent = lines[li + 1..]
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| {
+                        l.chars()
+                            .take_while(|c| *c == '\u{3000}' || *c == ' ')
+                            .count()
+                    })
+                    .unwrap_or(1);
+                shift = 2usize.saturating_sub(next_indent);
+                flat = indent == 0 && next_indent == 0;
+                units.push(AmendUnit {
+                    article_of_amending_law: "本則".to_string(),
+                    target_title: c[1].to_string(),
+                    instructions: Vec::new(),
+                });
+                continue;
+            }
         }
         let Some(unit) = units.last_mut() else {
             return Err(ParseError::NoHeader);
@@ -148,8 +195,11 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         let is_item_line = line.split_once('\u{3000}').is_some_and(|(t, _)| {
             !t.is_empty() && t.chars().all(|c| "一二三四五六七八九十".contains(c))
         });
-        let is_instruction =
-            indent == 2 && line.ends_with('。') && !line.starts_with('（') && !is_item_line;
+        let is_instruction = if flat {
+            looks_like_instruction(line)
+        } else {
+            indent == 2 && line.ends_with('。') && !line.starts_with('（') && !is_item_line
+        };
         if is_instruction {
             let ops = parse_instruction(line)?;
             unit.instructions.push(Instruction {
@@ -168,6 +218,23 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         }
     }
     Ok(units)
+}
+
+/// 字下げの無いページで、行が改め文か（追加する条文でないか）。書き出しが位置（第N条中・同条・附則・目次・別表・題名・本則・「）で、
+/// 指示の動詞で終わる。「第十条の二　…」「第十条の二（見出し）　…」「２　…」「一　…」「但し、…」は追加する条文
+pub(crate) fn looks_like_instruction(line: &str) -> bool {
+    static HEAD: OnceLock<Regex> = OnceLock::new();
+    static ARTICLE: OnceLock<Regex> = OnceLock::new();
+    static END: OnceLock<Regex> = OnceLock::new();
+    let head = HEAD.get_or_init(|| {
+        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名)")
+    });
+    let article =
+        ARTICLE.get_or_init(|| re(r"^第{N}(?:条|編|章|節|款|目)(?:の{N})*(?:（[^）]*）)?[　 ]"));
+    let end = END.get_or_init(|| {
+        re(r"(?:改め|加え|削|と|付|繰り下げ|繰り上げ|繰下げ|繰上げ|掲げ|移)(?:る|す)。$|削る。$|付する。$")
+    });
+    line.ends_with('。') && head.is_match(line) && !article.is_match(line) && end.is_match(line)
 }
 
 /// 「、」で区切る。ただし「」（）の中は区切らない
@@ -443,6 +510,17 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
             ante.suppl = suppl;
             n
         }
+        // 「附則第三項」「附則」: 条の無い附則（項だけ）。仮の条（第0条）
+        None if c.get(1).is_some() => {
+            let n = ArticleNum::Single {
+                base: 0,
+                branch: vec![],
+            };
+            ante.article = Some(n.clone());
+            ante.toc = false;
+            ante.suppl = true;
+            n
+        }
         None => ante
             .article
             .clone()
@@ -705,6 +783,44 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                                 to: b.clone(),
                             })
                             .collect(),
+                    )));
+                }
+            }
+        }
+        return Ok(None);
+    }
+    // 「本則中「A」を「B」に改める」、位置を書かない最初の字句（古い法律の「「勅令」を「政令」に改める」）: 本則の全部
+    let whole = loc_part == Some("本則")
+        || (loc_part.is_none()
+            && ante.article.is_none()
+            && !ante.toc
+            && ante.appdx.is_none()
+            && ante.container.is_empty());
+    if whole {
+        ante.article = None;
+        let mk = |from: &String, to: String| Op::ReplaceAll {
+            from: from.clone(),
+            to,
+        };
+        if let Some(r) = rest.strip_prefix("を") {
+            if r == "削り" || r == "削る" {
+                return Ok(Some(PhraseOps(
+                    phrases.iter().map(|f| mk(f, String::new())).collect(),
+                )));
+            }
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "に" | "に改め" | "に改める") {
+                    return Ok(Some(PhraseOps(
+                        phrases.iter().map(|f| mk(f, b.clone())).collect(),
+                    )));
+                }
+            }
+        }
+        if let Some(r) = rest.strip_prefix("の下に") {
+            if let Some((b, tail)) = take_quoted(r) {
+                if matches!(tail, "を" | "を加え" | "を加える") {
+                    return Ok(Some(PhraseOps(
+                        phrases.iter().map(|f| mk(f, format!("{f}{b}"))).collect(),
                     )));
                 }
             }
@@ -1015,7 +1131,58 @@ fn ante_loc(ante: &Ante, seg: &str) -> Result<Loc, ParseError> {
     })
 }
 
+/// 古い改め文の書き方を今の書き方に揃える（「」の外だけ。「」の中は被改正法の字句なのでそのまま）:
+/// 「第二十七条ノ二」→「第二十七条の二」、「但書」→「ただし書」、「左の一項」「左のように」→「次の…」、半角の句読点
+pub fn normalize_instruction(line: &str) -> String {
+    let line = line
+        .replace('｡', "。")
+        .replace('､', "、")
+        .replace('｢', "「")
+        .replace('｣', "」");
+    let mut out = String::with_capacity(line.len());
+    let mut depth = 0i32;
+    let chars: Vec<char> = line.chars().collect();
+    let digits = "一二三四五六七八九十百千";
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '「' => depth += 1,
+            '」' => depth = (depth - 1).max(0),
+            _ => {}
+        }
+        if depth == 0 {
+            // 条・項・号の後の「ノ」+数 →「の」
+            if c == 'ノ'
+                && i > 0
+                && ("条項号".contains(chars[i - 1]) || digits.contains(chars[i - 1]))
+                && chars.get(i + 1).is_some_and(|n| digits.contains(*n))
+            {
+                out.push('の');
+                i += 1;
+                continue;
+            }
+            let rest: String = chars[i..chars.len().min(i + 5)].iter().collect();
+            if rest.starts_with("但書") {
+                out.push_str("ただし書");
+                i += 2;
+                continue;
+            }
+            if rest.starts_with("左の") {
+                out.push_str("次の");
+                i += 2;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
+    let normalized = normalize_instruction(line);
+    let line = normalized.as_str();
     static RULES: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
     let rules = RULES.get_or_init(|| {
         [

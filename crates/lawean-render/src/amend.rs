@@ -127,6 +127,12 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        Op::ReplaceAll { from, to } if to.is_empty() => {
+            format!("本則中「{from}」を{}", end("削り", "削る"))
+        }
+        Op::ReplaceAll { from, to } => {
+            format!("本則中「{from}」を「{to}」に{}", end("改め", "改める"))
+        }
         Op::ReplaceToc { from, to } if to.is_empty() => {
             format!("目次中「{from}」を{}", end("削り", "削る"))
         }
