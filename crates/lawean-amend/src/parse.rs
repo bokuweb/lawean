@@ -447,6 +447,7 @@ impl Ante {
             fresh: false,
             whole: false,
             title: false,
+            tedit: None,
         }
     }
 }
@@ -520,6 +521,8 @@ struct Ante {
     whole: bool,
     /// 直前の字句の操作が題名（「題名中「A」を「B」に、「C」を「D」に改める」の続き）
     title: bool,
+    /// 直前の位置が表の中（「別表第四表名称の欄中「A」を「B」に、「C」を「D」に改め」の続き、「同表」）
+    tedit: Option<(TableRef, String)>,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
@@ -642,6 +645,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     });
     // 位置を新しく言えば文の限定と列挙は解ける
     ante.whole = false;
+    ante.tedit = None;
     ante.part = part;
     ante.locs.clear();
     ante.appdx = None;
@@ -816,6 +820,34 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
             }
         }
         return Ok(None);
+    }
+    // 表の中の位置（欄・類・号・備考・行の列挙など）: 位置は字面のまま
+    // 条・項の中の表の全部・1 つの行（「第三十八条の表第七十条第二項の項」）は下の ReplaceTableRow で
+    static TROW_ONE: OnceLock<Regex> = OnceLock::new();
+    let trow_one = TROW_ONE.get_or_init(|| re(r"^[^表]+?の表(?:[^、]+?の項)?$"));
+    let generic = match loc_part {
+        Some(l)
+            if l.starts_with("別表")
+                || l.starts_with("同表")
+                || (l.contains("の表") && !(trow_one.is_match(l) && !l.contains("及び"))) =>
+        {
+            split_table_target(l, ante)?
+        }
+        None if ante.tedit.is_some() => ante.tedit.clone(),
+        _ => None,
+    };
+    if let Some((table, path)) = generic {
+        let v = phrase_tail(rest, &phrases, |from, to| Op::TableEdit {
+            table: table.clone(),
+            path: path.clone(),
+            action: TableAction::Phrase {
+                from: from.clone(),
+                to,
+            },
+        });
+        ante.appdx = None;
+        ante.tedit = Some((table, path));
+        return Ok(v.map(PhraseOps));
     }
     // 題名の字句: 「題名中「A」を「B」に改める」。「題名及び第一条中「A」を「B」に改める」は題名と残りの位置の両方
     let title_and = loc_part.and_then(|l| l.strip_prefix("題名及び"));
@@ -1008,6 +1040,45 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                 )));
             }
         }
+    }
+    Ok(None)
+}
+
+/// 表の在りかと、その中の位置（字面）に分ける。「別表第四表名称の欄」→（別表第四表, 名称の欄）、
+/// 「同表中第十二号」→（直前の表, 第十二号）、「第十三条第一項の表中A及びBの項」→（第十三条第一項の表, A及びBの項）
+fn split_table_target(
+    target: &str,
+    ante: &mut Ante,
+) -> Result<Option<(TableRef, String)>, ParseError> {
+    static NAME: OnceLock<Regex> = OnceLock::new();
+    let name = NAME.get_or_init(|| {
+        re(r"^(?P<t>別表(?:第?[一二三四五六七八九十百千]+(?:号表|表)?(?:[のノ][一二三四五六七八九十]+)?|[甲乙丙丁戊己庚辛][号表])?(?:(?:及び|、|から)(?:別表)?第?[一二三四五六七八九十百千]+(?:号表|表)?(?:まで)?)*)(?P<rest>.*)$")
+    });
+    let path_of = |r: &str| {
+        r.trim_start_matches('、')
+            .trim_start_matches('中')
+            .trim_start_matches('の')
+            .trim_end_matches('中')
+            .to_string()
+    };
+    if let Some(r) = target.strip_prefix("同表") {
+        let table = match (&ante.tedit, &ante.appdx) {
+            (Some((t, _)), _) => t.clone(),
+            (None, Some((t, _))) => TableRef::Appdx(t.clone()),
+            _ => return Err(ParseError::NoAntecedent(target.to_string())),
+        };
+        return Ok(Some((table, path_of(r))));
+    }
+    if target.starts_with("別表") {
+        let c = name.captures(target).expect("別表");
+        return Ok(Some((TableRef::Appdx(c["t"].to_string()), path_of(&c["rest"]))));
+    }
+    if let Some(i) = target.find("の表") {
+        let at = loc(&target[..i], ante)?;
+        return Ok(Some((
+            TableRef::InArticle(at),
+            path_of(&target[i + "の表".len()..]),
+        )));
     }
     Ok(None)
 }
@@ -1352,6 +1423,9 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             ("insert_containers_after", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|(?:同編|同章|同節|同款)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*)の(?P<side>次|前)に次の{N}(?:編|章|節|款|目)を加え(?:る)?$"),
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
             ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同編|同章|同節|同款)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            // 表の中の位置への操作（上の別表の行の規則に当たらないもの）: 位置は字面のまま
+            ("append_appdx_as", r"^別表として次のように加え(?:る)?$"),
+            ("table_edit", r"^(?P<target>(?:別表|同表)[^「」]*?|[^「」]+?の表[^「」]*?)(?P<act>を次のように改め(?:る)?|を削(?:り|る)|の(?P<side>次|前)に次の[^「」]+を加え(?:る)?|に次の[^「」]+を加え(?:る)?|に次のように加え(?:る)?|を(?P<to>[^「」]+?)と(?:し|する))$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
             ("set_title_quoted", r"^題名を「(?P<a>[^「」]+)」に改め(?:る)?$"),
             // 題名の無い古い法律に題名を付ける
@@ -1419,7 +1493,10 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する。見出しの中は別
         let loc_part = seg.split("中「").next().unwrap_or("");
         let listed = (loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで"))
-            && !loc_part.starts_with("題名及び");
+            && !loc_part.starts_with("題名及び")
+            && !loc_part.starts_with("別表")
+            && !loc_part.starts_with("同表")
+            && !loc_part.contains("の表");
         if (!listed || seg.starts_with('「') || seg.ends_with("削り") || seg.ends_with("削る"))
             && (!loc_part.contains("見出し") || loc_part.ends_with("（見出しを含む。）"))
             && (!loc_part.ends_with("名") || loc_part == "題名")
@@ -1803,6 +1880,33 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         from: l.article,
                         to,
                         suppl: l.suppl || g("qs") == "附則",
+                    }
+                }
+                "append_appdx_as" => Op::AppendAppdx { text: Vec::new() },
+                "table_edit" => {
+                    let Some((table, path)) = split_table_target(&g("target"), &mut ante)? else {
+                        return Err(ParseError::Unrecognized(seg.to_string()));
+                    };
+                    let act = g("act");
+                    let action = if act.starts_with("を次のように改め") {
+                        TableAction::Replace { text: Vec::new() }
+                    } else if act.starts_with("を削") {
+                        TableAction::Delete
+                    } else if g("side") == "次" {
+                        TableAction::InsertAfter { text: Vec::new() }
+                    } else if g("side") == "前" {
+                        TableAction::InsertBefore { text: Vec::new() }
+                    } else if act.starts_with("に次") {
+                        TableAction::Append { text: Vec::new() }
+                    } else {
+                        TableAction::Renumber { to: g("to") }
+                    };
+                    ante.appdx = None;
+                    ante.tedit = Some((table.clone(), path.clone()));
+                    Op::TableEdit {
+                        table,
+                        path,
+                        action,
                     }
                 }
                 "set_title_quoted" => Op::SetTitle { text: vec![g("a")] },

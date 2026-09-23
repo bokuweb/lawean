@@ -1311,6 +1311,14 @@ impl Binder<'_> {
                 Op::DeleteCaption { article } => {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
+                // 表の中（欄の字句・行）は id を持たない。文書の側だけ
+                Op::TableEdit { .. } => {
+                    let one = Instruction {
+                        text: ins.text.clone(),
+                        ops: vec![op.clone()],
+                    };
+                    crate::apply::apply_instruction(&mut self.doc, &one)?;
+                }
                 // 原始附則は文書の側だけ（id の世界には載せない）
                 Op::Suppl(inner) => {
                     let one = Instruction {

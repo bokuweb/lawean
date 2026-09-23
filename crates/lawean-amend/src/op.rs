@@ -36,6 +36,34 @@ impl Loc {
     }
 }
 
+/// 表の在りか
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableRef {
+    /// 別表（「別表第一」「別表甲号」「別表第一号表」。列挙「別表第一から第四まで」は字面のまま）
+    Appdx(String),
+    /// 条・項の中の表（「第十三条第一項の表」）
+    InArticle(Loc),
+}
+
+/// 表の中の位置への操作
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableAction {
+    /// 「中「A」を「B」に改め」（削りは `to` が空、「の下に「B」を加え」は `to = A + B`）
+    Phrase { from: String, to: String },
+    /// 「を次のように改める」+ 内容
+    Replace { text: Vec<String> },
+    /// 「を削る」
+    Delete,
+    /// 「の次に次の…を加える」+ 内容
+    InsertAfter { text: Vec<String> },
+    /// 「の前に次の…を加える」+ 内容
+    InsertBefore { text: Vec<String> },
+    /// 「に次の…を加える」「に次のように加える」+ 内容
+    Append { text: Vec<String> },
+    /// 「を…とする」
+    Renumber { to: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     /// 「目次中「A」を「B」に改める」
@@ -318,6 +346,12 @@ pub enum Op {
     /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
     /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
     Suppl(Box<Op>),
+    /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
+    TableEdit {
+        table: TableRef,
+        path: String,
+        action: TableAction,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -364,6 +398,10 @@ impl Op {
             | Op::RenumberAppdxRowSub { .. }
             | Op::DeleteAppdx { .. }
             | Op::Suppl(_) => None,
+            Op::TableEdit { table, .. } => match table {
+                TableRef::InArticle(at) => Some(&at.article),
+                TableRef::Appdx(_) => None,
+            },
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
@@ -458,6 +496,10 @@ impl Op {
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. } => Some(at),
+            Op::TableEdit {
+                table: TableRef::InArticle(at),
+                ..
+            } => Some(at),
             _ => None,
         }
     }
@@ -490,6 +532,15 @@ impl Op {
     pub fn takes_content(&self) -> bool {
         if let Op::Suppl(inner) = self {
             return inner.takes_content();
+        }
+        if let Op::TableEdit { action, .. } = self {
+            return matches!(
+                action,
+                TableAction::Replace { .. }
+                    | TableAction::InsertAfter { .. }
+                    | TableAction::InsertBefore { .. }
+                    | TableAction::Append { .. }
+            );
         }
         matches!(
             self,
@@ -563,6 +614,14 @@ impl Op {
             | Op::ReplaceContainers { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
             Op::Suppl(inner) => inner.push_content(line),
+            Op::TableEdit {
+                action:
+                    TableAction::Replace { text }
+                    | TableAction::InsertAfter { text }
+                    | TableAction::InsertBefore { text }
+                    | TableAction::Append { text },
+                ..
+            } => text.push(line),
             _ => {}
         }
     }

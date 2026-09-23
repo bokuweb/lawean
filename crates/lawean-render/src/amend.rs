@@ -126,6 +126,15 @@ fn shift_range(from: u32, to: u32, unit: &str) -> String {
     }
 }
 
+/// 表の中の位置の前置き（別表の名と位置の間は「中」）
+fn sep(path: &str) -> String {
+    if path.is_empty() {
+        String::new()
+    } else {
+        format!("中{path}")
+    }
+}
+
 /// 1 操作を、文の途中（`last = false`）または文末（`last = true`）の形にする
 fn segment(op: &Op, last: bool) -> String {
     let end = |mid: &str, fin: &str| {
@@ -136,6 +145,41 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        Op::TableEdit {
+            table,
+            path,
+            action,
+        } => {
+            let t = match table {
+                TableRef::Appdx(t) => t.clone(),
+                TableRef::InArticle(at) => format!("{}の表", loc_label(at)),
+            };
+            let p = path.clone();
+            match action {
+                TableAction::Phrase { from, to } if to.is_empty() => {
+                    format!("{t}{}中「{from}」を{}", sep(&p), end("削り", "削る"))
+                }
+                TableAction::Phrase { from, to } => {
+                    format!("{t}{}中「{from}」を「{to}」に{}", sep(&p), end("改め", "改める"))
+                }
+                TableAction::Replace { .. } => {
+                    format!("{t}{}を次のように{}", sep(&p), end("改め", "改める"))
+                }
+                TableAction::Delete => format!("{t}{}を{}", sep(&p), end("削り", "削る")),
+                TableAction::InsertAfter { .. } => {
+                    format!("{t}{}の次に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::InsertBefore { .. } => {
+                    format!("{t}{}の前に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::Append { .. } => {
+                    format!("{t}{}に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::Renumber { to } => {
+                    format!("{t}{}を{to}と{}", sep(&p), end("し", "する"))
+                }
+            }
+        }
         // 原始附則: 中の操作の位置に「附則」を冠する（項だけの附則は仮の第0条）
         Op::Suppl(inner) => {
             let s = segment(inner, last);
@@ -683,6 +727,15 @@ fn content_of(op: &Op) -> &[String] {
         | Op::ReplaceArticles { text, .. }
         | Op::ReplaceContainers { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text,
+        Op::TableEdit {
+            action:
+                TableAction::Replace { text }
+                | TableAction::InsertAfter { text }
+                | TableAction::InsertBefore { text }
+                | TableAction::Append { text },
+            ..
+        } => text,
+        Op::Suppl(inner) => content_of(inner),
         _ => &[],
     }
 }

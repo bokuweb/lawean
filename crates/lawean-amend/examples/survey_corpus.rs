@@ -156,7 +156,7 @@ fn main() {
         100.0 * units_ok as f64 / total.max(1) as f64
     );
     let mut ks: Vec<_> = kinds.into_iter().collect();
-    ks.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+    ks.sort_by_key(|k| std::cmp::Reverse(k.1 .0));
     for (k, (n, ex)) in ks.iter().take(60) {
         println!("{n:5}  {k}  [{ex}]");
     }

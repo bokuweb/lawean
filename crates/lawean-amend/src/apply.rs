@@ -25,6 +25,9 @@ pub enum ApplyError {
     BadContent(String),
     #[error("re-parse: {0}")]
     Reparse(String),
+    /// 読めた（位置と操作は分かる）が、まだ当てられない形
+    #[error("まだ当てられない: {0}")]
+    Unsupported(String),
 }
 
 /// 改正単位を適用した新しいリビジョンを返す
@@ -291,6 +294,20 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
             Op::DeleteCaption { article } => {
                 article_mut(doc, article)?.caption = None;
             }
+            Op::TableEdit {
+                table: TableRef::InArticle(at),
+                path,
+                action,
+            } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                table_edit_in_paragraph(paragraph_mut(art, idx), path, action, &inserted)?;
+            }
+            Op::TableEdit {
+                table: TableRef::Appdx(t),
+                path,
+                action,
+            } => table_edit_appdx(doc, t, path, action, &mut appdx_rows)?,
             Op::Suppl(inner) => {
                 let one = Instruction {
                     text: ins.text.clone(),
@@ -821,6 +838,152 @@ pub(crate) fn suppl_article_mut<'a>(
         "附則{}",
         num.to_num_string()
     )))
+}
+
+/// 「A、B及びCの項」「Aの項及びBの項」→ 行の上欄の列
+fn table_rows_of(path: &str) -> Option<Vec<String>> {
+    let body = path.strip_suffix("の項")?;
+    let rows: Vec<String> = body
+        .split("及び")
+        .flat_map(|x| x.split('、'))
+        .map(|x| x.trim_end_matches("の項").to_string())
+        .filter(|x| !x.is_empty())
+        .collect();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn replace_text_in(e: &mut Element, from: &str, to: &str) -> usize {
+    let mut n = 0;
+    for c in &mut e.children {
+        match c {
+            Node::Text(t) => {
+                let (nt, k) = replace_protected(t, from, to, &[]);
+                n += k;
+                *t = nt;
+            }
+            Node::Element(x) => n += replace_text_in(x, from, to),
+        }
+    }
+    n
+}
+
+/// 別表の中の位置への操作。位置が表の全部か行（「Xの項」）なら当てる。それ以外の位置（欄・類・号・備考など）はまだ当てない
+pub(crate) fn table_edit_appdx(
+    doc: &mut LegalDocument,
+    table: &str,
+    path: &str,
+    action: &TableAction,
+    appdx_rows: &mut BTreeMap<(String, String), usize>,
+) -> Result<(), ApplyError> {
+    let unsupported = || ApplyError::Unsupported(format!("{table}{path}"));
+    let row = path.strip_suffix("の項").filter(|r| !r.contains("及び") && !r.contains('、'));
+    match action {
+        TableAction::Phrase { from, to } if path.is_empty() => {
+            let ap = appdx_mut(doc, table)?;
+            if replace_text_in(ap, from, to) == 0 {
+                return Err(ApplyError::PhraseNotFound {
+                    at: table.to_string(),
+                    phrase: from.clone(),
+                });
+            }
+            Ok(())
+        }
+        TableAction::Phrase { from, to } => match row {
+            Some(r) => replace_appdx_row(doc, table, r, None, from, to, appdx_rows),
+            None => Err(unsupported()),
+        },
+        TableAction::Replace { text } if path.is_empty() => {
+            let i = appdx_index(doc, table)?;
+            let order = doc.body_order.clone();
+            append_appdx(doc, text, None)?;
+            let new = doc.appendices.pop().expect("appended");
+            doc.body_order = order;
+            doc.appendices[i] = new;
+            Ok(())
+        }
+        TableAction::Replace { text } => match row {
+            Some(r) => replace_appdx_row_whole(doc, table, r, text),
+            None => Err(unsupported()),
+        },
+        TableAction::Delete => match table_rows_of(path) {
+            Some(rows) => delete_appdx_rows(doc, table, &rows),
+            None => Err(unsupported()),
+        },
+        TableAction::InsertAfter { text } => match row {
+            Some(r) => insert_appdx_rows_after(doc, table, r, text),
+            None => Err(unsupported()),
+        },
+        TableAction::Renumber { to } => match (row, to.strip_suffix("の項")) {
+            (Some(r), Some(t)) => renumber_appdx_row(doc, table, r, t),
+            _ => Err(unsupported()),
+        },
+        _ => Err(unsupported()),
+    }
+}
+
+fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
+    doc.appendices
+        .iter()
+        .position(|ap| {
+            let title = ap
+                .children
+                .iter()
+                .find_map(|c| match c {
+                    Node::Element(x) if x.name.ends_with("Title") => Some(strip_ws(&x.text())),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            title == table
+                || title.starts_with(&format!("{table}（"))
+                || title.starts_with(&format!("{table}\u{3000}"))
+        })
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
+}
+
+/// 条・項の中の表への操作。表の全部の字句、行（「Xの項」）の字句、行の削除を当てる
+pub(crate) fn table_edit_in_paragraph(
+    p: &mut Paragraph,
+    path: &str,
+    action: &TableAction,
+    protect: &[String],
+) -> Result<(), ApplyError> {
+    let unsupported = || ApplyError::Unsupported(format!("表{path}"));
+    let row = path.strip_suffix("の項").filter(|r| !r.contains("及び") && !r.contains('、'));
+    match action {
+        TableAction::Phrase { from, to } if path.is_empty() => {
+            replace_table_row(p, "", from, to, protect)
+        }
+        TableAction::Phrase { from, to } => match row {
+            Some(r) => replace_table_row(p, r, from, to, protect),
+            None => Err(unsupported()),
+        },
+        TableAction::Delete => {
+            let rows = table_rows_of(path).ok_or_else(unsupported)?;
+            fn remove(e: &mut Element, key: &str) -> bool {
+                let before = e.children.len();
+                e.children.retain(|c| !matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key));
+                if e.children.len() != before {
+                    return true;
+                }
+                e.children.iter_mut().any(|c| match c {
+                    Node::Element(x) => remove(x, key),
+                    _ => false,
+                })
+            }
+            for r in rows {
+                let key = strip_ws(&r);
+                let hit = p.children.iter_mut().any(|c| match c {
+                    ParagraphChild::Raw(e) => remove(e, &key),
+                    _ => false,
+                });
+                if !hit {
+                    return Err(ApplyError::BadContent(format!("表に「{r}」の項が無い")));
+                }
+            }
+            Ok(())
+        }
+        _ => Err(unsupported()),
+    }
 }
 
 /// 「題名中「A」を「B」に改める」
