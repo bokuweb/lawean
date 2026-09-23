@@ -49,8 +49,12 @@ def main():
                 f.write(get(f"{BASE}{d}/kaiji{n}_l.htm"))
             time.sleep(0.3)
         t = open(idx_path, "rb").read().decode("shift_jis", "replace")
-        for m in re.finditer(r'href="(\d{14})\.htm"[^>]*>([^<]*)<', t):
-            rows.append((int(n), d, m.group(1), m.group(2).strip()))
+        # 行ごとに: 法律名の欄（HOURITSU.HOURITSUMEI）と本文へのリンク
+        for m in re.finditer(
+            r'headers="HOURITSU\.HOURITSUMEI"[^>]*>(.*?)</TD>.*?href="(\d{14})\.htm"', t, re.S
+        ):
+            title = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+            rows.append((int(n), d, m.group(2), title))
     seen = set()
     rows = [r for r in rows if not (r[2] in seen or seen.add(r[2]))]
     rows.sort()
