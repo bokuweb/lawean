@@ -180,6 +180,30 @@ fn segment(op: &Op, last: bool) -> String {
             )
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::SetSupplNote { article, .. } => format!(
+            "{}の付記を次のように{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::ShiftBranchItems {
+            at,
+            base,
+            from,
+            to,
+            by,
+        } => format!(
+            "{}中第{b}号の{}から第{b}号の{}までを{}号ずつ繰り{}",
+            loc_label(at),
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            },
+            b = to_kanji(*base)
+        ),
         Op::ReplacePairs { scope, .. } => format!(
             "{scope}中次の表の上欄に掲げる字句を同表の下欄に掲げる字句に{}",
             end("改め", "改める")
@@ -934,7 +958,8 @@ fn content_of(op: &Op) -> &[String] {
         Op::SubitemsEdit {
             text: Some(text), ..
         }
-        | Op::ReplacePairs { text, .. } => text,
+        | Op::ReplacePairs { text, .. }
+        | Op::SetSupplNote { text, .. } => text,
         Op::InsertContainersAfterArticle { text, .. }
         | Op::InsertHeadingsBefore { text, .. }
         | Op::SetContainerTitles { text, .. } => text,

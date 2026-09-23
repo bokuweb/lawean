@@ -325,6 +325,47 @@ pub(crate) fn apply_instruction(
                 }
                 _ => return Err(ApplyError::Unsupported(format!("前文{path}"))),
             },
+            Op::SetSupplNote { article, text } => {
+                let art = article_mut(doc, article)?;
+                let note = Element {
+                    name: "SupplNote".into(),
+                    attrs: vec![],
+                    children: vec![Node::Text(text.join("").trim().to_string())],
+                };
+                match art
+                    .children
+                    .iter_mut()
+                    .find(|c| matches!(c, ArticleChild::Raw(e) if e.name == "SupplNote"))
+                {
+                    Some(c) => *c = ArticleChild::Raw(note),
+                    None => art.children.push(ArticleChild::Raw(note)),
+                }
+            }
+            Op::ShiftBranchItems {
+                at,
+                base,
+                from,
+                to,
+                by,
+            } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let p = paragraph_mut(art, idx);
+                let mut ks: Vec<u32> = (*from..=*to.min(&(from + 200))).collect();
+                if *by > 0 {
+                    ks.reverse();
+                }
+                for k in ks {
+                    let old = format!("{base}_{k}");
+                    let new = format!("{base}_{}", k as i32 + by);
+                    if items_mut(p)
+                        .iter()
+                        .any(|i| i.num.as_deref() == Some(old.as_str()))
+                    {
+                        renumber_item(p, &old, &new)?;
+                    }
+                }
+            }
             Op::ReplacePairs { scope, .. } => {
                 return Err(ApplyError::Unsupported(format!(
                     "{scope}中の表の上欄の字句を下欄の字句に改める"

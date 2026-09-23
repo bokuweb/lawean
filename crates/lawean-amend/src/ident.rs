@@ -1315,6 +1315,8 @@ impl Binder<'_> {
                 | Op::DeleteContainer { .. }
                 | Op::ShiftBranchArticles { .. }
                 | Op::ShiftContainers { .. }
+                | Op::SetSupplNote { .. }
+                | Op::ShiftBranchItems { .. }
                 | Op::ReplacePairs { .. }
                 | Op::SubitemsEdit { .. }
                 | Op::ReplaceInContainer { .. }

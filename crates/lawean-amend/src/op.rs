@@ -232,6 +232,19 @@ pub enum Op {
         from: String,
         to: String,
     },
+    /// 「第六十五条の付記を次のように改める」+ 付記の行
+    SetSupplNote {
+        article: ArticleNum,
+        text: Vec<String>,
+    },
+    /// 「第五号の二から第五号の四までを一号ずつ繰り下げ」: 号（`at` の項の中）の枝番の範囲を `by` 動かす
+    ShiftBranchItems {
+        at: Loc,
+        base: u32,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
     /// 「第二条のうち、X法目次の改正規定中「A」を「B」に改める」: 改正法の改正規定の中の字句
     ReplaceInAmendment {
         article: ArticleNum,
@@ -505,6 +518,7 @@ impl Op {
             | Op::Suppl(_) => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::DeleteArticleTitle { article }
+            | Op::SetSupplNote { article, .. }
             | Op::ReplaceSupplNote { article, .. }
             | Op::ReplaceInAmendment { article, .. } => Some(article),
             Op::TableEdit { table, .. } => match table {
@@ -548,6 +562,7 @@ impl Op {
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. }
             | Op::SubitemsEdit { at, .. }
+            | Op::ShiftBranchItems { at, .. }
             | Op::ParagraphCaption { at, .. } => Some(&at.article),
         }
     }
@@ -608,6 +623,7 @@ impl Op {
             | Op::ShiftSubitems { at, .. }
             | Op::InsertSubitemAfter { at, .. }
             | Op::SubitemsEdit { at, .. }
+            | Op::ShiftBranchItems { at, .. }
             | Op::ParagraphCaption { at, .. } => Some(at),
             Op::TableEdit {
                 table: TableRef::InArticle(at),
@@ -653,7 +669,7 @@ impl Op {
         if let Op::SubitemsEdit { text, .. } = self {
             return text.is_some();
         }
-        if let Op::ReplacePairs { .. } = self {
+        if let Op::ReplacePairs { .. } | Op::SetSupplNote { .. } = self {
             return true;
         }
         if let Op::ParagraphCaption {
@@ -751,7 +767,8 @@ impl Op {
             Op::SubitemsEdit {
                 text: Some(text), ..
             }
-            | Op::ReplacePairs { text, .. } => text.push(line),
+            | Op::ReplacePairs { text, .. }
+            | Op::SetSupplNote { text, .. } => text.push(line),
             Op::ParagraphCaption {
                 edit: CaptionEdit::Set(text),
                 ..
