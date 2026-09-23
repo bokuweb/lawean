@@ -158,13 +158,16 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
     // 改め文が段落の途中で切れている（「同表中」+ 表 +「を」…）ページ: 「、」で終わる改め文の行は次の行とつなぐ
     let mut joined: Vec<String> = Vec::new();
     for l in text.lines() {
+        let next = l.trim_start_matches(['\u{3000}', ' ']);
         match joined.last_mut() {
-            // 「目次中「A」」の行の次が「を「B」に改める。」: 字句の後で切れた改め文
+            // 「目次中「A」」の行の次が「を「B」に改める。」: 字句の後で切れた改め文。
+            // 「目次中「A」を」+ 複数行の「…」（目次の行を並べた字句）: 「」が閉じるまで
             Some(prev)
                 if (prev.ends_with('、')
-                    || prev.ends_with('」')
-                        && l.trim_start_matches(['\u{3000}', ' '])
-                            .starts_with(['を', 'に', '及', '並']))
+                    || prev.ends_with('」') && next.starts_with(['を', 'に', '及', '並'])
+                    || prev.ends_with('を') && next.starts_with('「')
+                    || !prev.ends_with('。')
+                        && prev.matches('「').count() > prev.matches('」').count())
                     && prev
                         .trim_start_matches(['\u{3000}', ' '])
                         .starts_with(['第', '同', '附', '別', '「', '目', '題', '本']) =>

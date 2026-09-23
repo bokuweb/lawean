@@ -83,6 +83,10 @@ class P(HTMLParser):
             self.cell.append(inner)
             self.in_table -= 1
         elif tag == "table" and self.in_table:
+            # </tr> の無いまま閉じた最後の行
+            if self.row:
+                self.table_rows.append(self.row)
+                self.row = None
             self.in_table -= 1
             rows = self.pending_rows + self.table_rows
             self.table_rows = []

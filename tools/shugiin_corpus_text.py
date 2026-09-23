@@ -6,7 +6,7 @@
 出力: <cache>/txt/<14 桁>.txt（HTML と変換（shugiin_text.py）と誤記表より新しければ作り直さない）
 
 衆議院のページの誤記は tools/shugiin_errata.tsv（ページの 14 桁、誤、正、注[、回数]）で直してから平文にする。
-誤の字句はそのページにちょうど「回数」（省けば 1）回現れなければならない（違えば止める）
+行をまたぐ字句は「\\n」で改行を書く。誤の字句はそのページにちょうど「回数」（省けば 1）回現れなければならない（違えば止める）
 """
 import os
 import subprocess
@@ -29,7 +29,8 @@ for ln in open(errata_path, encoding="utf-8"):
     if not ln.strip() or ln.startswith("#"):
         continue
     cols = ln.rstrip("\n").split("\t")
-    lid, wrong, right = cols[:3]
+    # 行をまたぐ誤記は「\\n」で改行を書く
+    lid, wrong, right = (c.replace("\\n", "\n") for c in cols[:3])
     times = int(cols[4]) if len(cols) > 4 and cols[4] else 1
     errata.setdefault(lid, []).append((wrong, right, times))
 n = 0
