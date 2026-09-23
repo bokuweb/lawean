@@ -193,7 +193,12 @@ pub enum Op {
     /// 「題名を削る」
     DeleteTitle,
     /// 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則の項を条に（原始附則）
-    ParagraphToArticle { from: u32, to: ArticleNum },
+    /// 「附則第十六項を附則第二十六条第一項とし」: 条の中の項に（`para`）
+    ParagraphToArticle {
+        from: u32,
+        to: ArticleNum,
+        para: Option<u32>,
+    },
     /// 「第二章の二を削る」: 枝番の容器 1 つ（`path` は外側から、最後が消す容器）
     DeleteContainer {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -218,6 +223,8 @@ pub enum Op {
     ReplaceInContainer {
         path: Vec<(lawean_source::ContainerKind, String)>,
         except: Vec<Loc>,
+        /// 除く容器の題名（「本則（第四章の章名…を除く。）中」）
+        except_titles: Vec<Vec<(lawean_source::ContainerKind, String)>>,
         from: String,
         to: String,
     },
@@ -457,6 +464,8 @@ pub enum Op {
     /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
     /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
     Suppl(Box<Op>),
+    /// 「同項（第三号を除く。）及び同条第三項第一号中「A」を「B」に改める」: 除く位置のある字句の操作（`except` は位置の中で除くところ）
+    Except { op: Box<Op>, except: Vec<Loc> },
     /// 「第八条の次に次の二章を加える」「第十条の次に次の一款を加える」+ 章・款の内容: 条の後ろに容器を置く
     InsertContainersAfterArticle {
         after: ArticleNum,
@@ -547,7 +556,8 @@ impl Op {
             | Op::ShiftContainers { .. }
             | Op::ReplaceInContainer { .. }
             | Op::SetContainerTitles { .. }
-            | Op::Suppl(_) => None,
+            | Op::Suppl(_)
+            | Op::Except { .. } => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::MoveArticle { from, .. } => Some(from),
             Op::DeleteArticleTitle { article }
@@ -711,6 +721,7 @@ impl Op {
             Op::AmendmentEdit { target, .. } => m(target),
             Op::SetCaption { text, .. } | Op::AttachCaption { text, .. } => m(text),
             Op::Suppl(inner) => inner.map_strings(f),
+            Op::Except { op, .. } => op.map_strings(f),
             _ => {}
         }
     }

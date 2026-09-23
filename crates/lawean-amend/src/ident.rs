@@ -1340,7 +1340,8 @@ impl Binder<'_> {
                 | Op::DeleteToc
                 | Op::SetTitleAndToc { .. }
                 | Op::DeleteTitle
-                | Op::ParagraphToArticle { .. } => {
+                | Op::ParagraphToArticle { .. }
+                | Op::Except { .. } => {
                     let one = Instruction {
                         text: ins.text.clone(),
                         ops: vec![op.clone()],

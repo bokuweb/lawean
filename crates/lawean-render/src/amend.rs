@@ -219,10 +219,12 @@ fn segment(op: &Op, last: bool) -> String {
             }
         ),
         Op::DeleteTitle => format!("題名を{}", end("削り", "削る")),
-        Op::ParagraphToArticle { from, to } => format!(
-            "附則第{}項を附則{}と{}",
+        Op::ParagraphToArticle { from, to, para } => format!(
+            "附則第{}項を附則{}{}と{}",
             to_kanji(*from),
             article_label(to),
+            para.map(|p| format!("第{}項", to_kanji(p)))
+                .unwrap_or_default(),
             end("し", "する")
         ),
         Op::DeleteContainer { path } => format!("{}を{}", path_label(path), end("削り", "削る")),
@@ -273,6 +275,7 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceInContainer {
             path,
             except,
+            except_titles,
             from,
             to,
         } => {
@@ -281,13 +284,18 @@ fn segment(op: &Op, last: bool) -> String {
             } else {
                 path_label(path)
             };
-            let ex = if except.is_empty() {
+            let names: Vec<String> = except_titles
+                .iter()
+                .map(|p| {
+                    let kind = p.last().map(|(k, _)| kind_label(*k)).unwrap_or("章");
+                    format!("{}の{kind}名", path_label(p))
+                })
+                .chain(except.iter().map(loc_label))
+                .collect();
+            let ex = if names.is_empty() {
                 String::new()
             } else {
-                format!(
-                    "（{}を除く。）",
-                    except.iter().map(loc_label).collect::<Vec<_>>().join("、")
-                )
+                format!("（{}を除く。）", names.join("、"))
             };
             if to.is_empty() {
                 format!("{scope}{ex}中「{from}」を{}", end("削り", "削る"))
@@ -443,6 +451,15 @@ fn segment(op: &Op, last: bool) -> String {
                         end("上げ", "上げる")
                     }
                 ),
+            }
+        }
+        // 除く位置: 位置の後に「（…を除く。）」
+        Op::Except { op, except } => {
+            let s = segment(op, last);
+            let ex = except.iter().map(loc_label).collect::<Vec<_>>().join("、");
+            match s.find("中「") {
+                Some(i) => format!("{}（{ex}を除く。）{}", &s[..i], &s[i..]),
+                None => s,
             }
         }
         // 原始附則: 中の操作の位置に「附則」を冠する（項だけの附則は仮の第0条）

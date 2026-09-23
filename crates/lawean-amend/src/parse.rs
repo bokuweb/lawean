@@ -701,6 +701,7 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
             continue;
         }
         let loc_only = (seg.starts_with('第')
+            || seg == "目次"
             || seg.starts_with('同')
             || seg.starts_with("附則")
             || seg.starts_with("別表")
@@ -751,6 +752,155 @@ fn split_outside_parens(s: &str, seps: &[&str]) -> Vec<String> {
     }
     out.push(cur);
     out
+}
+
+/// 除く位置のある位置への字句の操作を `Op::Except` に包む（覚えは位置を新しく言うと消える）
+fn with_excepts(v: Vec<Op>, ante: &Ante) -> Vec<Op> {
+    if ante.excepts.is_empty() {
+        return v;
+    }
+    v.into_iter()
+        .map(|op| {
+            let hit = match &op {
+                Op::Replace { at, .. } | Op::InsertAfterPhrase { at, .. } => ante
+                    .excepts
+                    .iter()
+                    .find(|(l, _)| l == at)
+                    .map(|(_, e)| e.clone()),
+                _ => None,
+            };
+            match hit {
+                Some(except) => Op::Except {
+                    op: Box::new(op),
+                    except,
+                },
+                None => op,
+            }
+        })
+        .collect()
+}
+
+/// 容器の中の字句の範囲（`Op::ReplaceInContainer` の位置）
+#[derive(Clone)]
+struct ContainerScope {
+    path: ContainerPath,
+    except: Vec<Loc>,
+    except_titles: Vec<ContainerPath>,
+}
+
+/// 「第三章」「本則（第九条…を除く。）」「第二編第二章から第八章まで（…を除く。）及び第十一章から第十四章まで」:
+/// 容器（とその列挙・範囲）で言う字句の範囲。容器でなければ None
+fn scope_piece() -> &'static Regex {
+    static PIECE: OnceLock<Regex> = OnceLock::new();
+    PIECE.get_or_init(|| {
+        re(r"^(?P<path>本則|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+(?:から(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+まで)?)(?:（(?P<ex>.+)を除く。）)?$")
+    })
+}
+
+/// 容器の列挙（「第二編第二章から第八章まで（…を除く。）及び第十一章から第十四章まで」）か
+fn is_container_scope_list(l: &str) -> bool {
+    let l = l.trim_end_matches("の規定");
+    let pieces = split_outside_parens(l, &["及び", "並びに", "、"]);
+    pieces.len() > 1
+        && pieces
+            .iter()
+            .all(|p| scope_piece().is_match(p) && p != "本則")
+        && !is_container_list(l)
+}
+
+fn container_scopes(l: &str, ante: &mut Ante) -> Result<Option<Vec<ContainerScope>>, ParseError> {
+    let piece = scope_piece();
+    let pieces = split_outside_parens(l, &["及び", "並びに", "、"]);
+    let mut caps = Vec::new();
+    for p in &pieces {
+        match piece.captures(p) {
+            Some(c) => caps.push(c),
+            None => return Ok(None),
+        }
+    }
+    // 「本則」だけは本則の全部（別の規則で読む）
+    if caps.len() == 1 && &caps[0]["path"] == "本則" && caps[0].name("ex").is_none() {
+        return Ok(None);
+    }
+    let mut out = Vec::new();
+    let mut parent: ContainerPath = Vec::new();
+    for c in caps {
+        let except_all = match c.name("ex") {
+            Some(ex) => split_outside_parens(ex.as_str(), &["及び", "並びに", "、"]),
+            None => Vec::new(),
+        };
+        // 除く容器の題名（「第四章の章名」「第六章第三節第二款の款名」）と、除く条・項
+        let mut except_titles = Vec::new();
+        let mut rest = Vec::new();
+        for t in except_all {
+            match ["の章名", "の節名", "の款名", "の編名", "の目名"]
+                .iter()
+                .find_map(|x| t.strip_suffix(x))
+            {
+                Some(base) => except_titles.push(container_path(base)),
+                None => rest.push(t),
+            }
+        }
+        let except = if rest.is_empty() {
+            Vec::new()
+        } else {
+            expand_locs(&rest.join("、"), ante)?
+        };
+        let paths = if &c["path"] == "本則" {
+            vec![Vec::new()]
+        } else {
+            let mut ps = container_range(&c["path"]);
+            // 「第二編第二章から…及び第十一章から…」: 後の容器は前の容器の外側を受け継ぐ
+            for p in &mut ps {
+                if let (Some(first), false) = (p.first(), parent.is_empty()) {
+                    if let Some(i) = parent.iter().position(|(k, _)| k == &first.0) {
+                        let mut full = parent[..i].to_vec();
+                        full.extend(p.iter().cloned());
+                        *p = full;
+                    }
+                }
+            }
+            if let Some(p) = ps.first() {
+                parent = p.clone();
+            }
+            ps
+        };
+        for path in paths {
+            out.push(ContainerScope {
+                path,
+                except: except.clone(),
+                except_titles: except_titles.clone(),
+            });
+        }
+    }
+    Ok(Some(out))
+}
+
+/// 位置の列挙から「（…を除く。）」を外す。除く位置は、その前の位置（列挙の区切りから）と組にして返す
+fn strip_exceptions(l: &str) -> (String, Vec<(String, String)>) {
+    static EX: OnceLock<Regex> = OnceLock::new();
+    let ex = EX.get_or_init(|| re(r"（(?P<ex>[^（）]+)を除く。）"));
+    let mut clean = String::new();
+    let mut out = Vec::new();
+    let mut last = 0;
+    for c in ex.captures_iter(l) {
+        let m = c.get(0).expect("全体");
+        clean.push_str(&l[last..m.start()]);
+        // 列挙の中でのこの位置（最後の「及び」「、」「並びに」の後ろ）
+        let head = split_outside_parens(&clean, &["及び", "並びに", "、"])
+            .pop()
+            .unwrap_or_default();
+        // 「同項」「第八項」だけの位置は、列挙の頭から読んだ位置で解く
+        let head = if head.starts_with('同') || clean.len() == head.len() {
+            head
+        } else {
+            clean.clone()
+        };
+        out.push((head, c["ex"].to_string()));
+        last = m.end();
+    }
+    clean.push_str(&l[last..]);
+    (clean, out)
 }
 
 /// 別表の行の範囲「八の三」から「八の五」まで（最後の番号だけが動く）
@@ -876,6 +1026,8 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
 impl Ante {
     fn empty() -> Ante {
         Ante {
+            excepts: Vec::new(),
+            para_art: None,
             article: None,
             paragraph: None,
             item: None,
@@ -946,6 +1098,10 @@ type ContainerPath = Vec<(lawean_source::ContainerKind, String)>;
 
 #[derive(Clone)]
 struct Ante {
+    /// 位置の列挙の中の除く位置（「同項（第三号を除く。）及び…」）: 位置と、その中で除くところ
+    excepts: Vec<(Loc, Vec<Loc>)>,
+    /// 項だけの附則の項を移した先の条（「附則第十六項を附則第二十六条第一項とし、附則第十七項を同条第二項とし」の「同条」）
+    para_art: Option<ArticleNum>,
     article: Option<ArticleNum>,
     paragraph: Option<u32>,
     item: Option<String>,
@@ -972,7 +1128,7 @@ struct Ante {
     /// 直前の位置が表の中（「別表第四表名称の欄中「A」を「B」に、「C」を「D」に改め」の続き、「同表」）
     tedit: Option<(TableRef, String)>,
     /// 直前の字句の操作の範囲（「第三章（第四十九条を除く。）中「A」を「B」に、「C」を「D」に改める」の続き）
-    scope: Option<(ContainerPath, Vec<Loc>)>,
+    scope: Option<Vec<ContainerScope>>,
     /// 直前の字句の操作が条の付記（「第七十一条の付記中「A」を「B」に、「C」を「D」に改める」の続き）
     note: Option<ArticleNum>,
     /// 直前の改正規定（「同改正規定中」）
@@ -1179,6 +1335,7 @@ fn loc(s: &str, ante: &mut Ante) -> Result<Loc, ParseError> {
     });
     // 位置を新しく言えば文の限定と列挙は解ける
     ante.whole = false;
+    ante.excepts.clear();
     ante.tedit = None;
     ante.scope = None;
     ante.note = None;
@@ -1644,38 +1801,35 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     }
     // 「第三章中「第五節　収容」を…」「第二章第四節中「…」を削り」: 容器の中の字句
     // 「本則（第九条、第十条…を除く。）中」「第三章（第四十九条を除く。）中」: 除く条の外
-    static CONT: OnceLock<Regex> = OnceLock::new();
-    let cont = CONT.get_or_init(|| {
-        re(r"^(?P<path>本則|(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)(?:（(?P<ex>.+)を除く。）)?$")
-    });
-    let scope = match loc_part.and_then(|l| cont.captures(l)) {
-        Some(c) if &c["path"] != "本則" || c.name("ex").is_some() => {
-            let path = container_path(&c["path"]);
-            let except = match c.name("ex") {
-                Some(ex) => expand_locs(ex.as_str(), ante)?,
-                None => Vec::new(),
-            };
-            Some((path, except))
-        }
-        Some(_) => None,
-        None if loc_part.is_none() => ante.scope.clone(),
-        None => None,
+    // 「第二編第二章から第八章まで（…を除く。）及び第十一章から第十四章まで（…を除く。）の規定中」: 容器の列挙
+    let scope = match loc_part {
+        Some(l) => container_scopes(l.trim_end_matches("の規定"), ante)?,
+        None => ante.scope.clone(),
     };
-    if let Some((path, except)) = scope {
-        if !path.is_empty() {
-            ante.container = path.clone();
+    if let Some(scopes) = scope {
+        if let Some(p) = scopes
+            .first()
+            .map(|s| s.path.clone())
+            .filter(|p| !p.is_empty())
+        {
+            ante.container = p;
         }
         ante.article = None;
-        ante.scope = Some((path.clone(), except.clone()));
-        return Ok(
-            phrase_tail(rest, &phrases, |from, to| Op::ReplaceInContainer {
-                path: path.clone(),
-                except: except.clone(),
+        ante.scope = Some(scopes.clone());
+        let mut v = Vec::new();
+        for sc in &scopes {
+            let Some(w) = phrase_tail(rest, &phrases, |from, to| Op::ReplaceInContainer {
+                path: sc.path.clone(),
+                except: sc.except.clone(),
+                except_titles: sc.except_titles.clone(),
                 from: from.clone(),
                 to,
-            })
-            .map(PhraseOps),
-        );
+            }) else {
+                return Ok(None);
+            };
+            v.extend(w);
+        }
+        return Ok(Some(PhraseOps(v)));
     }
     // 「本則中「A」を「B」に改める」、位置を書かない最初の字句（古い法律の「「勅令」を「政令」に改める」）: 本則の全部
     let whole = loc_part == Some("本則") || (loc_part.is_none() && (ante.fresh || ante.whole));
@@ -1855,8 +2009,21 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     let ats: Vec<Loc> = match loc_part {
         // 「同条第四項及び第六項中「A」を削る」: 位置の列挙（置換・追加の列挙は規則の側で展開する）
         Some(l) if l.contains("及び") || l.contains('、') || l.contains("まで") => {
-            let v = expand_locs(l, ante)?;
+            // 「同条第三項（第一号を除く。）及び第八項」: 除く位置は外して列挙し、位置ごとに覚える
+            let (clean, exs) = strip_exceptions(l);
+            let snapshot = ante.clone();
+            let v = expand_locs(&clean, ante)?;
+            let mut excepts = Vec::new();
+            for (head, ex) in exs {
+                let mut a = snapshot.clone();
+                let at = expand_locs(&head, &mut a)?;
+                let Some(at) = at.last().cloned() else {
+                    return Ok(None);
+                };
+                excepts.push((at, expand_locs(&ex, &mut a)?));
+            }
             ante.locs = v.clone();
+            ante.excepts = excepts;
             v
         }
         Some(l) => vec![loc(l, ante)?],
@@ -2929,6 +3096,7 @@ fn parse_instruction_split(
             ("append_structure", r"^本則に次の{N}条及び{N}(?:編|章|節)を加え(?:る)?$"),
             // 「同号イからニまでを次のように改める」「同号イ及びロを削る」: 号の下のイロハの列挙
             ("subitems_edit", r"^(?P<loc>.*?号(?:の{N})*)?(?P<a>{S})(?:から(?P<b>{S})まで|(?P<list>(?:(?:、|及び){S})+))を(?P<act>次のように改め(?:る)?|削(?:り|る))$"),
+            ("suppl_para_to_art", r"^(?:附則(?:第(?P<p>{N})項)?|(?P<same>同項))を(?:附則第(?P<q>{N})条|(?P<samea>同条))(?:第(?P<r>{N})項)?と(?:し|する)$"),
             ("renumber_para", r"^(?P<loc>.+?)中第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             // 「同条を同条第二項とし」: 項番号の無い 1 項だけの条の本文を第二項に
             ("renumber_whole_para", r"^(?P<loc>(?:附則)?第{N}条(?:の{N})*|同条|附則)を(?:同条|附則)?第(?P<q>{N})項と(?:し|する)$"),
@@ -2994,7 +3162,6 @@ fn parse_instruction_split(
             ("delete_toc", r"^目次(?:及び(?P<rest>.+))?を削(?:り|る)$"),
             ("delete_title", r"^題名(?P<toc>及び目次(?:（[^）]*）)?)?を削(?:り|る)$"),
             // 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則を条に
-            ("suppl_para_to_art", r"^(?:附則(?:第(?P<p>{N})項)?|(?P<same>同項))を附則第(?P<q>{N})条と(?:し|する)$"),
             // 「同号にイとして次のように加える」「同号ロの次にハとして次のように加える」
             ("add_sub_as", r"^(?P<loc>.+?号(?:の{N})*(?:{S})?)(?:(?P<after>{S})の次)?に(?:同号)?(?P<k>{S})(?:(?:及び|から){S}(?:まで)?)?として次のように加え(?:る)?$"),
             // 「附則第一項の項番号を削る」: 残った 1 項の番号を外す（項番号の無い本文に）
@@ -3134,6 +3301,7 @@ fn parse_instruction_split(
                 && !loc_part.contains("のうち")
                 && !loc_part.ends_with("付記")
                 && !loc_part.contains("改正規定")
+                && !is_container_scope_list(loc_part)
                 && !(ante.tedit.is_some()
                     && (loc_part.starts_with("同号")
                         || loc_part.starts_with("同表")
@@ -3160,11 +3328,11 @@ fn parse_instruction_split(
                 || loc_part.contains('、'))
         {
             if let Some(PhraseOps(v)) = parse_phrase_op(seg, &mut ante)? {
-                ops.extend(v);
+                ops.extend(with_excepts(v, &ante));
                 continue;
             }
             if let Some(PhraseOps(v)) = parse_phrase_op_loose(seg, &mut ante)? {
-                ops.extend(v);
+                ops.extend(with_excepts(v, &ante));
                 continue;
             }
         }
@@ -3302,7 +3470,10 @@ fn parse_instruction_split(
                 } else {
                     (g("a"), format!("{}{}", g("a"), g("b")))
                 };
-                for tok in g("loc")
+                // 「同条第三項（第一号を除く。）及び第八項中」: 除く位置は外して読み、位置ごとに覚える
+                let (loc_clean, exs) = strip_exceptions(&g("loc"));
+                let snapshot = ante.clone();
+                for tok in loc_clean
                     .split("並びに")
                     .flat_map(|x| x.split("及び"))
                     .flat_map(|x| x.split('、'))
@@ -3385,22 +3556,36 @@ fn parse_instruction_split(
                     }
                 }
                 let ats = expand_locs(&rest_tokens.join("及び"), &mut ante)?;
-                ante.locs = ats.clone();
-                for at in ats {
-                    ops.push(if *name == "replace" {
-                        Op::Replace {
-                            at,
-                            from: g("a"),
-                            to: g("b"),
-                        }
-                    } else {
-                        Op::InsertAfterPhrase {
-                            at,
-                            anchor: g("a"),
-                            text: g("b"),
-                        }
-                    });
+                let mut excepts = Vec::new();
+                for (head, ex) in exs {
+                    let mut a = snapshot.clone();
+                    let at = expand_locs(&head, &mut a)?;
+                    let Some(at) = at.last().cloned() else {
+                        return Err(ParseError::Unrecognized(seg.to_string()));
+                    };
+                    excepts.push((at, expand_locs(&ex, &mut a)?));
                 }
+                ante.locs = ats.clone();
+                ante.excepts = excepts;
+                let v: Vec<Op> = ats
+                    .into_iter()
+                    .map(|at| {
+                        if *name == "replace" {
+                            Op::Replace {
+                                at,
+                                from: g("a"),
+                                to: g("b"),
+                            }
+                        } else {
+                            Op::InsertAfterPhrase {
+                                at,
+                                anchor: g("a"),
+                                text: g("b"),
+                            }
+                        }
+                    })
+                    .collect();
+                ops.extend(with_excepts(v, &ante));
                 break;
             }
             let op = match *name {
@@ -4307,10 +4492,27 @@ fn parse_instruction_split(
                     Op::DeleteTitle
                 }
                 "suppl_para_to_art" => {
-                    let to = ArticleNum::Single {
-                        base: num("q"),
-                        branch: vec![],
+                    // 「同項を同条第四項とし」は、直前が項だけの附則の項のときだけ（条の中なら項の付け替え）
+                    let bare_suppl = ante.suppl
+                        && matches!(
+                            &ante.article,
+                            Some(ArticleNum::Single { base: 0, .. }) | None
+                        );
+                    if (!g("same").is_empty() && !bare_suppl)
+                        || (!g("samea").is_empty() && ante.para_art.is_none())
+                    {
+                        matched = false;
+                        continue;
+                    }
+                    let to = if g("samea").is_empty() {
+                        ArticleNum::Single {
+                            base: num("q"),
+                            branch: vec![],
+                        }
+                    } else {
+                        ante.para_art.clone().expect("同条")
                     };
+                    let para = (!g("r").is_empty()).then(|| num("r"));
                     let from = if !g("same").is_empty() {
                         ante.paragraph
                             .ok_or_else(|| ParseError::NoAntecedent(seg.to_string()))?
@@ -4320,8 +4522,9 @@ fn parse_instruction_split(
                         num("p")
                     };
                     ante.article = Some(to.clone());
+                    ante.para_art = Some(to.clone());
                     ante.suppl = true;
-                    Op::ParagraphToArticle { from, to }
+                    Op::ParagraphToArticle { from, to, para }
                 }
                 "add_sub_as" => {
                     let l = loc(&g("loc"), &mut ante)?;

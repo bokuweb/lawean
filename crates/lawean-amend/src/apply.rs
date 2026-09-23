@@ -482,6 +482,7 @@ pub(crate) fn apply_instruction(
             Op::ReplaceInContainer {
                 path,
                 except,
+                except_titles,
                 from,
                 to,
             } => {
@@ -496,25 +497,33 @@ pub(crate) fn apply_instruction(
                 }
                 let skip = |a: &ArticleNum| except.iter().any(|l| &l.article == a);
                 let mut n = 0;
+                // 除く容器の題名（外側からの道筋で比べる）
+                let skip_title =
+                    |p: &[(ContainerKind, String)]| except_titles.iter().any(|x| x == p);
+                #[allow(clippy::too_many_arguments)]
                 fn go(
                     ps: &mut [Provision],
+                    at: &mut Vec<(ContainerKind, String)>,
                     from: &str,
                     to: &str,
                     n: &mut usize,
                     skip: &dyn Fn(&ArticleNum) -> bool,
+                    skip_title: &dyn Fn(&[(ContainerKind, String)]) -> bool,
                     protect: &[String],
                 ) {
                     for p in ps {
                         match p {
                             Provision::Container(c) => {
-                                if let Some(t) = &mut c.title {
+                                at.push((c.kind, c.num.clone().unwrap_or_default()));
+                                if let Some(t) = c.title.as_mut().filter(|_| !skip_title(at)) {
                                     let cur = inline_text(t);
                                     if cur.contains(from) {
                                         *n += cur.matches(from).count();
                                         *t = vec![Inline::Text(cur.replace(from, to))];
                                     }
                                 }
-                                go(&mut c.children, from, to, n, skip, protect);
+                                go(&mut c.children, at, from, to, n, skip, skip_title, protect);
+                                at.pop();
                             }
                             Provision::Article(a) if !skip(&a.num) => {
                                 *n += replace_in_article_part(
@@ -526,7 +535,17 @@ pub(crate) fn apply_instruction(
                     }
                 }
                 let list = children_mut(doc, path)?;
-                go(list, from, &mark(to), &mut n, &skip, &inserted);
+                let mut at = path.clone();
+                go(
+                    list,
+                    &mut at,
+                    from,
+                    &mark(to),
+                    &mut n,
+                    &skip,
+                    &skip_title,
+                    &inserted,
+                );
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
                         at: if path.is_empty() {
@@ -608,6 +627,11 @@ pub(crate) fn apply_instruction(
             Op::InsertHeadingsBefore { .. } => {
                 return Err(ApplyError::Unsupported(
                     "条の前に章名・目次を置く（条を容器に包み直す）".into(),
+                ))
+            }
+            Op::Except { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "除く位置（「（第三号を除く。）」）のある字句の改正".into(),
                 ))
             }
             Op::Suppl(inner) => {
