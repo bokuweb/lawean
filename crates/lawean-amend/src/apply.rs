@@ -573,6 +573,26 @@ pub(crate) fn apply_instruction(
                     });
                 }
             }
+            Op::DeleteSupplNote { article } => {
+                let art = article_mut(doc, article)?;
+                let before = art.children.len();
+                art.children
+                    .retain(|c| !matches!(c, ArticleChild::Raw(e) if e.name == "SupplNote"));
+                if art.children.len() == before {
+                    return Err(ApplyError::BadContent(format!(
+                        "{}に付記が無い",
+                        article_label(article)
+                    )));
+                }
+            }
+            Op::MoveArticle { .. } | Op::MoveContainer { .. } | Op::MoveParagraph { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "条・容器・項を別の場所へ移す".into(),
+                ))
+            }
+            Op::ReplaceStructure { scope, .. } => {
+                return Err(ApplyError::Unsupported(format!("{scope}をまとめて改める")))
+            }
             Op::AmendmentEdit { target, .. } => {
                 return Err(ApplyError::Unsupported(format!(
                     "改正規定そのものの操作（{target}）"

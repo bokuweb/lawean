@@ -234,6 +234,28 @@ pub enum Op {
         from: String,
         to: String,
     },
+    /// 「第百一条の付記を削る」
+    DeleteSupplNote { article: ArticleNum },
+    /// 「同条を第四章第三節中第三十六条とする」: 条を別の容器（`path`）へ移して番号を付け替える
+    MoveArticle {
+        from: ArticleNum,
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        to: ArticleNum,
+    },
+    /// 「第四章の二第三節を第四章の三第一節とする」: 容器を別の容器の中へ移す
+    MoveContainer {
+        from: Vec<(lawean_source::ContainerKind, String)>,
+        to: Vec<(lawean_source::ContainerKind, String)>,
+    },
+    /// 「同条第二項を第百十三条の二の六とする」「同項を附則第二十一条第一項とし」: 項を条（の項）にする
+    MoveParagraph {
+        article: ArticleNum,
+        paragraph: u32,
+        to: String,
+    },
+    /// 「第二編第三章の章名及び第八十一条から第八十八条までを次のように改める」「同条ただし書及び各号を次のように改める」:
+    /// 種類の違う位置をまとめて改める。`scope` は位置の字面
+    ReplaceStructure { scope: String, text: Vec<String> },
     /// 「第六十五条の付記を次のように改める」+ 付記の行
     SetSupplNote {
         article: ArticleNum,
@@ -512,6 +534,8 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::MoveContainer { .. }
+            | Op::ReplaceStructure { .. }
             | Op::AmendmentEdit { .. }
             | Op::SetTitleAndToc { .. }
             | Op::ReplacePairs { .. }
@@ -524,7 +548,10 @@ impl Op {
             | Op::SetContainerTitles { .. }
             | Op::Suppl(_) => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
+            Op::MoveArticle { from, .. } => Some(from),
             Op::DeleteArticleTitle { article }
+            | Op::DeleteSupplNote { article }
+            | Op::MoveParagraph { article, .. }
             | Op::SetSupplNote { article, .. }
             | Op::ReplaceSupplNote { article, .. }
             | Op::ReplaceInAmendment { article, .. } => Some(article),
@@ -676,7 +703,10 @@ impl Op {
         if let Op::SubitemsEdit { text, .. } = self {
             return text.is_some();
         }
-        if let Op::ReplacePairs { .. } | Op::SetSupplNote { .. } | Op::SetTitleAndToc { .. } = self
+        if let Op::ReplacePairs { .. }
+        | Op::SetSupplNote { .. }
+        | Op::SetTitleAndToc { .. }
+        | Op::ReplaceStructure { .. } = self
         {
             return true;
         }
@@ -777,7 +807,8 @@ impl Op {
             }
             | Op::ReplacePairs { text, .. }
             | Op::SetSupplNote { text, .. }
-            | Op::SetTitleAndToc { text } => text.push(line),
+            | Op::SetTitleAndToc { text }
+            | Op::ReplaceStructure { text, .. } => text.push(line),
             Op::ParagraphCaption {
                 edit: CaptionEdit::Set(text),
                 ..

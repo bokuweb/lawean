@@ -319,6 +319,37 @@ fn segment(op: &Op, last: bool) -> String {
             article_label(article),
             end("改め", "改める")
         ),
+        Op::DeleteSupplNote { article } => {
+            format!("{}の付記を{}", article_label(article), end("削り", "削る"))
+        }
+        Op::MoveArticle { from, path, to } => format!(
+            "{}を{}中{}と{}",
+            article_label(from),
+            path_label(path),
+            article_label(to),
+            end("し", "する")
+        ),
+        Op::MoveContainer { from, to } => {
+            format!(
+                "{}を{}と{}",
+                path_label(from),
+                path_label(to),
+                end("し", "する")
+            )
+        }
+        Op::MoveParagraph {
+            article,
+            paragraph,
+            to,
+        } => format!(
+            "{}第{}項を{to}と{}",
+            article_label(article),
+            to_kanji(*paragraph),
+            end("し", "する")
+        ),
+        Op::ReplaceStructure { scope, .. } => {
+            format!("{scope}を次のように{}", end("改め", "改める"))
+        }
         Op::AmendmentEdit { target, action } => match action {
             TableAction::Replace { .. } => format!("{target}を次のように{}", end("改め", "改める")),
             TableAction::Delete => format!("{target}を{}", end("削り", "削る")),
@@ -980,7 +1011,8 @@ fn content_of(op: &Op) -> &[String] {
         }
         | Op::ReplacePairs { text, .. }
         | Op::SetSupplNote { text, .. }
-        | Op::SetTitleAndToc { text } => text,
+        | Op::SetTitleAndToc { text }
+        | Op::ReplaceStructure { text, .. } => text,
         Op::InsertContainersAfterArticle { text, .. }
         | Op::InsertHeadingsBefore { text, .. }
         | Op::SetContainerTitles { text, .. } => text,
