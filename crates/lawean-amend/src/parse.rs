@@ -170,10 +170,11 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             continue;
         }
         if amending_chapter.is_match(line) {
-            let next = lines[li + 1..]
-                .iter()
-                .enumerate()
-                .find(|(_, l)| !l.trim().is_empty());
+            // 「第三章　内閣府関係」「第一節　本府関係」と続く見出しは読み飛ばして、その次の行で決める
+            let next = lines[li + 1..].iter().enumerate().find(|(_, l)| {
+                let t = l.trim_start_matches(['\u{3000}', ' ']).trim_end();
+                !t.is_empty() && !amending_chapter.is_match(t)
+            });
             if next.is_none_or(|(k, n)| {
                 let n = n.trim_start_matches(['\u{3000}', ' ']).trim_end();
                 caption.is_match(n)
@@ -294,7 +295,11 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
                 && (!pending || looks_like_instruction(line))
         };
         if is_instruction {
-            let ops = parse_instruction_with(line, &mut unit_ante)?;
+            let ops = parse_instruction_with(line, &mut unit_ante).inspect_err(|_| {
+                if std::env::var("LAWEAN_DEBUG_LINES").is_ok() {
+                    eprintln!("line: {line}");
+                }
+            })?;
             unit.instructions.push(Instruction {
                 text: line.to_string(),
                 ops,
@@ -303,10 +308,25 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             // 追加する条文。直前の指示の、内容を取る最後の操作に付ける
             let target = unit
                 .instructions
-                .last_mut()
-                .and_then(|ins| ins.ops.iter_mut().rev().find(|o| o.takes_content()));
+                .last()
+                .and_then(|ins| ins.ops.iter().rposition(|o| o.takes_content()));
             match target {
-                Some(op) => op.push_content(line.to_string()),
+                Some(idx) => {
+                    let ops = &mut unit.instructions.last_mut().unwrap().ops;
+                    // 位置の列挙から出た同じ種類の操作（「第十項及び第十一項に後段として次のように加える」）は同じ内容を受ける
+                    let before = content_len(&ops[idx]);
+                    let kind = std::mem::discriminant(&ops[idx]);
+                    ops[idx].push_content(line.to_string());
+                    for k in (0..idx).rev() {
+                        if before.is_none()
+                            || std::mem::discriminant(&ops[k]) != kind
+                            || content_len(&ops[k]) != before
+                        {
+                            break;
+                        }
+                        ops[k].push_content(line.to_string());
+                    }
+                }
                 // 内容を待つ操作が無いのに字下げが内容の形: 字下げの崩れたページ。改め文の形なら改め文
                 None if looks_like_instruction(line) => {
                     let ops = parse_instruction_with(line, &mut unit_ante)?;
@@ -853,6 +873,8 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         _ if seg.starts_with('「') => (None, seg),
         _ => return Ok(None),
     };
+    // 位置の後ろ全部（「題名及び第一条中…」「本則及び別表第一中…」で残りの位置に付け直す）
+    let full_rest = rest;
     let Some((a, rest)) = take_quoted(rest) else {
         return Ok(None);
     };
@@ -919,18 +941,19 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         }
     }
     let appdx: Option<(String, String)> = match loc_part {
-        Some(l) => appdx_re.captures(l).map(|c| {
-            appdx_sub = c.name("sub").map(|m| m.as_str().to_string());
-            // 「同表の…の項」は直前の別表
+        Some(l) => appdx_re.captures(l).and_then(|c| {
+            // 「同表の…の項」は直前の別表（直前が条の中の表なら、下の表の中の位置で読む）
             let table = match &c["table"] {
-                "同表" => ante
-                    .appdx
-                    .as_ref()
-                    .map(|(t, _)| t.clone())
-                    .unwrap_or_default(),
+                "同表" => match (&ante.appdx, &ante.tedit) {
+                    (Some((t, _)), _) => t.clone(),
+                    (None, Some((TableRef::Appdx(t), _))) => t.clone(),
+                    (None, Some(_)) => return None,
+                    (None, None) => String::new(),
+                },
                 t => t.to_string(),
             };
-            (table, c["row"].to_string())
+            appdx_sub = c.name("sub").map(|m| m.as_str().to_string());
+            Some((table, c["row"].to_string()))
         }),
         None if ante.article.is_none() && !ante.toc => ante.appdx.clone(),
         None => None,
@@ -1046,6 +1069,20 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         ante.tedit = Some((table, path));
         return Ok(v.map(PhraseOps));
     }
+    // 「本則及び別表第一中「A」を「B」に改める」: 本則の全部と残りの位置
+    if let Some(l) = loc_part.and_then(|l| l.strip_prefix("本則及び")) {
+        let Some(mut v) = phrase_tail(rest, &phrases, |from, to| Op::ReplaceAll {
+            from: from.clone(),
+            to,
+        }) else {
+            return Ok(None);
+        };
+        match parse_phrase_op(&format!("{l}中{full_rest}"), ante)? {
+            Some(PhraseOps(w)) => v.extend(w),
+            None => return Ok(None),
+        }
+        return Ok(Some(PhraseOps(v)));
+    }
     // 題名の字句: 「題名中「A」を「B」に改める」。「題名及び第一条中「A」を「B」に改める」は題名と残りの位置の両方
     let title_and = loc_part.and_then(|l| l.strip_prefix("題名及び"));
     if loc_part == Some("題名") || title_and.is_some() || (loc_part.is_none() && ante.title) {
@@ -1058,7 +1095,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         ante.title = true;
         if let Some(l) = title_and {
             ante.title = false;
-            match parse_phrase_op(&format!("{l}中{rest}"), ante)? {
+            match parse_phrase_op(&format!("{l}中{full_rest}"), ante)? {
                 Some(PhraseOps(w)) => v.extend(w),
                 None => return Ok(None),
             }
@@ -1409,6 +1446,17 @@ fn has_article_table(s: &str) -> bool {
         let next = &s[i + "の表".len()..];
         prev.is_some_and(|c| "条項号一二三四五六七八九十百千".contains(c)) && !next.starts_with("以外")
     })
+}
+
+/// 位置の列挙から並んで出る、内容を受ける操作の受けた行の数（それ以外は None）
+fn content_len(op: &Op) -> Option<usize> {
+    match op {
+        Op::AppendSentence { text, .. }
+        | Op::AppendParagraph { text, .. }
+        | Op::InsertParagraphAfter { text, .. }
+        | Op::AppendItem { text, .. } => Some(text.len()),
+        _ => None,
+    }
 }
 
 /// 「同表」の指す別表（別表の行の先行詞か、表の中の位置の先行詞）
@@ -1936,6 +1984,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         let loc_part = seg.split("中「").next().unwrap_or("");
         let listed = (loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで"))
             && !loc_part.starts_with("題名及び")
+            && !loc_part.starts_with("本則及び")
             && !loc_part.starts_with("本則（")
             && !(loc_part.starts_with('第') && loc_part.ends_with("を除く。）"))
             && !loc_part.contains("のうち")
