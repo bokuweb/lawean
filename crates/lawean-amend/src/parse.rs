@@ -749,7 +749,7 @@ fn split_segments_with(s: &str, strict: bool) -> Vec<String> {
         // 「第一号ニ、ホ、ヘ(11)及びチ中」の「ホ」: 細目だけの断片も位置
         static SUB_ONLY: OnceLock<Regex> = OnceLock::new();
         let sub_only = SUB_ONLY
-            .get_or_init(|| re(r"^[{K}](?:[（(][^）)「」、]{1,6}[）)])*(?:$|及び|から|並びに)"));
+            .get_or_init(|| re(r"^(?:[{K}](?:[（(][^）)「」、]{1,6}[）)])*|(?:[（(][^）)「」、]{1,8}[）)])+)(?:$|及び|から|並びに)"));
         let loc_only = (seg.starts_with('第')
             || (!pending.is_empty() || merged.last().is_some_and(|m| !m.ends_with(['し', 'る', 'め', 'え', 'り', 'げ'])))
                 && sub_only.is_match(&seg)
@@ -1041,6 +1041,7 @@ fn amend_inner_edit(seg: &str, ante: &mut Ante) -> Option<Op> {
     let target = if let Some(r) = t.strip_prefix("同改正規定") {
         format!("{head}{r}")
     } else if t.starts_with('同')
+        || t.ends_with("に係る部分")
         || t.starts_with('第') && !t.contains('条')
         || t.chars()
             .next()
@@ -1881,6 +1882,26 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     // 「第四条第一項の改正規定中「A」を「B」に、「C」を「D」に改める」の続き
     if loc_part.is_none() {
         if let Some(target) = ante.amend.clone() {
+            return Ok(
+                phrase_tail(rest, &phrases, |from, to| Op::ReplaceInAmendment {
+                    article: ArticleNum::Single {
+                        base: 0,
+                        branch: vec![],
+                    },
+                    target: target.clone(),
+                    from: from.clone(),
+                    to,
+                })
+                .map(PhraseOps),
+            );
+        }
+    }
+    // 「…改正規定のうち第二百七十条の見出し中「A」を「B」に改め、同条中「C」を「D」に改め」
+    // 「…改正規定のうち、第二十三条の八の見出しに係る部分中…、同条第一項に係る部分中…」: 改正規定の中の位置の続き
+    if let (Some(l), Some(base)) = (loc_part, ante.amend.clone()) {
+        if !l.contains("改正規定") && (l.starts_with('同') || l.ends_with("に係る部分")) {
+            let head = base.split("のうち").next().unwrap_or(&base).to_string();
+            let target = format!("{head}のうち{l}");
             return Ok(
                 phrase_tail(rest, &phrases, |from, to| Op::ReplaceInAmendment {
                     article: ArticleNum::Single {
@@ -3241,6 +3262,53 @@ pub fn parse_instruction(line: &str) -> Result<Vec<Op>, ParseError> {
 
 /// 前の文の位置を引き継いで読む（古い改め文は文をまたいで「同条第二項中…」と書く）
 fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, ParseError> {
+    let saved = ante_in.clone();
+    let first = match parse_instruction_core(line, ante_in) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    // 字句の入れ子が深く長い文（改正規定を改める文）は候補が尽きる: 字句の後の動詞と次の位置の切れ目
+    // （「…」を加え、附則第三十二条…」）で区切り、区切りごとに読む
+    static CUT: OnceLock<Regex> = OnceLock::new();
+    let cut = CUT.get_or_init(|| re(r"」(?:を加え|に改め|を削り)、(?:(?:附則)?第|同)"));
+    // 切れ目は字句の中（改め文を含む字句）にもあるので、読める最も長い区切りから取る
+    let norm = normalize_instruction(line);
+    let body = norm.trim_end_matches('。');
+    let mut cuts: Vec<(usize, usize)> = cut
+        .find_iter(body)
+        .map(|m| {
+            let end = m.start() + m.as_str().find('、').expect("、");
+            (end, end + '、'.len_utf8())
+        })
+        .collect();
+    if cuts.is_empty() {
+        return Err(first);
+    }
+    cuts.push((body.len(), body.len()));
+    let mut retry = saved;
+    let mut all = Vec::new();
+    let mut start = 0;
+    while start < body.len() {
+        let mut took = false;
+        for &(end, next) in cuts.iter().rev().filter(|(e, _)| *e > start) {
+            let mut a = retry.clone();
+            if let Ok(v) = parse_instruction_core(&format!("{}。", &body[start..end]), &mut a) {
+                all.extend(v);
+                retry = a;
+                start = next;
+                took = true;
+                break;
+            }
+        }
+        if !took {
+            return Err(first);
+        }
+    }
+    *ante_in = retry;
+    Ok(all)
+}
+
+fn parse_instruction_core(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, ParseError> {
     // 字句に「」が入って切れ目がずれる文は、動詞の後の「、」で切り直して読む。
     // それでも読めなければ、字句の閉じ括弧を後ろに続く語（「を「」「に改め」…）で決め、字句の中の「」を伏せて読む
     let saved = ante_in.clone();
@@ -3253,7 +3321,13 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         *ante_in = retry;
         return Ok(v);
     }
-    for masked in mask_inner_quotes(&normalize_instruction(line), 64) {
+    let amend = line.contains("改正規定");
+    let norm = normalize_instruction(line);
+    let mut cands = mask_inner_quotes(&norm, 64, false);
+    if amend {
+        cands.extend(mask_inner_quotes(&norm, 64, true));
+    }
+    for masked in cands {
         if !masked.contains([MASK_O, MASK_C]) {
             continue;
         }
@@ -3290,7 +3364,7 @@ fn next_instr() -> &'static Regex {
     })
 }
 
-fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
+fn mask_inner_quotes(line: &str, limit: usize, late_first: bool) -> Vec<String> {
     static FROM: OnceLock<Regex> = OnceLock::new();
     static TO: OnceLock<Regex> = OnceLock::new();
     let from_end = FROM.get_or_init(|| {
@@ -3310,6 +3384,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         from_end: &Regex,
         to_end: &Regex,
         amend: bool,
+        late_first: bool,
     ) {
         if out.len() >= limit {
             return;
@@ -3331,17 +3406,45 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
             return;
         }
         let before: String = chars[k.saturating_sub(4)..k].iter().collect();
+        // 置き換えた後の字句は、前の語で閉じ方が決まる: 「を「」の後は「に改め」、「の下に「」の後は「を加え」、
+        // 「とあるのは「」の後は「と」（改め文を含む長い字句の中の「」に改め、」で閉じない）
+        static TO_REPL: OnceLock<Regex> = OnceLock::new();
+        static TO_INS: OnceLock<Regex> = OnceLock::new();
+        static TO_READ: OnceLock<Regex> = OnceLock::new();
+        let _ = to_end;
         let is_to = before.ends_with('を')
             || before.ends_with("下に")
             || before.ends_with("上に")
             || before.ends_with("次に")
             || before.ends_with("あるのは");
-        let pat = if is_to { to_end } else { from_end };
+        let pat: &Regex = if before.ends_with('を') {
+            TO_REPL
+                .get_or_init(|| Regex::new(r"^(?:に改め(?:、|る?(?:。|$))|に(?:、|。|$))").unwrap())
+        } else if before.ends_with("下に") || before.ends_with("上に") || before.ends_with("次に")
+        {
+            TO_INS
+                .get_or_init(|| Regex::new(r"^(?:を加え(?:、|る?(?:。|$))|を(?:、|。|$))").unwrap())
+        } else if before.ends_with("あるのは") {
+            TO_READ.get_or_init(|| Regex::new(r"^(?:と、「|と(?:、|。|$))").unwrap())
+        } else {
+            from_end
+        };
         let mut any = false;
-        for j in k + 1..chars.len() {
-            if chars[j] != '」' {
-                continue;
-            }
+        // 閉じ括弧の候補（先に閉じるものから。`late_first` なら後で閉じるものから）
+        let mut js: Vec<usize> = (k + 1..chars.len()).filter(|&j| chars[j] == '」').collect();
+        if late_first {
+            js.reverse();
+        }
+        // 改正規定を改める文: 中の「」が釣り合う閉じ方（改め文を丸ごと含む字句）を先に
+        if amend {
+            let balanced = |j: usize| {
+                let inner = &chars[k + 1..j];
+                inner.iter().filter(|c| **c == '「').count()
+                    == inner.iter().filter(|c| **c == '」').count()
+            };
+            js.sort_by_key(|&j| !balanced(j));
+        }
+        for j in js {
             let after: String = chars[j + 1..].iter().collect();
             if !pat.is_match(&after) {
                 continue;
@@ -3349,6 +3452,15 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
             // 次の改正文まで呑み込む読み方は採らない（改正規定を改める文の字句は改め文を含む）
             let inner: String = chars[k + 1..j].iter().collect();
             if !amend && next_instr().is_match(&inner) {
+                continue;
+            }
+            // 改め文そのものを加える字句（「同条第六項」の下に「中「A」を「B」に改め、…同項」を加え）は、
+            // 閉じた後が文の終わりか次の改正規定まで（字句の中の「」を加え、「C」…」では閉じない）
+            static NESTED_END: OnceLock<Regex> = OnceLock::new();
+            let nested_end = NESTED_END.get_or_init(|| {
+                Regex::new(r"^(?:を加え|に改め)(?:る?。?$|、[^「」]*改正規定)").unwrap()
+            });
+            if amend && is_to && inner.starts_with("中「") && !nested_end.is_match(&after) {
                 continue;
             }
             any = true;
@@ -3362,7 +3474,17 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
                 });
             }
             acc.push('」');
-            go(chars, j + 1, acc, out, limit, from_end, to_end, amend);
+            go(
+                chars,
+                j + 1,
+                acc,
+                out,
+                limit,
+                from_end,
+                to_end,
+                amend,
+                late_first,
+            );
             acc.truncate(l2);
             if out.len() >= limit {
                 break;
@@ -3371,7 +3493,17 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         if !any {
             // 閉じ方が決まらない「は字句の外の字として残す
             acc.push('「');
-            go(chars, k + 1, acc, out, limit, from_end, to_end, amend);
+            go(
+                chars,
+                k + 1,
+                acc,
+                out,
+                limit,
+                from_end,
+                to_end,
+                amend,
+                late_first,
+            );
         }
         acc.truncate(len);
     }
@@ -3386,6 +3518,7 @@ fn mask_inner_quotes(line: &str, limit: usize) -> Vec<String> {
         from_end,
         to_end,
         amend,
+        late_first,
     );
     out
 }
@@ -3696,8 +3829,10 @@ fn parse_instruction_split(
             && (!loc_part.contains("見出し")
                 || loc_part.contains("（見出しを含む。）")
                 || loc_part.contains("及び")
-                || loc_part.contains("並びに"))
+                || loc_part.contains("並びに")
+                || loc_part.contains("改正規定"))
             && (!loc_part.ends_with("名")
+                || loc_part.contains("改正規定")
                 || loc_part == "題名"
                 || loc_part.contains("及び")
                 || loc_part.contains('、'))
