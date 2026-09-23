@@ -1310,7 +1310,12 @@ impl Binder<'_> {
                 Op::DeleteCaption { article } => {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
-                Op::InsertContainersAfterArticle { .. } | Op::InsertHeadingsBefore { .. } => {
+                Op::InsertContainersAfterArticle { .. }
+                | Op::InsertHeadingsBefore { .. }
+                | Op::DeleteContainer { .. }
+                | Op::ShiftBranchArticles { .. }
+                | Op::ReplaceInContainer { .. }
+                | Op::ReplaceAllExcept { .. } => {
                     return Err(ApplyError::Unsupported(
                         "条の前後に容器を置く改正の id の対応".into(),
                     ))

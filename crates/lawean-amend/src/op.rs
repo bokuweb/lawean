@@ -75,6 +75,8 @@ pub enum TableAction {
     Append { text: Vec<String> },
     /// 「を…とする」
     Renumber { to: String },
+    /// 「第三号から第五号までを一号ずつ繰り上げる」: 位置の範囲の番号を `by` 動かす
+    Shift { by: i32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +186,29 @@ pub enum Op {
     ReplaceTitle { from: String, to: String },
     /// 「目次を削る」
     DeleteToc,
+    /// 「第二章の二を削る」: 枝番の容器 1 つ（`path` は外側から、最後が消す容器）
+    DeleteContainer {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+    },
+    /// 「第十三条の十一から第十三条の十五までを一条ずつ繰り下げ」: 枝番の条の範囲の枝番を `by` 動かす
+    ShiftBranchArticles {
+        base: u32,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
+    /// 「第三章中「第五節　収容」を「第五節　収容及保管」に改める」: 容器の中の字句（容器の題名・条の本文）
+    ReplaceInContainer {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        from: String,
+        to: String,
+    },
+    /// 「本則（第九条、第十条…を除く。）中「A」を「B」に改める」: 除く位置の外の本則の全部
+    ReplaceAllExcept {
+        except: Vec<Loc>,
+        from: String,
+        to: String,
+    },
     /// 「題名の次に次の目次を付する」+ 目次の行（「目次」「第一章　総則（第一条）」…「附則」）。目次の無い法律に目次を足す
     SetToc {
         text: Vec<String>,
@@ -430,6 +455,10 @@ impl Op {
             | Op::DeleteAppdx { .. }
             | Op::InsertHeadingsBefore { .. }
             | Op::DeleteToc
+            | Op::DeleteContainer { .. }
+            | Op::ShiftBranchArticles { .. }
+            | Op::ReplaceInContainer { .. }
+            | Op::ReplaceAllExcept { .. }
             | Op::Suppl(_) => None,
             Op::InsertContainersAfterArticle { after, .. } => Some(after),
             Op::TableEdit { table, .. } => match table {

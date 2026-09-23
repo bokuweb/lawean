@@ -3,7 +3,7 @@
 
     python3 tools/shugiin_corpus_text.py [--cache ~/.cache/lawean/shugiin]
 
-出力: <cache>/txt/<14 桁>.txt（HTML より新しければ作り直さない）
+出力: <cache>/txt/<14 桁>.txt（HTML と変換（shugiin_text.py）より新しければ作り直さない）
 """
 import os
 import subprocess
@@ -19,12 +19,13 @@ import shugiin_text  # noqa: E402
 src = os.path.join(cache, "html")
 dst = os.path.join(cache, "txt")
 os.makedirs(dst, exist_ok=True)
+conv = os.path.getmtime(os.path.join(here, "shugiin_text.py"))
 n = 0
 for f in sorted(os.listdir(src)):
     if not f.endswith(".htm"):
         continue
     out = os.path.join(dst, f[:-4] + ".txt")
-    if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(os.path.join(src, f)):
+    if os.path.exists(out) and os.path.getmtime(out) >= max(conv, os.path.getmtime(os.path.join(src, f))):
         continue
     try:
         text = shugiin_text.convert(open(os.path.join(src, f), "rb").read())

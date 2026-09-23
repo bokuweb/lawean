@@ -329,6 +329,93 @@ pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> R
                 }
             }
             Op::DeleteToc => doc.toc = None,
+            Op::DeleteContainer { path } => delete_container(doc, path)?,
+            Op::ShiftBranchArticles {
+                base,
+                from,
+                to,
+                by,
+            } => {
+                let mut nums: Vec<ArticleNum> = crate::numbering::article_nums(doc)
+                    .into_iter()
+                    .filter(|n| {
+                        matches!(n, ArticleNum::Single { base: b, branch }
+                            if b == base && branch.first().is_some_and(|k| k >= from && k <= to))
+                    })
+                    .collect();
+                if *by > 0 {
+                    nums.reverse();
+                }
+                for n in nums {
+                    let ArticleNum::Single { base, branch } = &n else {
+                        continue;
+                    };
+                    let mut nb = branch.clone();
+                    nb[0] = (nb[0] as i32 + by) as u32;
+                    renumber_article(
+                        doc,
+                        &n,
+                        &ArticleNum::Single {
+                            base: *base,
+                            branch: nb,
+                        },
+                    )?;
+                }
+            }
+            Op::ReplaceInContainer { path, from, to } => {
+                let c = container_mut(doc, path)?;
+                let mut n = 0;
+                fn go(ps: &mut [Provision], from: &str, to: &str, n: &mut usize) {
+                    for p in ps {
+                        match p {
+                            Provision::Container(c) => {
+                                if let Some(t) = &mut c.title {
+                                    let cur = inline_text(t);
+                                    if cur.contains(from) {
+                                        *n += cur.matches(from).count();
+                                        *t = vec![Inline::Text(cur.replace(from, to))];
+                                    }
+                                }
+                                go(&mut c.children, from, to, n);
+                            }
+                            Provision::Article(a) => {
+                                *n += replace_in_article_part(a, None, None, None, None, from, to, &[]);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                go(&mut c.children, from, &mark(to), &mut n);
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: container_label(path),
+                        phrase: from.clone(),
+                    });
+                }
+                inserted.push(to.clone());
+            }
+            Op::ReplaceAllExcept { except, from, to } => {
+                let mut n = 0;
+                for a in crate::numbering::article_nums(doc) {
+                    if except.iter().any(|l| l.paragraph.is_none() && l.item.is_none() && l.article == a) {
+                        continue;
+                    }
+                    if except.iter().any(|l| l.article == a) {
+                        return Err(ApplyError::Unsupported(
+                            "本則（…を除く。）の項・号の単位の除外".into(),
+                        ));
+                    }
+                    let art = article_mut(doc, &a)?;
+                    n += replace_in_article_part(art, None, None, None, None, from, &mark(to), &inserted);
+                }
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: "本則".into(),
+                        phrase: from.clone(),
+                    });
+                }
+                inserted.push(to.clone());
+            }
             Op::InsertContainersAfterArticle { after, text } => {
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;
@@ -903,6 +990,23 @@ pub(crate) fn suppl_article_mut<'a>(
         "附則{}",
         num.to_num_string()
     )))
+}
+
+/// 「第二章の二を削る」: 容器 1 つを消す
+pub(crate) fn delete_container(
+    doc: &mut LegalDocument,
+    path: &[(ContainerKind, String)],
+) -> Result<(), ApplyError> {
+    let Some(((kind, num), parent)) = path.split_last() else {
+        return Err(ApplyError::BadContent("容器が無い".into()));
+    };
+    let list = children_mut(doc, parent)?;
+    let before = list.len();
+    list.retain(|p| !matches!(p, Provision::Container(c) if c.kind == *kind && c.num.as_deref() == Some(num.as_str())));
+    if list.len() == before {
+        return Err(ApplyError::BadContent(format!("{}が無い", container_label(path))));
+    }
+    Ok(())
 }
 
 /// 「第八条の次に次の二章を加える」: 条のある並び（本則または容器の中）で、条の後ろに容器を置く

@@ -164,6 +164,37 @@ fn segment(op: &Op, last: bool) -> String {
             format!("{}の次に次のように{}", article_label(after), end("加え", "加える"))
         }
         Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::DeleteContainer { path } => format!("{}を{}", path_label(path), end("削り", "削る")),
+        Op::ShiftBranchArticles {
+            base,
+            from,
+            to,
+            by,
+        } => format!(
+            "第{b}条の{}から第{b}条の{}までを{}条ずつ繰り{}",
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            },
+            b = to_kanji(*base)
+        ),
+        Op::ReplaceInContainer { path, from, to } if to.is_empty() => {
+            format!("{}中「{from}」を{}", path_label(path), end("削り", "削る"))
+        }
+        Op::ReplaceInContainer { path, from, to } => format!(
+            "{}中「{from}」を「{to}」に{}",
+            path_label(path),
+            end("改め", "改める")
+        ),
+        Op::ReplaceAllExcept { except, from, to } => format!(
+            "本則（{}を除く。）中「{from}」を「{to}」に{}",
+            except.iter().map(loc_label).collect::<Vec<_>>().join("、"),
+            end("改め", "改める")
+        ),
         Op::InsertHeadingsBefore {
             before,
             after,
@@ -214,6 +245,16 @@ fn segment(op: &Op, last: bool) -> String {
                 TableAction::Renumber { to } => {
                     format!("{t}{}を{to}と{}", sep(&p), end("し", "する"))
                 }
+                TableAction::Shift { by } => format!(
+                    "{t}{}を{}ずつ繰り{}",
+                    sep(&p),
+                    to_kanji(by.unsigned_abs()),
+                    if *by > 0 {
+                        end("下げ", "下げる")
+                    } else {
+                        end("上げ", "上げる")
+                    }
+                ),
             }
         }
         // 原始附則: 中の操作の位置に「附則」を冠する（項だけの附則は仮の第0条）
