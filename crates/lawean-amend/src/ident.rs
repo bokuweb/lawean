@@ -1311,6 +1311,16 @@ impl Binder<'_> {
                 Op::DeleteCaption { article } => {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
+                // 原始附則は文書の側だけ（id の世界には載せない）
+                Op::Suppl(inner) => {
+                    let one = Instruction {
+                        text: ins.text.clone(),
+                        ops: vec![(**inner).clone()],
+                    };
+                    crate::apply::with_suppl_as_main(&mut self.doc, |d| {
+                        crate::apply::apply_instruction(d, &one)
+                    })?;
+                }
                 Op::DeleteSentencePart { at, part } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
@@ -1359,7 +1369,7 @@ impl Binder<'_> {
                 }
                 // 目次を付ける: id の世界では toc ノード。無ければ先頭の項の後ろに insertAfter で足す
                 // （id の操作に「先頭に加える」は無い。目次は本文ではないので並びは問わない。あれば replace）
-                Op::SetToc { text } => {
+                Op::SetToc { text, .. } => {
                     let before = toc_text(&self.doc);
                     crate::apply::set_toc(&mut self.doc, text);
                     let new = toc_text(&self.doc).unwrap_or_default();
@@ -1382,6 +1392,7 @@ impl Binder<'_> {
                     }
                 }
                 // 題名は本文ではない
+                Op::ReplaceTitle { from, to } => crate::apply::replace_title(&mut self.doc, from, to)?,
                 Op::SetTitle { text } => {
                     let t = text.join("").trim().to_string();
                     self.doc.title = Some(LawTitle {

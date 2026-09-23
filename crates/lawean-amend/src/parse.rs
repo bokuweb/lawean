@@ -158,9 +158,11 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         }
         if let Some(c) = header.captures(line) {
             list = None;
-            shift = 0;
             unit_ante = Ante::empty();
-            flat = indent == 0 && next_indent_of(li) == Some(0);
+            // 改め文は 2 字下げ。ページによって 1 字（字下げを 1 段深く読む）、字下げ無し（書き出しで見分ける）
+            let next_indent = next_indent_of(li).unwrap_or(2);
+            shift = if indent == 0 { 2usize.saturating_sub(next_indent.max(1)) } else { 0 };
+            flat = indent == 0 && next_indent == 0;
             units.push(AmendUnit {
                 article_of_amending_law: c[1].to_string(),
                 target_title: c[2].to_string(),
@@ -195,6 +197,18 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         let Some(unit) = units.last_mut() else {
             return Err(ParseError::NoHeader);
         };
+        // 古い改め文は位置の前に法律名を冠する（「会計法目次中「A」を「B」に改める」「地方自治法第二条中…」）
+        let line = match line.strip_prefix(unit.target_title.as_str()) {
+            Some(r)
+                if !unit.target_title.is_empty()
+                    && ["目次", "第", "別表", "附則", "題名", "本則"]
+                        .iter()
+                        .any(|h| r.starts_with(h)) =>
+            {
+                r
+            }
+            _ => line,
+        };
         // インデント 2 で「。」で終わる行が指示。ただし「一　…。」の号の行（加える項の中の号）は内容
         let is_item_line = line.split_once('\u{3000}').is_some_and(|(t, _)| {
             !t.is_empty() && t.chars().all(|c| "一二三四五六七八九十".contains(c))
@@ -212,16 +226,47 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
             });
         } else {
             // 追加する条文。直前の指示の、内容を取る最後の操作に付ける
-            let Some(ins) = unit.instructions.last_mut() else {
-                return Err(ParseError::Unrecognized(line.to_string()));
-            };
-            match ins.ops.iter_mut().rev().find(|o| o.takes_content()) {
+            let target = unit
+                .instructions
+                .last_mut()
+                .and_then(|ins| ins.ops.iter_mut().rev().find(|o| o.takes_content()));
+            match target {
                 Some(op) => op.push_content(line.to_string()),
-                None => return Err(ParseError::Unrecognized(line.to_string())),
+                None => {
+                    // 古い改め文は「第六条　削除」「第九条　内閣ハ…」と、改める条をそのまま書く（「第N条を次のように改める」の省略）
+                    let Some(text) = bare_article_instruction(line) else {
+                        return Err(ParseError::Unrecognized(line.to_string()));
+                    };
+                    let mut ops = parse_instruction_with(&text, &mut unit_ante)?;
+                    for op in ops.iter_mut() {
+                        op.push_content(line.to_string());
+                    }
+                    unit.instructions.push(Instruction { text, ops });
+                }
             }
         }
     }
     Ok(units)
+}
+
+/// 「第六条　削除」「第七十三条乃至第七十六条　削除」「第十条ノ三及第十条ノ四　削除」: 条の書き出しの行を、省かれた
+/// 「第N条を次のように改める。」の文にする（条でなければ None）
+fn bare_article_instruction(line: &str) -> Option<String> {
+    static BARE: OnceLock<Regex> = OnceLock::new();
+    let bare = BARE.get_or_init(|| {
+        re(r"^(?P<nums>第{N}条(?:[のノ]{N})*(?:(?:及び?|、|乃至|から)第{N}条(?:[のノ]{N})*(?:まで)?)*)[　 ]")
+    });
+    let c = bare.captures(line)?;
+    let nums = c["nums"].replace('ノ', "の");
+    let nums = match nums.split_once("乃至") {
+        Some((a, b)) => format!("{a}から{b}まで"),
+        None => nums,
+    };
+    let nums = regex::Regex::new("及(?:び)?")
+        .unwrap()
+        .replace_all(&nums, "及び")
+        .to_string();
+    Some(format!("{nums}を次のように改める。"))
 }
 
 /// 字下げの無いページで、行が改め文か（追加する条文でないか）。書き出しが位置（第N条中・同条・附則・目次・別表・題名・本則・「）で、
@@ -231,12 +276,12 @@ pub(crate) fn looks_like_instruction(line: &str) -> bool {
     static ARTICLE: OnceLock<Regex> = OnceLock::new();
     static END: OnceLock<Regex> = OnceLock::new();
     let head = HEAD.get_or_init(|| {
-        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名)")
+        re(r"^(?:第{N}|同(?:条|項|号|章|節|款|編|表)|附則|目次|別表|題名|本則|「|前条|次条|章名|節名|この法律に)")
     });
     let article =
         ARTICLE.get_or_init(|| re(r"^第{N}(?:条|編|章|節|款|目)(?:の{N})*(?:（[^）]*）)?[　 ]"));
     let end = END.get_or_init(|| {
-        re(r"(?:改め|加え|削|と|付|繰り下げ|繰り上げ|繰下げ|繰上げ|掲げ|移)(?:る|す)。$|削る。$|付する。$")
+        re(r"(?:改め|加え|削|と|付|繰り下げ|繰り上げ|繰下げ|繰上げ|掲げ|移)(?:る|す)。$|削る。$|[付附]する。$")
     });
     line.ends_with('。') && head.is_match(line) && !article.is_match(line) && end.is_match(line)
 }
@@ -401,6 +446,7 @@ impl Ante {
             appdx: None,
             fresh: false,
             whole: false,
+            title: false,
         }
     }
 }
@@ -472,6 +518,8 @@ struct Ante {
     fresh: bool,
     /// 直前の字句の操作が本則の全部（「本則中「A」を「B」に、「C」を「D」に改める」の続き）
     whole: bool,
+    /// 直前の字句の操作が題名（「題名中「A」を「B」に、「C」を「D」に改める」の続き）
+    title: bool,
 }
 
 pub(crate) fn art_num(s: &str) -> ArticleNum {
@@ -769,6 +817,26 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         }
         return Ok(None);
     }
+    // 題名の字句: 「題名中「A」を「B」に改める」。「題名及び第一条中「A」を「B」に改める」は題名と残りの位置の両方
+    let title_and = loc_part.and_then(|l| l.strip_prefix("題名及び"));
+    if loc_part == Some("題名") || title_and.is_some() || (loc_part.is_none() && ante.title) {
+        let Some(mut v) = phrase_tail(rest, &phrases, |from, to| Op::ReplaceTitle {
+            from: from.clone(),
+            to,
+        }) else {
+            return Ok(None);
+        };
+        ante.title = true;
+        if let Some(l) = title_and {
+            ante.title = false;
+            match parse_phrase_op(&format!("{l}中{rest}"), ante)? {
+                Some(PhraseOps(w)) => v.extend(w),
+                None => return Ok(None),
+            }
+        }
+        return Ok(Some(PhraseOps(v)));
+    }
+    ante.title = false;
     // 目次の字句: 「目次中「A」を削り」「目次中「A」を「B」に、「C」を「D」に改め」
     if loc_part == Some("目次") || (loc_part.is_none() && ante.toc) {
         ante.toc = true;
@@ -837,10 +905,11 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
     // 位置を省いた続きは、直前の位置の列挙（「第九十四条第一項及び第三項中「A」を「B」に、「C」を「D」に改める」）全部に当てる
     // 条・項の中の表の行: 「第三十八条の表第七十条第二項の項中「A」を「B」に改め」（別表は上で）
     static TROW: OnceLock<Regex> = OnceLock::new();
-    let trow = TROW.get_or_init(|| re(r"^(?P<loc>.+?)の表(?P<row>.+?)の項$"));
+    let trow = TROW.get_or_init(|| re(r"^(?P<loc>.+?)の表(?:(?P<row>.+?)の項)?$"));
     if let Some(c) = loc_part.and_then(|l| trow.captures(l)) {
         let at = loc(&c["loc"], ante)?;
-        let row = c["row"].to_string();
+        // 行を言わない「第二十四条第一項の表中「A」を「B」に改める」は表の全部（row = ""）
+        let row = c.name("row").map(|m| m.as_str().to_string()).unwrap_or_default();
         let mk = |from: String, to: String| Op::ReplaceTableRow {
             at: at.clone(),
             row: row.clone(),
@@ -941,6 +1010,28 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
         }
     }
     Ok(None)
+}
+
+/// 「を削り」「を「B」に改め」「の下に「B」を加え」の尾を読み、字句ごとに `mk(字句, 置き換え後)` の操作にする
+fn phrase_tail(rest: &str, phrases: &[String], mk: impl Fn(&String, String) -> Op) -> Option<Vec<Op>> {
+    if let Some(r) = rest.strip_prefix("を") {
+        if r == "削り" || r == "削る" {
+            return Some(phrases.iter().map(|f| mk(f, String::new())).collect());
+        }
+        if let Some((b, tail)) = take_quoted(r) {
+            if matches!(tail, "に" | "に改め" | "に改める") {
+                return Some(phrases.iter().map(|f| mk(f, b.clone())).collect());
+            }
+        }
+    }
+    if let Some(r) = rest.strip_prefix("の下に") {
+        if let Some((b, tail)) = take_quoted(r) {
+            if matches!(tail, "を" | "を加え" | "を加える") {
+                return Some(phrases.iter().map(|f| mk(f, format!("{f}{b}"))).collect());
+            }
+        }
+    }
+    None
 }
 
 /// 1 つの断片から出る字句の操作（列挙なら複数）
@@ -1233,9 +1324,11 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             // 「同条中第三項を第五項とし、第二項を第四項とし」の続き（条は直前のもの）
             ("renumber_para_cont", r"^第(?P<p>{N})項を第(?P<q>{N})項と(?:し|する)$"),
             ("shift_paras", r"^(?:(?P<loc>.+?)中|同条)?第(?P<p>{N})項から第(?P<q>{N})項までを(?P<k>{N})項ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
-            ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を同条第(?P<q>{N})項と(?:し|する)$"),
+            ("renumber_para_same", r"^(?P<loc>同項|.+?第{N}項)を(?:同条|附則)?第(?P<q>{N})項と(?:し|する)$"),
             // 条ずれ: 「第六十一条を第六十四条とする」「同条を第六十三条とし」
             ("renumber_art", r"^(?:本則中|(?:同編|同章|同節|同款|第{N}(?:編|章|節|款|目)(?:の{N})*)(?:第{N}(?:編|章|節|款|目)(?:の{N})*)*中)?(?P<loc>附則第{N}条(?:の{N})*|第{N}条(?:の{N})*|同条)を(?P<qs>附則)?第(?P<q>{N})条(?P<qb>(?:の{N})*)と(?:し|する)$"),
+            // 「第二号を第一号とし、以下順次一号ずつ繰り上げる」「第四条を削り、以下一条ずつ繰り上げる」: 直前の付け替え・削除の次から（「第Z号まで」が無ければ最後まで）
+            ("shift_rest", r"^以下(?:第(?P<z>{N})(?:条|項|号)まで(?:を)?)?(?:各(?:号|項|条)を)?(?:順次)?(?P<k>{N})(?P<u>条|項|号)ずつ繰り(?P<dir>上げ|下げ)(?:る)?$"),
             ("shift_arts", r"^第(?P<p>{N})条から第(?P<q>{N})条までを(?P<k>{N})条ずつ繰り(?P<dir>下げ|上げ)(?:る)?$"),
             ("insert_para_after", r"^(?P<loc>.+?)の次に次の{N}項を加え(?:る)?$"),
             ("append_para", r"^(?P<loc>.+?)に次の{N}項を加え(?:る)?$"),
@@ -1260,7 +1353,11 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
             // 「第三章を第五章とする」「第一章中第八節を第十節とし」「第六節を第八節とし」
             ("renumber_container", r"^(?:(?P<pre>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)中)?(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+|同編|同章|同節|同款)を(?:同章|同節|同編|同款)?第(?P<q>{N})(?:編|章|節|款|目)(?P<qb>(?:の{N})*)と(?:し|する)$"),
             ("set_title", r"^題名を次のように改め(?:る)?$"),
+            ("set_title_quoted", r"^題名を「(?P<a>[^「」]+)」に改め(?:る)?$"),
+            // 題名の無い古い法律に題名を付ける
+            ("attach_title", r"^この法律に(?:次|左)の題名を附する$"),
             ("set_toc", r"^題名の次に次の目次を付する$"),
+            ("replace_toc_whole", r"^目次を次のように改め(?:る)?$"),
             ("set_container_title", r"^(?P<path>(?:第{N}(?:編|章|節|款|目)(?:の{N})*)+)の(?:編|章|節|款|目)名を次のように改め(?:る)?$"),
             ("replace_whole", r"^(?P<loc>.+?)を次のように改め(?:る)?$"),
             ("delete", r"^(?P<loc>.+?)を削(?:り|る)$"),
@@ -1305,20 +1402,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     if !ends {
                         continue;
                     }
-                    let mut a2 = Ante {
-                        article: ante.article.clone(),
-                        paragraph: ante.paragraph,
-                        item: ante.item.clone(),
-                        toc: ante.toc,
-                        container: ante.container.clone(),
-                        part: ante.part,
-                        locs: ante.locs.clone(),
-                        suppl: ante.suppl,
-                        sub: ante.sub.clone(),
-                        appdx: ante.appdx.clone(),
-                        fresh: ante.fresh,
-                        whole: ante.whole,
-                    };
+                    let mut a2 = ante.clone();
                     // 「「A」を「B」に、「C」を「D」に改め」の列挙: 「」に、「」で区切ってから、各片を緩く読む
                     // （B や D の中の「」が釣り合わなくても、最初の「」を「」で A と B が分かれる）
                     if let Some(v) = parse_phrase_list_loose(&merged, &mut a2) {
@@ -1334,11 +1418,11 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
         // 字句の置換・追加・削除は正規表現でなく手で読む（置換先に「」が入れ子になることがある）。
         // ただし「第百条第三項及び第百三条第四項中」の複数位置は下の規則で展開する。見出しの中は別
         let loc_part = seg.split("中「").next().unwrap_or("");
-        let listed =
-            loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで");
+        let listed = (loc_part.contains("及び") || loc_part.contains('、') || loc_part.contains("まで"))
+            && !loc_part.starts_with("題名及び");
         if (!listed || seg.starts_with('「') || seg.ends_with("削り") || seg.ends_with("削る"))
             && (!loc_part.contains("見出し") || loc_part.ends_with("（見出しを含む。）"))
-            && !loc_part.ends_with("名")
+            && (!loc_part.ends_with("名") || loc_part == "題名")
         {
             if let Some(PhraseOps(v)) = parse_phrase_op(seg, &mut ante)? {
                 ops.extend(v);
@@ -1721,6 +1805,64 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                         suppl: l.suppl || g("qs") == "附則",
                     }
                 }
+                "set_title_quoted" => Op::SetTitle { text: vec![g("a")] },
+                "attach_title" => Op::SetTitle { text: Vec::new() },
+                "shift_rest" => {
+                    let k = num("k") as i32 * if g("dir") == "下げ" { 1 } else { -1 };
+                    let to = if g("z").is_empty() { u32::MAX } else { num("z") };
+                    let base = |n: &str| n.split('_').next().and_then(|b| b.parse::<u32>().ok());
+                    let (prev, suppl) = match ops.last() {
+                        Some(Op::Suppl(inner)) => ((**inner).clone(), true),
+                        Some(op) => (op.clone(), false),
+                        None => return Err(ParseError::NoAntecedent(seg.to_string())),
+                    };
+                    let bad = || ParseError::Unrecognized(seg.to_string());
+                    let op = match (g("u").as_str(), prev) {
+                        ("号", Op::RenumberItem { at, from, .. }) => Op::ShiftItems {
+                            from: base(&from).ok_or_else(bad)? + 1,
+                            at,
+                            to,
+                            by: k,
+                        },
+                        ("号", Op::Delete { at }) if at.item.is_some() => Op::ShiftItems {
+                            from: base(at.item.as_deref().unwrap()).ok_or_else(bad)? + 1,
+                            at: Loc { item: None, ..at },
+                            to,
+                            by: k,
+                        },
+                        ("項", Op::RenumberParagraph { article, from: ParaRef::Num(p), .. }) => {
+                            Op::ShiftParagraphs { article, from: p + 1, to, by: k }
+                        }
+                        ("項", Op::Delete { at }) if at.item.is_none() && at.paragraph.is_some() => {
+                            let Some(ParaRef::Num(p)) = at.paragraph else { unreachable!() };
+                            Op::ShiftParagraphs { article: at.article, from: p + 1, to, by: k }
+                        }
+                        (
+                            "条",
+                            Op::RenumberArticle {
+                                from: ArticleNum::Single { base, branch },
+                                suppl: false,
+                                ..
+                            },
+                        ) if branch.is_empty() => Op::ShiftArticles { from: base + 1, to, by: k },
+                        ("条", Op::Delete { at })
+                            if at.paragraph.is_none() && !at.suppl =>
+                        {
+                            match at.article {
+                                ArticleNum::Single { base, branch } if branch.is_empty() => {
+                                    Op::ShiftArticles { from: base + 1, to, by: k }
+                                }
+                                _ => return Err(bad()),
+                            }
+                        }
+                        _ => return Err(bad()),
+                    };
+                    if suppl {
+                        Op::Suppl(Box::new(op))
+                    } else {
+                        op
+                    }
+                }
                 "shift_arts" => {
                     let by = num("k") as i32 * if g("dir") == "下げ" { 1 } else { -1 };
                     Op::ShiftArticles {
@@ -1924,7 +2066,14 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     }
                 }
                 "set_title" => Op::SetTitle { text: Vec::new() },
-                "set_toc" => Op::SetToc { text: Vec::new() },
+                "set_toc" => Op::SetToc {
+                    text: Vec::new(),
+                    replace: false,
+                },
+                "replace_toc_whole" => Op::SetToc {
+                    text: Vec::new(),
+                    replace: true,
+                },
                 "set_container_title" => Op::SetContainerTitle {
                     path: container_path(&g("path")),
                     text: Vec::new(),
@@ -2223,7 +2372,7 @@ fn parse_instruction_with(line: &str, ante_in: &mut Ante) -> Result<Vec<Op>, Par
                     text: Vec::new(),
                 },
             };
-            ops.push(op);
+            ops.push(op.in_suppl(ante.suppl));
             break;
         }
         if !matched {

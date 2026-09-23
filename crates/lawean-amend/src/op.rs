@@ -139,8 +139,14 @@ pub enum Op {
     ReplaceItem { at: Loc, text: Vec<String> },
     /// 「題名を次のように改める」+ 題名の行
     SetTitle { text: Vec<String> },
+    /// 「題名中「A」を「B」に改める」「題名中「A」の下に「B」を加える」（`to = A + B`）
+    ReplaceTitle { from: String, to: String },
     /// 「題名の次に次の目次を付する」+ 目次の行（「目次」「第一章　総則（第一条）」…「附則」）。目次の無い法律に目次を足す
-    SetToc { text: Vec<String> },
+    SetToc {
+        text: Vec<String>,
+        /// 「目次を次のように改める」（目次の差し替え）。false は目次の無い法律に付ける形
+        replace: bool,
+    },
     /// 「第三章の章名を削る」: 題名の無くなった章は前の章に併合される（中の条は前の章の末尾に）
     DeleteContainerTitle {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -309,6 +315,9 @@ pub enum Op {
         part: SentencePart,
         text: Vec<String>,
     },
+    /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
+    /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
+    Suppl(Box<Op>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +347,7 @@ impl Op {
             | Op::RenumberContainer { .. }
             | Op::ReplaceContainerTitle { .. }
             | Op::SetTitle { .. }
+            | Op::ReplaceTitle { .. }
             | Op::SetContainerTitle { .. }
             | Op::DeleteContainerTitle { .. }
             | Op::DeleteContainers { .. }
@@ -352,7 +362,8 @@ impl Op {
             | Op::InsertAppdxAfter { .. }
             | Op::DeleteAppdxRowSub { .. }
             | Op::RenumberAppdxRowSub { .. }
-            | Op::DeleteAppdx { .. } => None,
+            | Op::DeleteAppdx { .. }
+            | Op::Suppl(_) => None,
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
@@ -423,8 +434,63 @@ impl Op {
         }
     }
 
+    /// 位置（`at`）を持つ操作の位置
+    pub fn loc_mut(&mut self) -> Option<&mut Loc> {
+        match self {
+            Op::Replace { at, .. }
+            | Op::InsertAfterPhrase { at, .. }
+            | Op::AppendSentence { at, .. }
+            | Op::Delete { at }
+            | Op::ReplaceSentencePart { at, .. }
+            | Op::DeleteSentencePart { at, .. }
+            | Op::ReplaceParagraph { at, .. }
+            | Op::ReplaceItem { at, .. }
+            | Op::RenumberItem { at, .. }
+            | Op::ShiftItems { at, .. }
+            | Op::InsertItemAfter { at, .. }
+            | Op::InsertItemBefore { at, .. }
+            | Op::AppendItem { at, .. }
+            | Op::InsertItemFirst { at, .. }
+            | Op::ReplaceItems { at, .. }
+            | Op::ReplaceItemSet { at, .. }
+            | Op::ReplaceTableRow { at, .. }
+            | Op::AppendTable { at, .. }
+            | Op::RenumberSubitem { at, .. }
+            | Op::ShiftSubitems { at, .. }
+            | Op::InsertSubitemAfter { at, .. } => Some(at),
+            _ => None,
+        }
+    }
+
+    /// 原始附則に向けた操作（`suppl`）を `Op::Suppl` に包む。附則を自分で扱う操作（字句の置換・条の追加・条ずれ）はそのまま
+    pub fn in_suppl(mut self, suppl: bool) -> Op {
+        let suppl = match self.loc_mut() {
+            Some(l) => l.suppl,
+            None => suppl,
+        };
+        if !suppl || self.article().is_none() {
+            return self;
+        }
+        match self {
+            Op::Replace { .. }
+            | Op::InsertAfterPhrase { .. }
+            | Op::InsertArticleAfter { .. }
+            | Op::InsertArticleBefore { .. }
+            | Op::RenumberArticle { .. } => self,
+            mut op => {
+                if let Some(l) = op.loc_mut() {
+                    l.suppl = false;
+                }
+                Op::Suppl(Box::new(op))
+            }
+        }
+    }
+
     /// 続く条文（インデント 1 の行）を受け取る操作か
     pub fn takes_content(&self) -> bool {
+        if let Op::Suppl(inner) = self {
+            return inner.takes_content();
+        }
         matches!(
             self,
             Op::AppendParagraph { .. }
@@ -496,6 +562,7 @@ impl Op {
             | Op::ReplaceArticles { text, .. }
             | Op::ReplaceContainers { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
+            Op::Suppl(inner) => inner.push_content(line),
             _ => {}
         }
     }

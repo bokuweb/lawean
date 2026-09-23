@@ -43,7 +43,7 @@ pub fn apply_unit(
 }
 
 /// 1 文の中の項番号は文の始まりの番号（改正前）で解釈する
-fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), ApplyError> {
+pub(crate) fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), ApplyError> {
     // 条ごとに、文の始まりの項ラベル
     let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
     // この文で加えた字句（後の置換はその中を指さない）
@@ -291,6 +291,13 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::DeleteCaption { article } => {
                 article_mut(doc, article)?.caption = None;
             }
+            Op::Suppl(inner) => {
+                let one = Instruction {
+                    text: ins.text.clone(),
+                    ops: vec![(**inner).clone()],
+                };
+                with_suppl_as_main(doc, |d| apply_instruction(d, &one))?;
+            }
             Op::DeleteSentencePart { at, part } => {
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
@@ -321,7 +328,8 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let p = paragraph_mut(art, idx);
                 append_sentence(p, text)?;
             }
-            Op::SetToc { text } => set_toc(doc, text),
+            Op::SetToc { text, .. } => set_toc(doc, text),
+            Op::ReplaceTitle { from, to } => replace_title(doc, from, to)?,
             Op::SetTitle { text } => {
                 let t = text.join("").trim().to_string();
                 doc.title = Some(LawTitle {
@@ -813,6 +821,72 @@ pub(crate) fn suppl_article_mut<'a>(
         "附則{}",
         num.to_num_string()
     )))
+}
+
+/// 「題名中「A」を「B」に改める」
+pub(crate) fn replace_title(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
+    let cur = doc
+        .title
+        .as_ref()
+        .map(|t| inline_text(&t.text))
+        .unwrap_or_default();
+    if !cur.contains(from) {
+        return Err(ApplyError::PhraseNotFound {
+            at: "題名".into(),
+            phrase: from.to_string(),
+        });
+    }
+    let attrs = doc.title.as_ref().map(|x| x.attrs.clone()).unwrap_or_default();
+    doc.title = Some(LawTitle {
+        text: vec![Inline::Text(cur.replace(from, to))],
+        attrs,
+    });
+    Ok(())
+}
+
+/// 原始附則を本則に見立てて `f` を当てる（項だけの附則は仮の条（第0条）に束ねる。出力では項に戻る）
+pub(crate) fn with_suppl_as_main<T>(
+    doc: &mut LegalDocument,
+    f: impl FnOnce(&mut LegalDocument) -> Result<T, ApplyError>,
+) -> Result<T, ApplyError> {
+    let si = doc
+        .suppl_provisions
+        .iter()
+        .position(|s| s.amend_law_num.is_none())
+        .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()))?;
+    if doc.suppl_provisions[si]
+        .children
+        .iter()
+        .any(|c| matches!(c, SupplChild::Paragraph(_)))
+    {
+        suppl_article_mut(
+            doc,
+            &ArticleNum::Single {
+                base: 0,
+                branch: vec![],
+            },
+        )?;
+    }
+    let provs: Vec<Provision> = std::mem::take(&mut doc.suppl_provisions[si].children)
+        .into_iter()
+        .map(|c| match c {
+            SupplChild::Provision(p) => p,
+            SupplChild::Paragraph(p) => Provision::Paragraph(p),
+            SupplChild::Raw(e) => Provision::Raw(e),
+        })
+        .collect();
+    let main = std::mem::replace(&mut doc.main_provision, provs);
+    let r = f(doc);
+    let provs = std::mem::replace(&mut doc.main_provision, main);
+    doc.suppl_provisions[si].children = provs
+        .into_iter()
+        .map(|p| match p {
+            Provision::Paragraph(p) => SupplChild::Paragraph(p),
+            Provision::Raw(e) => SupplChild::Raw(e),
+            p => SupplChild::Provision(p),
+        })
+        .collect();
+    r
 }
 
 /// 位置に応じて本則か原始附則の条
@@ -2788,6 +2862,17 @@ pub(crate) fn replace_table_row(
         if let ParagraphChild::Raw(e) = c {
             all_rows(e, &mut all);
         }
+    }
+    // 行を言わない「第二十四条第一項の表中「A」を「B」に改める」: 表の全部の行
+    if key.is_empty() {
+        let n: usize = all.into_iter().map(|r| replace_in(r, from, to, protect)).sum();
+        if n == 0 {
+            return Err(ApplyError::PhraseNotFound {
+                at: "表".into(),
+                phrase: from.to_string(),
+            });
+        }
+        return Ok(());
     }
     let hit = all.into_iter().find(|r| {
         r.children

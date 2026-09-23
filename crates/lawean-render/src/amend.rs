@@ -117,6 +117,15 @@ fn loc_label(l: &Loc) -> String {
     s
 }
 
+/// 繰り下げ・繰り上げの範囲。`to` が `u32::MAX` なら「以下」（「第二号を第一号とし、以下…」の最後まで）
+fn shift_range(from: u32, to: u32, unit: &str) -> String {
+    if to == u32::MAX {
+        format!("第{}{unit}以下", to_kanji(from))
+    } else {
+        format!("第{}{unit}から第{}{unit}まで", to_kanji(from), to_kanji(to))
+    }
+}
+
 /// 1 操作を、文の途中（`last = false`）または文末（`last = true`）の形にする
 fn segment(op: &Op, last: bool) -> String {
     let end = |mid: &str, fin: &str| {
@@ -127,6 +136,15 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        // 原始附則: 中の操作の位置に「附則」を冠する（項だけの附則は仮の第0条）
+        Op::Suppl(inner) => {
+            let s = segment(inner, last);
+            if s.starts_with("第0条") {
+                s.replacen("第0条", "附則", 1)
+            } else {
+                format!("附則{s}")
+            }
+        }
         Op::ReplaceAll { from, to } if to.is_empty() => {
             format!("本則中「{from}」を{}", end("削り", "削る"))
         }
@@ -277,7 +295,14 @@ fn segment(op: &Op, last: bool) -> String {
             ),
             end("加え", "加える")
         ),
+        Op::ReplaceTitle { from, to } if to.is_empty() => {
+            format!("題名中「{from}」を{}", end("削り", "削る"))
+        }
+        Op::ReplaceTitle { from, to } => {
+            format!("題名中「{from}」を「{to}」に{}", end("改め", "改める"))
+        }
         Op::SetTitle { .. } => format!("題名を次のように{}", end("改め", "改める")),
+        Op::SetToc { replace: true, .. } => format!("目次を次のように{}", end("改め", "改める")),
         Op::SetToc { .. } => "題名の次に次の目次を付する".to_string(),
         Op::DeleteContainerTitle { path } => format!(
             "{}の{}名を{}",
@@ -347,10 +372,9 @@ fn segment(op: &Op, last: bool) -> String {
             end("し", "する")
         ),
         Op::ShiftItems { at, from, to, by } => format!(
-            "{}中第{}号から第{}号までを{}号ずつ繰り{}",
+            "{}中{}を{}号ずつ繰り{}",
             loc_label(at),
-            to_kanji(*from),
-            to_kanji(*to),
+            shift_range(*from, *to, "号"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
@@ -381,6 +405,14 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::ReplaceTableRow { at, row, from, to } if row.is_empty() && to.is_empty() => {
+            format!("{}の表中「{from}」を{}", loc_label(at), end("削り", "削る"))
+        }
+        Op::ReplaceTableRow { at, row, from, to } if row.is_empty() => format!(
+            "{}の表中「{from}」を「{to}」に{}",
+            loc_label(at),
+            end("改め", "改める")
+        ),
         Op::ReplaceTableRow { at, row, from, to } if to.is_empty() => format!(
             "{}の表{row}の項中「{from}」を{}",
             loc_label(at),
@@ -536,10 +568,9 @@ fn segment(op: &Op, last: bool) -> String {
             to,
             by,
         } => format!(
-            "{}中第{}項から第{}項までを{}項ずつ繰り{}",
+            "{}中{}を{}項ずつ繰り{}",
             article_label(article),
-            to_kanji(*from),
-            to_kanji(*to),
+            shift_range(*from, *to, "項"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
@@ -557,9 +588,8 @@ fn segment(op: &Op, last: bool) -> String {
             end("し", "する")
         ),
         Op::ShiftArticles { from, to, by } => format!(
-            "第{}条から第{}条までを{}条ずつ繰り{}",
-            to_kanji(*from),
-            to_kanji(*to),
+            "{}を{}条ずつ繰り{}",
+            shift_range(*from, *to, "条"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
