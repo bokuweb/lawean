@@ -10,19 +10,23 @@ import Lawean.Ident
 そうすると:
 
 - 参照は id なので、項の挿入・削除で**壊れない**（`Body` は `applyUnit` で変わらない。定義から明らか）
-- **ハネの完全性**: 本文（`Body`）が同じなのに描画が違うなら、必ずどれかの参照の番号か距離が動いている（`renderBody_congr` の対偶）
+- **ハネの完全性**: 本文（`Body`）が同じなのに描画が違うなら、必ずどれかの参照の番号か距離が動いている（`renderBody_congr` の対偶）。
+  条を丸ごと指す参照（「第六十一条」「前条」）も含む: 条ずれ（`renumber`）で条番号か「直前の条」が動いたときだけ描画が変わる
 - **ハネの手当ては生成できる**: 改正後の描画と改正前の描画の差がそのまま手当て（`haneFixes`）。
   Rust の `hane::render_fix` は同じ規則（相対形は距離が同じならそのまま、1 なら「前項」「次項」、それ以外は絶対形）
 -/
 
 namespace Lawean.Ident
 
-/-- 参照の書き方。相対形は元の距離を持つ（「前二項」= `prev 2`）。`absoluteArt` は他の条の項（「第百四十二条の四第六項」） -/
+/-- 参照の書き方。相対形は元の距離を持つ（「前二項」= `prev 2`）。`absoluteArt` は他の条の項（「第百四十二条の四第六項」）。
+`art` / `prevArt` は条を丸ごと指す（「第六十一条」「前条」）。指す先の id はその条の項のどれか（第一項）で、描画に使うのは条番号だけ -/
 inductive RefForm
   | absolute
   | absoluteArt
   | prev (k : Nat)
   | next
+  | art
+  | prevArt
 deriving Repr, DecidableEq
 
 /-- 本文の断片 -/
@@ -86,8 +90,24 @@ def renderRef (form : RefForm) : Option Nat × Option Nat → String
     | _, _ => "第" ++ kanji t ++ "項"
   | (none, _) => "（削除された項）"
 
+/-- 条 `a` の直前の条（文書順）。目次は数えない -/
+def prevArtOf (r : Revision) (a : ArtNum) : Option ArtNum :=
+  ((r.nodes.takeWhile (·.art ≠ a)).filter (·.art ≠ "toc")).getLast?.map (·.art)
+
+/-- 参照元の条の直前の条（「前条」の描画用） -/
+def srcPrev (r : Revision) (src : NodeId) : Option ArtNum :=
+  (targetArt r src).bind (prevArtOf r)
+
 def renderPiece (r : Revision) (src : NodeId) : Piece → String
   | .text s => s
+  | .ref target .art =>
+    match targetArt r target with
+    | some art => artLabel art
+    | none => "（削除された規定）"
+  | .ref target .prevArt =>
+    match targetArt r target with
+    | some art => if srcPrev r src = some art then "前条" else artLabel art
+    | none => "（削除された規定）"
   | .ref target .absoluteArt =>
     match targetArt r target, paraNum r target with
     | some art, some p => artLabel art ++ "第" ++ kanji p ++ "項"
@@ -98,9 +118,10 @@ def renderBody (r : Revision) (src : NodeId) : Body → String
   | [] => ""
   | p :: ps => renderPiece r src p ++ renderBody r src ps
 
-/-- 参照の描画が依存するもの: (参照先の番号, 参照元の番号, 参照先の条) -/
-def refKey (r : Revision) (src target : NodeId) : (Option Nat × Option Nat) × Option ArtNum :=
-  (refNums r src target, targetArt r target)
+/-- 参照の描画が依存するもの: (参照先の番号, 参照元の番号, 参照先の条, 参照元の直前の条) -/
+def refKey (r : Revision) (src target : NodeId) :
+    (Option Nat × Option Nat) × Option ArtNum × Option ArtNum :=
+  (refNums r src target, targetArt r target, srcPrev r src)
 
 theorem paraNum_of_refKey {r r' : Revision} {src t : NodeId} (h : refKey r src t = refKey r' src t) :
     paraNum r t = paraNum r' t := by
@@ -118,10 +139,11 @@ theorem renderBody_congr (r r' : Revision) (src : NodeId) :
   | .ref t f :: ps, h => by
     have hk := h t f (List.mem_cons_self _ _)
     have h1 : refNums r src t = refNums r' src t := by simp only [refKey, Prod.mk.injEq] at hk; exact hk.1
-    have h2 : targetArt r t = targetArt r' t := by simp only [refKey, Prod.mk.injEq] at hk; exact hk.2
+    have h2 : targetArt r t = targetArt r' t := by simp only [refKey, Prod.mk.injEq] at hk; exact hk.2.1
+    have h4 : srcPrev r src = srcPrev r' src := by simp only [refKey, Prod.mk.injEq] at hk; exact hk.2.2
     have h3 := paraNum_of_refKey hk
     have ih := renderBody_congr r r' src ps (fun t' f' ht => h t' f' (List.mem_cons_of_mem _ ht))
-    cases f <;> simp only [renderBody, renderPiece] <;> rw [ih] <;> first | rw [h1] | rw [h2, h3]
+    cases f <;> simp only [renderBody, renderPiece] <;> rw [ih] <;> first | rw [h1] | rw [h2, h3] | rw [h2, h4] | rw [h2]
 
 /-- **ハネの完全性**（対偶）: 本文が同じなのに描画が違えば、どれかの参照の番号・距離・条が動いている -/
 theorem hane_complete (r r' : Revision) (src : NodeId) (body : Body)

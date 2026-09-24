@@ -349,7 +349,7 @@ fn art_of(id: &str) -> Option<ArticleNum> {
 
 /// 条ずれ（第N条を第M条とする）で、指す先の条番号が変わる絶対参照「第N条…」を列挙する。
 /// 手当ては「第N条」を「第M条」に置き換えた字句。相対形（前条・次条）は参照元も同じだけ動くのが普通なので、
-/// 参照元と参照先の距離が変わるときだけ候補にする
+/// 参照元と参照先の距離が変わるときだけ候補にし、手当ては参照先の新しい番号の絶対形
 fn article_hane_candidates(
     doc: &LegalDocument,
     unit: &AmendUnit,
@@ -409,8 +409,13 @@ fn article_hane_candidates(
                 let sp = para_of(&id.0);
                 let old_label = crate::apply::article_label(&tgt);
                 let new_label = crate::apply::article_label(&new_tgt);
+                // 相対形は距離が変わったので絶対形にする（「前条第一項」→「第五十五条第一項」。Lean `Refs.lean` の `prevArt` と同じ）。
+                // 「前二条」のように範囲を指すものは書き方が一つに決まらないので手当ては出さない
                 let fix = if relative {
-                    None
+                    ["前条", "次条"]
+                        .iter()
+                        .find(|w| r.span.text.starts_with(**w))
+                        .map(|w| r.span.text.replacen(w, &new_label, 1))
                 } else {
                     Some(r.span.text.replacen(&old_label, &new_label, 1))
                 };

@@ -14,6 +14,7 @@ import Lawean.FrameExamples
 import Lawean.Cases
 import Lawean.Refs
 import Lawean.RefsExamples
+import Lawean.ArtRefsExamples
 import Lawean.Space
 import Lawean.SpaceExamples
 import Lawean.Koshoku

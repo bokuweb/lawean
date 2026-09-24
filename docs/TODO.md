@@ -77,7 +77,8 @@
 ## 改正（[docs/08](08-amendment.md)）
 
 - [ ] Lean と Rust の対応: Rust の apply を Lean の定義に対してテストで突き合わせる（同じ Op 列を両方で実行して比較）。将来的には Lean から C へ抽出して Rust から呼ぶ
-- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）。ハネの完全性は `Refs.lean` で済み（項の参照。条の参照は条ずれと一緒に）
+- [ ] Lean: `deletePara` / `appendPara` を含む可換性、条の挿入（条ずれ）
+- [x] ハネの完全性を条の参照に（`Refs.lean` の `RefForm.art` / `prevArt`、`ArtRefsExamples.lean`）。Rust の「前条」の手当ても同じ規則に（`tests/hane_articles.rs`）。令5-53 の実データでの `native_decide` は未
 - [ ] 令和4年法律第48号の 3 段施行をシナリオとして検査（§6 の 5）
 - [ ] 令和5年法律第53号（2028 施行、第46〜48条の挿入 = 条ずれ）の改め文を取得して条の挿入・繰り下げに対応
 - [ ] 他法令へのハネ（被改正法令を参照する他法令）

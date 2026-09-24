@@ -528,7 +528,11 @@ mod tests_overlap_report {
         .unwrap()
         .remove(0);
         let parts = super::parts_of(&spec, "第六条", &u);
-        assert_eq!(parts.len(), 1, "見出しも第十二条第一項の範囲に拾われる: {parts:?}");
+        assert_eq!(
+            parts.len(),
+            1,
+            "見出しも第十二条第一項の範囲に拾われる: {parts:?}"
+        );
 
         let u2 = parse_units(
             "第六条　医師法の一部を次のように改正する。
