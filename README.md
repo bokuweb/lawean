@@ -20,7 +20,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/07-verification.md](docs/07-verification.md) | Verification IR: overrides の意味論、SMT への写像、最初の証明と検証が見つけたバグ | 実装 |
 | [docs/08-amendment.md](docs/08-amendment.md) | **改正**: 法制執務の実態、改正単位 / シナリオ / リビジョン、改め文の語彙、検査、Lean の役割 | 実装（Lean が実データの溶け込みを検査） |
 | [docs/09-cross-law-impact.md](docs/09-cross-law-impact.md) | **他法令への波及**: A の改正が A を参照する B に参照切れ・ずれ・意味変化・時期不整合を生むことを、施行時点の法令空間で検出する。実データは高齢者居住安定確保法・借地借家法施行令 | 実装（Lean は未） |
-| [docs/10-temporal-consistency.md](docs/10-temporal-consistency.md) | **時間の整合性**: 施行日・期間・経過措置の矛盾を誰が担保するか。担保の鎖（人 → 施行日の比較 → Z3 → 経過措置の場合分け）と、担保しないもの、サービスでの置き場所 | 設計（2・3 は実装済み、経過措置は未） |
+| [docs/10-temporal-consistency.md](docs/10-temporal-consistency.md) | **時間の整合性**: 施行日・期間・経過措置の矛盾を誰が担保するか。担保の鎖（人 → 施行日の比較 → Z3 → 経過措置の場合分け）と、担保しないもの、サービスでの置き場所 | 設計（2・3・経過措置の場合分けは実装済み） |
 | [docs/10-lean-semantics.md](docs/10-lean-semantics.md) | **法令の意味を Lean に載せる計画**（[ADR-0016](docs/adr/0016-lean-as-semantic-backend.md)）: 法令は Lean のデータ、意味論は評価器 1 つ、性質は定理、Z3 は反例。改正 × 意味の frame 定理。M1〜M5 | 計画 |
 | [docs/11-layer2.md](docs/11-layer2.md) | **層 2 の計画**: 規則で述語・引数・値の候補（形態素解析 + 格助詞）→ grande で判定 → 人が昇格 → Lean へ。評価指標つき | 計画 |
 | [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を再現。可換性（`applyUnit_comm`）で順序は消えるが正しさは出ない → **参照を id で持つ**（`Refs.lean` / `lawean-amend::body`）と描き直しが e-Gov の本文と一致する（Lean で実データ） | 実装 |

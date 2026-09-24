@@ -23,7 +23,7 @@
 | Taisho（新旧対照表） | 「新」欄が溶け込み後、「旧」欄が改正前の本文と一致するか。逆に**溶け込みから新旧対照表を生成**もする（`Report.taisho_generated`。転記ではないので誤記が起きない。生成した表は必ず Taisho を通る。**見た目の整備は後回し**、docs/TODO） | 位置 → 本文の突き合わせ |
 | CrossLaw（他法令） | 他法令からの参照切れ・ずれ。ずれには他法令側の手当て（「第三十八条第四項」→「第三十八条第五項」）を添える | `lawean-space::impact`（Lean `Space.lean` の `impact` と同じ分類） |
 | Penalty（罰則） | 罰則が指す規定に罰則の行為が無い（空振り）。改正で生じたものが Fail | `lawean-extract::penalty`（[07](07-verification.md) 罰則） |
-| Enforcement（施行期日） | 施行日が改正法の附則第一条（「公布の日から起算して一年を超えない範囲内において政令で定める日」）の許容区間にあるか。単位ごとに号の範囲欄から引く。号が 1 つの条の一部の改正規定だけを別の日にする（「第六条の規定（…の改正規定を除く。）」「第三条中…の改正規定」「…に限る。」）なら、単位を施行期日ごとの部分に分けて（`lawean-check::stage`）、施行日に当たる部分だけを溶け込ませ、他の部分は「前に施行済み／後に施行」と報告する | `lawean-extract::suppl` + 暦（[07](07-verification.md) 時間表現の抽出。Z3 の暦と一致することは `lawean-verify` のテスト） |
+| Enforcement（施行期日） | 施行日が改正法の附則第一条（「公布の日から起算して一年を超えない範囲内において政令で定める日」）の許容区間にあるか。単位ごとに号の範囲欄から引く。号が 1 つの条の一部の改正規定だけを別の日にする（「第六条の規定（…の改正規定を除く。）」「第三条中…の改正規定」「…に限る。」）なら、単位を施行期日ごとの部分に分けて（`lawean-check::stage`）、施行日に当たる部分だけを溶け込ませ、他の部分は「前に施行済み／後に施行」と報告する。分割は命令を落とさない（本文の施行期日が読めなくても「読めない」部分に残す）。別の日の部分が同じ条・項を触れば注意（施行の順で結果が変わりうる）。部分が独立なら施行の順によらず単位全体と同じことは Lean `Stage.lean` の `applyParts_eq` | `lawean-extract::suppl` + 暦（[07](07-verification.md) 時間表現の抽出。Z3 の暦と一致することは `lawean-verify` のテスト） |
 
 Order / Conflict / Consolidate の溶け込みは、Lean ランタイムがリンクされていれば**証明した `Ident.applyUnit` そのもの**（`lawean-leanrt`、[ADR-0017](adr/0017-lean-to-c-is-the-runtime.md)）で計算する（`Report.engine = "lean"`）。無ければ Rust の写し。同じデータを Lean にも出し、`Consolidate.lean` / `Cases.lean` が同じ結論を `native_decide` で確かめる。
 Hane の生成規則は Lean の `Refs.lean`（`renderRef`）と同じで、`RefsExamples.lean` が「生成した手当て = 令3-37 の実際の置換」を確かめる。

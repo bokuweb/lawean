@@ -191,6 +191,34 @@ pub fn months(n: u32) -> Duration {
 pub fn event(name: &str) -> Event {
     Event(name.into())
 }
+/// `from` の日から効力を持つ（新法の規定）。既定では施行後に生じた事実にだけ及ぶ
+pub fn in_force_from(from: &str) -> RuleTemporal {
+    RuleTemporal {
+        effective_from: Some(event(from)),
+        effective_to: None,
+        facts_before: None,
+    }
+}
+/// `to` の日に効力を失う（廃止・改正前の規定）
+pub fn in_force_until(to: &str) -> RuleTemporal {
+    RuleTemporal {
+        effective_from: None,
+        effective_to: Some(event(to)),
+        facts_before: None,
+    }
+}
+impl RuleTemporal {
+    /// 「施行前に生じた事項にも適用する」
+    pub fn also_before(mut self, boundary: &str) -> Self {
+        self.facts_before = Some(FactsBefore::Also(event(boundary)));
+        self
+    }
+    /// 「なお従前の例による」: 効力を失った後も、境の日より前の事実にだけ及ぶ
+    pub fn only_before(mut self, boundary: &str) -> Self {
+        self.facts_before = Some(FactsBefore::Only(event(boundary)));
+        self
+    }
+}
 pub fn after(from: &str, length: Duration) -> Period {
     Period {
         from: event(from),

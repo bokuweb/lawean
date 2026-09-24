@@ -19,7 +19,8 @@ pub struct NumberingIssue {
     pub message: String,
 }
 
-fn label(n: &ArticleNum) -> String {
+/// 「第十二条の二」「第三条から第五条まで」
+pub fn label(n: &ArticleNum) -> String {
     use lawean_resolve::numeral::to_kanji;
     match n {
         ArticleNum::Single { base, branch } => {

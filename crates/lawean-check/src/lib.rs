@@ -1392,6 +1392,9 @@ fn check_enforcement_with(
             };
             lines.push(format!("{what}: {range}。{verdict}"));
         }
+        let ov = overlap_lines(label, &parts);
+        warns += ov.len();
+        lines.extend(ov);
         if split && !any_on_day && last {
             fails += 1;
             lines.push(format!(
@@ -1465,6 +1468,22 @@ fn check_enforcement_with(
             details,
         )
     }
+}
+
+/// 施行期日ごとに分けた部分が同じ箇所を触る組の明細。独立でなければ施行の順で結果が変わりうる
+/// （独立なら順序によらず単位全体と同じ: Lean `Stage.lean` の `staged_eq_whole`）
+fn overlap_lines(label: &str, parts: &[stage::Part]) -> Vec<String> {
+    stage::overlaps(parts)
+        .into_iter()
+        .map(|(i, j, at)| {
+            let when = |k: usize| parts[k].clause.text.clone();
+            format!(
+                "{label}: 施行期日の違う部分（「{}」と「{}」）が同じ箇所（{at}）を触る。施行の順で結果が変わりうるので、どちらが先かを確かめる",
+                when(i),
+                when(j)
+            )
+        })
+        .collect()
 }
 
 fn check_penalty(base: &LegalDocument, after: &LegalDocument) -> Check {

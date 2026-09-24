@@ -131,18 +131,15 @@ fn label_article(label: &str) -> Option<u32> {
         .and_then(kanji_num)
 }
 
-/// 単位を施行期日ごとの部分に分ける。号に触れられていなければ本文の 1 つだけ。附則が読めなければ空
+/// 単位を施行期日ごとの部分に分ける。号に触れられていなければ本文の 1 つだけ。
+/// 本文の施行期日が読めなくても命令は落とさず、`enforcement: None` の部分に残す（部分をつなぐと元の単位の部分列への分割になる）
 pub fn parts_of(spec: &EnforcementSpec, label: &str, unit: &AmendUnit) -> Vec<Part> {
     let Some(art) = label_article(label) else {
-        return spec
-            .main
-            .iter()
-            .map(|m| Part {
-                unit: unit.clone(),
-                clause: m.clone(),
-                scope: None,
-            })
-            .collect();
+        return vec![Part {
+            unit: unit.clone(),
+            clause: spec.main.clone().unwrap_or_else(unreadable),
+            scope: None,
+        }];
     };
     let mut remaining = unit.clone();
     let mut parts = Vec::new();
@@ -182,13 +179,11 @@ pub fn parts_of(spec: &EnforcementSpec, label: &str, unit: &AmendUnit) -> Vec<Pa
         remaining = rest;
     }
     if !remaining.instructions.is_empty() {
-        if let Some(m) = &spec.main {
-            parts.push(Part {
-                unit: remaining,
-                clause: m.clone(),
-                scope: None,
-            });
-        }
+        parts.push(Part {
+            unit: remaining,
+            clause: spec.main.clone().unwrap_or_else(unreadable),
+            scope: None,
+        });
     }
     parts
 }
@@ -235,6 +230,52 @@ pub enum Selection {
     Unreadable,
 }
 
+/// 施行期日が読めない部分に付ける節（本文が読めないまま残った命令を落とさない）
+fn unreadable() -> EnforcementClause {
+    EnforcementClause {
+        text: "施行期日が読めない".into(),
+        enforcement: None,
+    }
+}
+
+/// 同じ条（項が分かれば項）を触る命令が別の部分に入った組 `(i, j, 箇所)`（i < j）。
+/// 部分どうしが独立なら施行日の順序によらず単位全体を当てたのと同じ結果になる（Lean `Stage.lean` の `staged_eq_whole`）。
+/// ここに挙がる組はその前提が崩れていて、施行の順で結果が変わりうる
+pub fn overlaps(parts: &[Part]) -> Vec<(usize, usize, String)> {
+    use lawean_amend::numbering::label;
+    let keys = |p: &Part| {
+        p.unit
+            .instructions
+            .iter()
+            .flat_map(|i| &i.ops)
+            .filter_map(|op| op.article().map(|a| (a.clone(), op.paragraph())))
+            .collect::<Vec<_>>()
+    };
+    let ks: Vec<_> = parts.iter().map(keys).collect();
+    let mut out = Vec::new();
+    for i in 0..ks.len() {
+        for j in i + 1..ks.len() {
+            let hit = ks[i].iter().find(|(a, p)| {
+                ks[j].iter().any(|(b, q)| {
+                    a == b
+                        && match (p, q) {
+                            (Some(p), Some(q)) => p == q,
+                            _ => true,
+                        }
+                })
+            });
+            if let Some((a, p)) = hit {
+                let at = match p {
+                    Some(p) => format!("{}第{}項", label(a), lawean_resolve::numeral::to_kanji(*p)),
+                    None => label(a),
+                };
+                out.push((i, j, at));
+            }
+        }
+    }
+    out
+}
+
 fn empty_like(u: &AmendUnit) -> AmendUnit {
     AmendUnit {
         article_of_amending_law: u.article_of_amending_law.clone(),
@@ -244,10 +285,12 @@ fn empty_like(u: &AmendUnit) -> AmendUnit {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use lawean_amend::parse_units;
     use lawean_extract::suppl::spec_from_text;
+
+    pub(super) const SUPPL_FOR_CONSERVATION: &str = SUPPL;
 
     const SUPPL: &str = "第一条　この法律は、令和六年四月一日から施行する。ただし、次の各号に掲げる規定は、当該各号に定める日から施行する。
 　六　第五条の規定並びに附則第十九条の規定　令和五年四月一日
@@ -356,5 +399,178 @@ mod tests_art13 {
         assert_eq!(sel, vec![Selection::AlreadyEnforced, Selection::Apply]);
         assert_eq!(parts[1].unit.instructions.len(), 1);
         assert!(parts[1].scope.as_deref().unwrap().contains("第十三条中"));
+    }
+}
+
+/// 分割の保存則: 部分をつなぐと元の単位の命令がちょうど 1 回ずつ現れ、各部分の中では元の順序のまま（部分列への分割）。
+/// Lean `Stage.lean` の `Interleave` の前提を Rust 側で満たしていることの確認
+#[cfg(test)]
+mod tests_conservation {
+    use super::*;
+    use lawean_amend::parse_units;
+    use lawean_extract::suppl::spec_from_text;
+
+    const ITEMS_ONLY: &str = "第一条　この法律は、新非訟事件手続法の施行の日から施行する。ただし、次の各号に掲げる規定は、当該各号に定める日から施行する。
+　一　第六条中医師法第十二条の改正規定　公布の日";
+
+    fn unit(label: &str) -> AmendUnit {
+        let t = format!(
+            "{label}　医師法の一部を次のように改正する。
+　　第十一条第一号中「者」の下に「（大学）」を加える。
+　　第十二条中「前条第三号」を「前条第一項第三号」に改める。
+　　第十二条中「医師」を「医師等」に改める。
+　　第十七条の三中「前条第一項」を「前条」に改める。"
+        );
+        parse_units(&t).unwrap().remove(0)
+    }
+
+    fn texts(u: &AmendUnit) -> Vec<String> {
+        u.instructions.iter().map(|i| i.text.clone()).collect()
+    }
+
+    /// 各部分が元の単位の部分列で、全部合わせると元の命令の多重集合に一致する
+    fn assert_conserved(unit: &AmendUnit, parts: &[Part]) {
+        let all = texts(unit);
+        let mut used = vec![false; all.len()];
+        for p in parts {
+            let mut from = 0;
+            for t in texts(&p.unit) {
+                let k = (from..all.len())
+                    .find(|&k| !used[k] && all[k] == t)
+                    .unwrap_or_else(|| panic!("順序が崩れたか重複: {t}"));
+                used[k] = true;
+                from = k + 1;
+            }
+        }
+        let lost: Vec<_> = all.iter().zip(&used).filter(|(_, u)| !**u).collect();
+        assert!(lost.is_empty(), "落ちた命令: {lost:?}");
+    }
+
+    #[test]
+    fn remainder_is_kept_when_main_clause_is_unreadable() {
+        let spec = spec_from_text(ITEMS_ONLY, Some((2021, 5, 28)));
+        let spec = EnforcementSpec { main: None, ..spec };
+        let u = unit("第六条");
+        let parts = parts_of(&spec, "第六条", &u);
+        assert_conserved(&u, &parts);
+        // 残りは施行期日が読めない部分として残る
+        let rest = parts.iter().find(|p| p.scope.is_none()).unwrap();
+        assert!(rest.clause.enforcement.is_none());
+        let sel = select_for_day(&parts, (2021, 5, 28), (2021, 5, 28));
+        assert!(sel.contains(&Selection::Unreadable), "{sel:?}");
+    }
+
+    #[test]
+    fn suppl_label_keeps_unit_when_main_clause_is_unreadable() {
+        let spec = spec_from_text(ITEMS_ONLY, Some((2021, 5, 28)));
+        let spec = EnforcementSpec { main: None, ..spec };
+        let u = unit("附則第三条");
+        let parts = parts_of(&spec, "附則第三条", &u);
+        assert_conserved(&u, &parts);
+    }
+
+    #[test]
+    fn existing_splits_conserve_instructions() {
+        let spec = spec_from_text(ITEMS_ONLY, Some((2021, 5, 28)));
+        let u = unit("第六条");
+        assert_conserved(&u, &parts_of(&spec, "第六条", &u));
+        let spec = spec_from_text(super::tests::SUPPL_FOR_CONSERVATION, Some((2021, 5, 28)));
+        for label in ["第五条", "第六条", "第七条"] {
+            let u = unit(label);
+            assert_conserved(&u, &parts_of(&spec, label, &u));
+        }
+    }
+
+    /// 「第十二条中…の改正規定」だけを先に施行: 第十二条を触る 2 文のうち、
+    /// 範囲欄の位置（条・項）は 2 文とも拾うので同じ部分に入る → 部分どうしは独立
+    #[test]
+    fn same_paragraph_stays_in_one_part() {
+        let spec = spec_from_text(ITEMS_ONLY, Some((2021, 5, 28)));
+        let u = unit("第六条");
+        let parts = parts_of(&spec, "第六条", &u);
+        assert!(overlaps(&parts).is_empty(), "{:?}", overlaps(&parts));
+    }
+
+    /// 同じ項を触る命令が別の日の部分に分かれたら報告する（Lean の `staged_eq_whole` の前提が崩れる）
+    #[test]
+    fn parts_touching_the_same_paragraph_are_reported() {
+        let spec = spec_from_text(ITEMS_ONLY, Some((2021, 5, 28)));
+        let u = unit("第六条");
+        let mut parts = parts_of(&spec, "第六条", &u);
+        // 第十二条の 2 文目を本文の日の部分へ移す（範囲欄が「部分に限る」で文の一部だけを挙げた場合と同じ形）
+        let moved = parts[0].unit.instructions.pop().unwrap();
+        parts[1].unit.instructions.push(moved);
+        let o = overlaps(&parts);
+        assert_eq!(o.len(), 1, "{o:?}");
+        assert_eq!((o[0].0, o[0].1), (0, 1));
+        assert!(o[0].2.contains("第十二条"), "{o:?}");
+    }
+}
+
+#[cfg(test)]
+mod tests_overlap_report {
+    use lawean_amend::parse_units;
+    use lawean_extract::suppl::spec_from_text;
+
+    /// 第十二条第一項だけ公布の日、条全体を触る文は本文の日: 別の日の部分が同じ条を触るので施行期日の検査が注意を出す
+    #[test]
+    fn enforcement_check_warns_when_parts_touch_the_same_provision() {
+        let spec = spec_from_text(
+            "第一条　この法律は、令和六年四月一日から施行する。ただし、次の各号に掲げる規定は、当該各号に定める日から施行する。
+　一　第六条中医師法第十二条第一項の改正規定　公布の日",
+            Some((2021, 5, 28)),
+        );
+        let u = parse_units(
+            "第六条　医師法の一部を次のように改正する。
+　　第十二条第一項中「前条第三号」を「前条第一項第三号」に改める。
+　　第十二条の見出し中「試験」を「国家試験」に改める。",
+        )
+        .unwrap()
+        .remove(0);
+        let parts = super::parts_of(&spec, "第六条", &u);
+        assert_eq!(
+            parts.len(),
+            1,
+            "見出しも第十二条第一項の範囲に拾われる: {parts:?}"
+        );
+
+        let u2 = parse_units(
+            "第六条　医師法の一部を次のように改正する。
+　　第十二条第一項中「前条第三号」を「前条第一項第三号」に改める。
+　　第十二条第二項中「医師」を「医師等」に改める。",
+        )
+        .unwrap()
+        .remove(0);
+        let c = crate::check_enforcement_with(
+            &spec,
+            "起草中の附則",
+            "2021-05-28",
+            &[("第六条".into(), u2)],
+            false,
+        );
+        // 別の項なら独立: 注意は施行日の分割だけで、同じ箇所の注意は出ない
+        assert!(
+            !c.details.iter().any(|d| d.contains("同じ箇所")),
+            "{:?}",
+            c.details
+        );
+
+        let mut parts = super::parts_of(&spec, "第六条", &{
+            parse_units(
+                "第六条　医師法の一部を次のように改正する。
+　　第十二条第一項中「前条第三号」を「前条第一項第三号」に改める。
+　　第十二条第二項中「医師」を「医師等」に改める。",
+            )
+            .unwrap()
+            .remove(0)
+        });
+        assert_eq!(parts.len(), 2);
+        // 2 つ目の部分に第十二条第一項を触る文を足す（「部分に限る」で文の一部だけ先に施行した形）
+        let extra = parts[0].unit.instructions[0].clone();
+        parts[1].unit.instructions.push(extra);
+        let lines = crate::overlap_lines("第六条", &parts);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("同じ箇所"), "{lines:?}");
+        assert!(lines[0].contains("第十二条第一項"), "{lines:?}");
     }
 }
