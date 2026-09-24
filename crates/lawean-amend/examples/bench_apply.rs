@@ -5,6 +5,8 @@
 //! 2. `tools/fetch_egov_revisions.py units.tsv pairs.tsv` で、単位ごとに e-Gov の直前の版と直後の版を決めて取ってくる
 //! 3. 当てて突き合わせる:
 //!    cargo run --release -p lawean-amend --example bench_apply -- run <txt のディレクトリ> --pairs pairs.tsv [--out result.tsv]
+//! 4. 一致した単位を（改正前の条文, 改正後の条文, 改め文）の組として書き出す（`corpus/export.rs`）:
+//!    cargo run --release -p lawean-amend --example bench_apply -- export <txt のディレクトリ> --result result.tsv --index index.tsv --out cases.jsonl
 //!
 //! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文。目次を含む）、項の中の表、別表の本文。
 //! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）。
@@ -20,6 +22,8 @@ use std::path::{Path, PathBuf};
 #[path = "corpus/blocks.rs"]
 mod blocks;
 use blocks::blocks;
+#[path = "corpus/export.rs"]
+mod export;
 
 /// ページの 14 桁（国会 3 桁 + 公布日 8 桁 + 番号 3 桁）→ 法令番号（「令和三年法律第三十七号」）。
 /// e-Gov の改正履歴とは法令番号で照らす（法令 ID は閣法・衆法・参法で形が違う）
@@ -835,6 +839,7 @@ fn main() {
     match mode.as_str() {
         "list" => list(args),
         "run" => run(args),
-        _ => panic!("list | run"),
+        "export" => export::export(args),
+        _ => panic!("list | run | export"),
     }
 }
