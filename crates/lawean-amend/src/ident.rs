@@ -704,6 +704,7 @@ impl Binder<'_> {
                             .unwrap()
                             .push(None);
                     }
+                    crate::apply::renumber_unnumbered(article_mut(&mut self.doc, article)?);
                 }
                 Op::InsertParagraphAfter {
                     article,
@@ -729,6 +730,7 @@ impl Binder<'_> {
                             .unwrap()
                             .insert(idx + 1, None);
                     }
+                    crate::apply::renumber_unnumbered(article_mut(&mut self.doc, article)?);
                 }
                 // 条の先頭に項: 直前のノード（前の条の最後の項）の後ろに
                 Op::InsertParagraphFirst { article, text } => {

@@ -136,6 +136,7 @@ pub(crate) fn apply_instruction(
                         .unwrap()
                         .push(None);
                 }
+                renumber_unnumbered(art);
             }
             Op::InsertParagraphAfter {
                 article,
@@ -152,6 +153,7 @@ pub(crate) fn apply_instruction(
                         .unwrap()
                         .insert(idx + k + 1, None);
                 }
+                renumber_unnumbered(art);
             }
             Op::RenumberParagraph { article, from, to } => {
                 let art = article_mut(doc, article)?;
@@ -2074,11 +2076,39 @@ fn fullwidth(n: u32) -> String {
 
 pub(crate) fn set_label(p: &mut Paragraph, n: u32) {
     p.num = n.to_string();
-    p.num_text = Some(if n == 1 {
+    // 項番号の無い古い法律の項（e-Gov の `OldNum="true"`）は番号を書かない
+    p.num_text = Some(if n == 1 || is_unnumbered(p) {
         Vec::new()
     } else {
         vec![Inline::Text(fullwidth(n))]
     });
+}
+
+/// 項番号を書かない項（古い法律。e-Gov の `OldNum="true"`）
+fn is_unnumbered(p: &Paragraph) -> bool {
+    p.attrs.iter().any(|(k, v)| k == "OldNum" && v == "true")
+}
+
+/// 項番号を書かない流儀の条（第2項以降がどれも番号を書かない）なら、項を位置の番号に振り直す
+pub(crate) fn renumber_unnumbered(art: &mut Article) {
+    let ps: Vec<&Paragraph> = art
+        .children
+        .iter()
+        .filter_map(|c| match c {
+            ArticleChild::Paragraph(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    if ps.len() < 2 || !ps[1..].iter().all(|p| is_unnumbered(p)) {
+        return;
+    }
+    let mut k = 0;
+    for c in &mut art.children {
+        if let ArticleChild::Paragraph(p) = c {
+            k += 1;
+            p.num = k.to_string();
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 追加する条文の構築
@@ -2597,7 +2627,32 @@ pub fn parse_paragraphs(lines: &[String]) -> Result<Vec<Paragraph>, ApplyError> 
     let mut out: Vec<Paragraph> = Vec::new();
     // 項・号・イロハのどれでもない行（番号が無い）は読替え表のセル。最後の項に表として付ける
     let mut cells: Vec<String> = Vec::new();
+    // 最初の行に番号が無い: 項番号を書かない古い法律の項（「第二十五条に次の二項を加える。」+ 番号の無い文）。
+    // 続く番号の無い文（「。」で終わる）も項
+    let unnumbered = lines.first().is_some_and(|l| {
+        split_leading_number(l).0.is_none()
+            && split_item_title(l, KANJI_ITEM).is_none()
+            && split_item_title(l, KANA_SUBITEM).is_none()
+            && split_paren_number(l).is_none()
+    });
+    let old_paragraph = |l: &String| -> Result<Paragraph, ApplyError> {
+        let mut p = parse_paragraph(std::slice::from_ref(l))?;
+        p.attrs.push(("OldNum".into(), "true".into()));
+        p.num_text = Some(Vec::new());
+        Ok(p)
+    };
     for l in lines {
+        if unnumbered
+            && cells.is_empty()
+            && split_leading_number(l).0.is_none()
+            && split_item_title(l, KANJI_ITEM).is_none()
+            && split_item_title(l, KANA_SUBITEM).is_none()
+            && split_paren_number(l).is_none()
+            && l.trim_end().ends_with('。')
+        {
+            out.push(old_paragraph(l)?);
+            continue;
+        }
         if !out.is_empty()
             && split_leading_number(l).0.is_none()
             && split_item_title(l, KANJI_ITEM).is_none()

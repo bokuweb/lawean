@@ -1439,9 +1439,13 @@ pub(crate) fn art_num(s: &str) -> ArticleNum {
         .flat_map(|p| p.split('の'))
         .filter_map(kanji_to_u32)
         .collect();
+    // 番号として読めない条（呼び出し元の取り違えなど）で落ちない
+    let Some((&base, branch)) = parts.split_first() else {
+        return ArticleNum::Other(s.to_string());
+    };
     ArticleNum::Single {
-        base: parts[0],
-        branch: parts[1..].to_vec(),
+        base,
+        branch: branch.to_vec(),
     }
 }
 

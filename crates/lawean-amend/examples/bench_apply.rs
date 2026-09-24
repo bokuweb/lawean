@@ -275,7 +275,12 @@ fn ident_path(
         Ok(Ok(true)) => "ident_match".into(),
         Ok(Ok(false)) => "ident_mismatch".into(),
         Ok(Err(e)) if e == "none" => "ident_none".into(),
-        Ok(Err(_)) => "ident_bind_error".into(),
+        Ok(Err(e)) => {
+            if std::env::var("BENCH_DEBUG").is_ok() {
+                eprintln!("ident: {e}");
+            }
+            "ident_bind_error".into()
+        }
         Err(_) => "ident_panic".into(),
     }
 }
