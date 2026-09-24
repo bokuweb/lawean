@@ -125,6 +125,8 @@ pub fn normalize_source_text(s: &str) -> String {
     }
     out.push_str(&s[last..]);
     out.replace('剥', "剝")
+        // 目次の範囲「（第四条−第二十一条）」: e-Gov は「―」
+        .replace('−', "―")
         .replace('｡', "。")
         .replace('､', "、")
         .replace('｢', "「")

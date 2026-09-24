@@ -139,6 +139,10 @@ fn fold_glyphs(s: &str) -> String {
             '鴎' => '鷗',
             '掴' => '摑',
             '噛' => '嚙',
+            // 衆議院の「(2)」は e-Gov の「（２）」
+            '(' => '（',
+            ')' => '）',
+            '0'..='9' => char::from_u32(c as u32 - '0' as u32 + '０' as u32).unwrap_or(c),
             c => c,
         })
         .collect()

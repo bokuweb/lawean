@@ -45,6 +45,25 @@ pub fn apply_unit(
     refresh(&mut doc, new_version_id)
 }
 
+/// 括弧の番号の表記を e-Gov に揃える: 衆議院のページの半角「(1)」「(十九の七)」→ 全角「（１）」「（十九の七）」
+pub(crate) fn egov_parens(s: &str) -> String {
+    static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let r = R.get_or_init(|| {
+        regex::Regex::new(r"\(([0-9０-９]{1,3}|[一二三四五六七八九十百の]{1,8})\)").unwrap()
+    });
+    r.replace_all(s, |c: &regex::Captures| {
+        let inner: String = c[1]
+            .chars()
+            .map(|ch| match ch {
+                '0'..='9' => char::from_u32(ch as u32 - '0' as u32 + '０' as u32).unwrap_or(ch),
+                ch => ch,
+            })
+            .collect();
+        format!("（{inner}）")
+    })
+    .into_owned()
+}
+
 /// 1 文の中の項番号は文の始まりの番号（改正前）で解釈する
 pub(crate) fn apply_instruction(
     doc: &mut LegalDocument,
@@ -56,7 +75,17 @@ pub(crate) fn apply_instruction(
     let mut inserted: Vec<String> = Vec::new();
     // 別表の行は文の始まりの上欄で引く（同じ文の最初の置換で上欄が変わっても、後の置換は同じ行）
     let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
-    for op in &ins.ops {
+    // 字句の表記を e-Gov に揃える（衆議院の「(1)」→「（１）」）
+    let ops: Vec<Op> = ins
+        .ops
+        .iter()
+        .map(|o| {
+            let mut o = o.clone();
+            o.map_strings(&egov_parens);
+            o
+        })
+        .collect();
+    for op in &ops {
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
             Op::ReplaceAll { from, to } => {
@@ -2169,7 +2198,8 @@ fn split_sentences(text: &str) -> Vec<String> {
 }
 
 pub(crate) fn make_sentences(text: &str) -> Vec<Sentence> {
-    let parts = split_sentences(text);
+    let text = egov_parens(text);
+    let parts = split_sentences(&text);
     let proviso_at = parts.iter().position(|s| s.starts_with("ただし、"));
     parts
         .iter()
@@ -2779,6 +2809,12 @@ pub fn parse_paragraphs(lines: &[String]) -> Result<Vec<Paragraph>, ApplyError> 
     }
     if out.is_empty() {
         return Err(ApplyError::BadContent("empty".into()));
+    }
+    // 番号の無い項は並びの番号（条に加えるときは `renumber_unnumbered` が条の中の位置に振り直す）
+    if unnumbered {
+        for (k, p) in out.iter_mut().enumerate() {
+            p.num = (k + 1).to_string();
+        }
     }
     Ok(out)
 }
