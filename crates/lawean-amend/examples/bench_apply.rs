@@ -7,7 +7,10 @@
 //!    cargo run --release -p lawean-amend --example bench_apply -- run <txt のディレクトリ> --pairs pairs.tsv [--out result.tsv]
 //!
 //! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文）。目次・別表はまだ比べない。
-//! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）
+//! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）。
+//!
+//! 同じ単位を identity patch（`ident::bind` → Lean の `Ident.applyUnit` の写しの `ident::apply_unit`）でも当て、
+//! 本則の描画が e-Gov の版と一致するかを `ident` の列に出す（証明した意味論が実データで文書への適用と揃うか）
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -159,6 +162,8 @@ struct Outcome {
     diff: usize,
     prev: String,
     after: String,
+    /// identity patch の経路の結果（ident_match / ident_mismatch / ident_bind_error / ident_none）
+    ident: String,
 }
 
 impl Outcome {
@@ -187,6 +192,7 @@ fn try_pair(
         diff,
         prev: prev.into(),
         after: after.into(),
+        ident: String::new(),
     };
     match std::panic::catch_unwind(|| lawean_amend::apply_unit(before, u, "applied")) {
         Ok(Ok(applied)) => {
@@ -243,6 +249,27 @@ fn coarse(s: &str) -> String {
     out.chars().take(40).collect()
 }
 
+/// identity patch の経路: 発射台に束縛して `ident::apply_unit` で当て、本則の描画を e-Gov の版と比べる
+fn ident_path(
+    before: &lawean_source::LegalDocument,
+    expected: &lawean_source::LegalDocument,
+    u: &lawean_amend::AmendUnit,
+) -> String {
+    use lawean_amend::ident;
+    let r = std::panic::catch_unwind(|| {
+        let b = ident::bind(before, u, "bench").map_err(|e| e.to_string())?;
+        let got = ident::apply_unit(&ident::from_document(before), &b.ops).ok_or("none")?;
+        Ok::<bool, String>(got.render() == ident::from_document(expected).render())
+    });
+    match r {
+        Ok(Ok(true)) => "ident_match".into(),
+        Ok(Ok(false)) => "ident_mismatch".into(),
+        Ok(Err(e)) if e == "none" => "ident_none".into(),
+        Ok(Err(_)) => "ident_bind_error".into(),
+        Err(_) => "ident_panic".into(),
+    }
+}
+
 fn run(mut args: Vec<String>) {
     let pairs = take_flag(&mut args, "--pairs").expect("--pairs");
     let out = take_flag(&mut args, "--out");
@@ -274,7 +301,11 @@ fn run(mut args: Vec<String>) {
     let pages: std::collections::BTreeSet<&str> = want.keys().map(|k| k.0.as_str()).collect();
     let mut w = out.map(|p| std::fs::File::create(p).unwrap());
     if let Some(w) = w.as_mut() {
-        writeln!(w, "page\tblock\tunit\ttitle\tresult\tprev\tafter\tdetail").unwrap();
+        writeln!(
+            w,
+            "page\tblock\tunit\ttitle\tresult\tident\tprev\tafter\tdetail"
+        )
+        .unwrap();
     }
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
@@ -308,6 +339,14 @@ fn run(mut args: Vec<String>) {
                         break;
                     }
                 }
+                // 最良の候補について identity patch の経路も
+                if let Some(b) = best.as_mut().filter(|b| b.result.starts_with("match")) {
+                    let before = docs.get(&b.prev).cloned().flatten();
+                    let expected = docs.get(&b.after).cloned().flatten();
+                    if let (Some(before), Some(expected)) = (before, expected) {
+                        b.ident = ident_path(&before, &expected, &u);
+                    }
+                }
             }
             // 版を読み込んだものは、同じページの中だけ持つ（大きい法令の版で溢れないように）
             let o = best.unwrap_or(Outcome {
@@ -320,6 +359,7 @@ fn run(mut args: Vec<String>) {
                 diff: 0,
                 prev: String::new(),
                 after: String::new(),
+                ident: String::new(),
             });
             if o.result == "unsupported" || o.result == "apply_error" {
                 *unsupported
@@ -327,12 +367,16 @@ fn run(mut args: Vec<String>) {
                     .or_default() += 1;
             }
             *counts.entry(o.result.clone()).or_default() += 1;
+            if !o.ident.is_empty() {
+                *counts.entry(format!("  {}", o.ident)).or_default() += 1;
+            }
             if let Some(w) = w.as_mut() {
                 writeln!(
                     w,
-                    "{page}\t{bi}\t{ui}\t{}\t{}\t{}\t{}\t{}",
+                    "{page}\t{bi}\t{ui}\t{}\t{}\t{}\t{}\t{}\t{}",
                     u.target_title,
                     o.result,
+                    o.ident,
                     o.prev,
                     o.after,
                     o.detail.replace(['\t', '\n'], " ")
@@ -344,7 +388,7 @@ fn run(mut args: Vec<String>) {
     }
     let tried: usize = counts
         .iter()
-        .filter(|(k, _)| !k.starts_with("skip") && *k != "match_trivial")
+        .filter(|(k, _)| !k.starts_with("skip") && !k.starts_with(' ') && *k != "match_trivial")
         .map(|(_, n)| n)
         .sum();
     let ok = counts.get("match").copied().unwrap_or(0);
