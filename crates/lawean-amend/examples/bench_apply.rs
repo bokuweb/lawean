@@ -703,7 +703,7 @@ fn run(mut args: Vec<String>) {
         for (_, ks) in groups {
             let n_ins: usize = ks.iter().map(|&k| results[k].2.instructions.len()).sum();
             // 文が多すぎる法律（税法の一括改正など）は時間が掛かるので試さない
-            if n_ins < 2 || n_ins > 150 {
+            if !(2..=150).contains(&n_ins) {
                 continue;
             }
             let cands = results[ks[0]].4.clone();
