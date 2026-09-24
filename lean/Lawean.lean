@@ -19,4 +19,6 @@ import Lawean.SpaceExamples
 import Lawean.Koshoku
 import Lawean.Pending
 import Lawean.Check
+import Lawean.Stage
+import Lawean.StageExamples
 import Lawean.Ffi

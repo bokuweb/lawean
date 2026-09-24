@@ -44,6 +44,14 @@
 - [ ] Z3 の WASM ビルドで自法令内の性質検査をブラウザで閉じられるか測る。法令空間（他法令への波及）はサーバー側
 - [ ] Semantic IR の Lean 化 → [docs/10](10-lean-semantics.md) に移した（M1・M2 済み、M3〜M5）
 
+## 部分施行（`lawean-check::stage`、Lean `Stage.lean`）
+
+- [x] 分割の保存則（部分列への分割、命令を落とさない）を Rust のテストに。本文の施行期日が読めないとき命令を落としていたのを修正
+- [x] Lean: 独立な部分への分割は施行の順によらず単位全体と同じ（`applyUnit_interleave` / `staged_eq_whole` / `applyParts_eq`）。独立でない分割の反例
+- [x] 別の日の部分が同じ条・項を触れば Enforcement に注意（`stage::overlaps`）
+- [ ] 部分を `ident::bind` で id 操作にして、Lean の `isSplit` / `indepParts` を実データ（令3-49 第6条・第13条）で `native_decide`。`overlaps` は条・項の粒度の近似なので、id 粒度に置き換える
+- [ ] 「…を改める部分に限る。」（文の一部だけを別の日に）: 今は文の単位でしか分けられない
+
 ## identity patch（[ADR-0013](adr/0013-identity-patches.md)）
 
 - [x] Lean: `Ident.lean`（id ベースの `Op`、衝突を値に、`dependsOn` / `scheduleOk`、`paraNum`）と `applyOp_comm` / `applyUnit_comm`
