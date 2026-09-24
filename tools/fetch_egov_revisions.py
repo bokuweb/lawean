@@ -49,11 +49,15 @@ os.makedirs(os.path.join(cache, "revisions"), exist_ok=True)
 os.makedirs(os.path.join(cache, "rev"), exist_ok=True)
 
 
-def get(url, binary=False):
-    for attempt in range(5):
+def get(url, binary=False, expect=None):
+    """expect: 応答の頭の字（混雑すると e-Gov は 200 で HTML の「ページが見つかりません」を返す。それはやり直す）"""
+    for attempt in range(8):
         try:
             with urllib.request.urlopen(url, timeout=120) as r:
                 data = r.read()
+            if expect is not None and not data.lstrip().startswith(expect):
+                time.sleep(5 * (attempt + 1))
+                continue
             time.sleep(0.2)
             return data if binary else json.loads(data)
         except urllib.error.HTTPError as e:
@@ -161,7 +165,7 @@ if not no_xml:
     todo = sorted(r for r in need if not os.path.exists(os.path.join(cache, "rev", f"{r}.xml.gz")))
 
     def fetch(r):
-        data = get(f"{API}/law_data/{r}?response_format=xml", binary=True)
+        data = get(f"{API}/law_data/{r}?response_format=xml", binary=True, expect=b"<law_data_response")
         if data is not None:
             tmp = os.path.join(cache, "rev", f"{r}.xml.gz.tmp")
             with gzip.open(tmp, "wb") as f:
@@ -169,7 +173,8 @@ if not no_xml:
             os.replace(tmp, os.path.join(cache, "rev", f"{r}.xml.gz"))
         return len(data or b"")
 
-    with ThreadPoolExecutor(WORKERS) as ex:
+    # 本文は大きく、並べすぎると e-Gov が HTML を返すので 4 本まで
+    with ThreadPoolExecutor(min(WORKERS, 4)) as ex:
         for k, n in enumerate(ex.map(fetch, todo)):
             total += n
             if k % 50 == 0:

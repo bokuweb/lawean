@@ -1067,6 +1067,39 @@ pub(crate) fn article_mut<'a>(
             }),
         );
     }
+    // 本則から番号の続く附則の条（労働基準法の附則「第百三十八条」）: 改め文は「附則」を冠さずに言う。
+    // 本則の最後の条より後の番号で、本則に無ければ原始附則の中を探す
+    if find_article(&mut doc.main_provision, num).is_none() {
+        let mut last = None;
+        let mut stack: Vec<&Provision> = doc.main_provision.iter().collect();
+        while let Some(p) = stack.pop() {
+            match p {
+                Provision::Article(a) => {
+                    if let ArticleNum::Single { base, .. } = a.num {
+                        last = last.max(Some(base));
+                    }
+                }
+                Provision::Container(c) => stack.extend(c.children.iter()),
+                _ => {}
+            }
+        }
+        let beyond = matches!((num, last), (ArticleNum::Single { base, .. }, Some(l)) if *base > l);
+        if beyond {
+            if let Some(sp) = doc
+                .suppl_provisions
+                .iter_mut()
+                .find(|s| s.amend_law_num.is_none())
+            {
+                for c in sp.children.iter_mut() {
+                    if let SupplChild::Provision(Provision::Article(a)) = c {
+                        if a.num == *num {
+                            return Ok(a);
+                        }
+                    }
+                }
+            }
+        }
+    }
     find_article(&mut doc.main_provision, num)
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
 }
