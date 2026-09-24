@@ -45,6 +45,21 @@ pub fn apply_unit(
     refresh(&mut doc, new_version_id)
 }
 
+/// `apply_unit` の再パース（stable_id の振り直し）を省いたもの。本文を比べるだけの用途（段階施行の突き合わせで、
+/// 文を一つずつ試す）に。結果を次の改正単位の発射台に使うなら `apply_unit`
+pub fn apply_unit_unrefreshed(
+    doc: &LegalDocument,
+    unit: &AmendUnit,
+) -> Result<LegalDocument, ApplyError> {
+    let mut doc = doc.clone();
+    for ins in &unit.instructions {
+        apply_instruction(&mut doc, ins)?;
+    }
+    collapse_untitled(&mut doc.main_provision);
+    check_numbering(&doc)?;
+    Ok(doc)
+}
+
 /// 「第三条の前に次の節名及び二条を加える」「第十条の次に次のように加える」+ 題名の行・条: 条を `at` の前に入れ、
 /// 題名ごとに、その後ろの最初の新しい条（無ければ `at`）から包む
 fn insert_structure_before(
@@ -907,15 +922,29 @@ pub(crate) fn apply_instruction(
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;
             }
-            Op::InsertHeadingsBefore { with_toc: true, .. } => {
-                return Err(ApplyError::Unsupported("条の前に目次と章名を置く".into()))
-            }
             Op::InsertHeadingsBefore {
                 before,
                 after,
                 text,
-                ..
+                with_toc,
             } => {
+                // 「第一条の前に次の目次及び章名を付する」: 内容の頭の「目次」から「附則」までが目次
+                let text: &[String] = if *with_toc {
+                    let t: Vec<&str> = text.iter().map(|l| l.trim()).collect();
+                    let (Some(i), Some(j)) = (
+                        t.iter().position(|l| *l == "目次"),
+                        t.iter().position(|l| *l == "附則"),
+                    ) else {
+                        return Err(ApplyError::BadContent("目次の行が読めない".into()));
+                    };
+                    if j < i {
+                        return Err(ApplyError::BadContent("目次の行が読めない".into()));
+                    }
+                    set_toc(doc, &text[i..=j]);
+                    &text[j + 1..]
+                } else {
+                    text
+                };
                 // 「第三条の次に次の章名を付する」: 次の条の前に
                 let at = match (before, after) {
                     (Some(n), false) => n.clone(),
@@ -929,11 +958,15 @@ pub(crate) fn apply_instruction(
                             ApplyError::BadContent(format!("{}の次の条が無い", n.to_num_string()))
                         })?
                     }
-                    (None, _) => {
-                        return Err(ApplyError::Unsupported("本則の初めに章名を置く".into()))
-                    }
+                    // 「題名の次に次の目次及び章名を付する」: 本則の最初の条の前
+                    (None, _) => crate::numbering::article_nums(doc)
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| ApplyError::BadContent("本則に条が無い".into()))?,
                 };
-                insert_structure_before(doc, &at, text)?;
+                if !text.is_empty() {
+                    insert_structure_before(doc, &at, text)?;
+                }
             }
             Op::MainToArticle { .. } => {
                 return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))
@@ -1808,8 +1841,83 @@ pub(crate) fn table_edit_in_paragraph(
             }
             Ok(())
         }
+        // 「第四条第一項の表を次のように改める」: 表の全部
+        TableAction::Replace { text } if path.is_empty() => {
+            let at = p
+                .children
+                .iter()
+                .position(|c| matches!(c, ParagraphChild::Raw(e) if e.name == "TableStruct"))
+                .ok_or_else(|| ApplyError::BadContent("項に表が無い".into()))?;
+            p.children[at] = ParagraphChild::Raw(build_table(text));
+            Ok(())
+        }
+        // 「同表Xの項を次のように改める」「Xの項の次に次のように加える」「表に次のように加える」: 行
+        TableAction::Replace { text }
+        | TableAction::InsertAfter { text }
+        | TableAction::InsertBefore { text }
+        | TableAction::Append { text } => {
+            let new_rows = table_rows_of_struct(build_table(text));
+            let rows = paragraph_table_rows(p)
+                .ok_or_else(|| ApplyError::BadContent("項に表が無い".into()))?;
+            if let TableAction::Append { .. } = action {
+                if !path.is_empty() {
+                    return Err(unsupported());
+                }
+                rows.extend(new_rows);
+                return Ok(());
+            }
+            let r = row.ok_or_else(unsupported)?;
+            let key = strip_ws(r);
+            let at = rows
+                .iter()
+                .position(
+                    |c| matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key),
+                )
+                .ok_or_else(|| ApplyError::BadContent(format!("表に「{r}」の項が無い")))?;
+            match action {
+                TableAction::Replace { .. } => {
+                    rows.splice(at..=at, new_rows);
+                }
+                TableAction::InsertAfter { .. } => {
+                    rows.splice(at + 1..at + 1, new_rows);
+                }
+                _ => {
+                    rows.splice(at..at, new_rows);
+                }
+            }
+            Ok(())
+        }
         _ => Err(unsupported()),
     }
+}
+
+/// `build_table` の表の行
+fn table_rows_of_struct(e: Element) -> Vec<Node> {
+    e.children
+        .into_iter()
+        .filter_map(|c| match c {
+            Node::Element(t) if t.name == "Table" => Some(t.children),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// 項の中の最初の表の行の並び（`Table` の children）
+fn paragraph_table_rows(p: &mut Paragraph) -> Option<&mut Vec<Node>> {
+    fn find(e: &mut Element) -> Option<&mut Vec<Node>> {
+        if e.name == "Table" {
+            return Some(&mut e.children);
+        }
+        e.children.iter_mut().find_map(|c| match c {
+            Node::Element(x) => find(x),
+            _ => None,
+        })
+    }
+    p.children.iter_mut().find_map(|c| match c {
+        ParagraphChild::Raw(e) if e.name == "TableStruct" => find(e),
+        _ => None,
+    })
 }
 
 /// 「題名中「A」を「B」に改める」
@@ -2058,13 +2166,19 @@ pub(crate) fn para_index(
         return Ok(None);
     };
     let snap = &snapshots[&art.num.to_num_string()];
-    snap.iter()
+    let not_found = || ApplyError::ParagraphNotFound {
+        article: art.num.to_num_string(),
+        paragraph: *n,
+    };
+    let i = snap
+        .iter()
         .position(|o| *o == Some(*n))
-        .map(Some)
-        .ok_or_else(|| ApplyError::ParagraphNotFound {
-            article: art.num.to_num_string(),
-            paragraph: *n,
-        })
+        .ok_or_else(not_found)?;
+    // 同じ文の先の操作で項が減っていれば（文の始まりの番号の項がもう無い）、無い項
+    if i >= paragraphs(art).len() {
+        return Err(not_found());
+    }
+    Ok(Some(i))
 }
 
 // ---------------------------------------------------------------- テキスト操作
@@ -2200,6 +2314,9 @@ pub(crate) fn strip_marks_doc(doc: &mut LegalDocument) {
         }
     }
     provisions(&mut doc.main_provision);
+    if let Some(t) = doc.toc.as_mut() {
+        element(t);
+    }
     for sp in &mut doc.suppl_provisions {
         for c in &mut sp.children {
             match c {
@@ -2366,13 +2483,15 @@ fn replace_in_sentence(s: &mut Sentence, from: &str, to: &str, protect: &[String
     n
 }
 
+/// 目次の字句を改める。加えた字句には印を付ける（同じ文の「「第五章…」を「第五章…第六章…」に、「第六章」を「第七章」に」の
+/// 後の置換は、先に加えた「第六章」を指さない。印は文の終わりに外す）
 pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
     fn go(e: &mut Element, from: &str, to: &str) -> usize {
         let mut n = 0;
         for c in &mut e.children {
             match c {
                 Node::Text(t) => {
-                    let (nt, c) = replace_protected(t, from, to, &[]);
+                    let (nt, c) = replace_protected(t, from, &mark(to), &[]);
                     n += c;
                     *t = nt;
                 }
@@ -2394,7 +2513,7 @@ pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Resu
             if f.is_empty() || !flat.contains(&f) {
                 return Err(ApplyError::TocPhraseNotFound(from.into()));
             }
-            let (new, _) = replace_protected(&flat, &f, &t, &[]);
+            let (new, _) = replace_protected(&flat, &f, &mark(&t), &[]);
             doc.toc = Some(Element {
                 name: "TOC".into(),
                 attrs: vec![],
@@ -3199,6 +3318,27 @@ pub(crate) fn replace_articles(
     text: &[String],
 ) -> Result<(), ApplyError> {
     let new = parse_articles(text)?;
+    // 「第九百三十条から第九百三十二条までを次のように改める」: 範囲は、文書に範囲の条（「930:932」）が無ければ、
+    // 文書の並びでその間にある条（枝番も）に広げる
+    let mut expanded: Vec<ArticleNum> = Vec::new();
+    for n in articles {
+        if let ArticleNum::Range { from, to } = n {
+            if find_article(&mut doc.main_provision, n).is_none() {
+                let all = crate::numbering::article_nums(doc);
+                if let (Some(i), Some(j)) = (
+                    all.iter().position(|a| a == from.as_ref()),
+                    all.iter().position(|a| a == to.as_ref()),
+                ) {
+                    if i <= j {
+                        expanded.extend(all[i..=j].iter().cloned());
+                        continue;
+                    }
+                }
+            }
+        }
+        expanded.push(n.clone());
+    }
+    let articles = expanded.as_slice();
     let first = articles
         .first()
         .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
@@ -4736,8 +4876,14 @@ pub fn diff_snapshots(
                     if l != r {
                         out.push(format!(
                             "art {k} #{i}: {:?} != {:?}",
-                            l.map(|(n, t)| format!("{n}:{}", &t[..t.len().min(60)])),
-                            r.map(|(n, t)| format!("{n}:{}", &t[..t.len().min(60)]))
+                            l.map(|(n, t)| format!(
+                                "{n}:{}",
+                                t.chars().take(20).collect::<String>()
+                            )),
+                            r.map(|(n, t)| format!(
+                                "{n}:{}",
+                                t.chars().take(20).collect::<String>()
+                            ))
                         ));
                     }
                 }

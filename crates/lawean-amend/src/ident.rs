@@ -651,10 +651,11 @@ impl Binder<'_> {
                 Op::ReplaceToc { from, to } => {
                     let expected = toc_text(&self.doc).unwrap_or_default();
                     replace_toc(&mut self.doc, from, to)?;
+                    // 加えた字句の印（同じ文の後の置換から守る）は id の世界には載せない
                     self.ops.push(IdentOp::Replace {
                         id: TOC_ID.into(),
-                        expected,
-                        new: toc_text(&self.doc).unwrap_or_default(),
+                        expected: crate::apply::strip_marks(&expected),
+                        new: crate::apply::strip_marks(&toc_text(&self.doc).unwrap_or_default()),
                     });
                 }
                 // 附則の条は id の世界（本則）に無い。文書の側だけ改める
@@ -1366,7 +1367,6 @@ impl Binder<'_> {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
                 Op::InsertContainersAfterArticle { .. }
-                | Op::InsertHeadingsBefore { .. }
                 | Op::DeleteContainer { .. }
                 | Op::ShiftBranchArticles { .. }
                 | Op::ShiftContainers { .. }
@@ -1389,8 +1389,10 @@ impl Binder<'_> {
                         "条の前後に容器を置く改正の id の対応".into(),
                     ))
                 }
-                // 表の中（欄の字句・行）は id を持たない。文書の側だけ
+                // 表の中（欄の字句・行）は id を持たない。文書の側だけ。
+                // 目次と章名を置く（「第一条の前に次の目次及び章名を付する」）も文書の側だけ（目次は id の世界で作れない）
                 Op::TableEdit { .. }
+                | Op::InsertHeadingsBefore { .. }
                 | Op::ParagraphCaption { .. }
                 | Op::DeleteToc
                 | Op::SetTitleAndToc { .. }
