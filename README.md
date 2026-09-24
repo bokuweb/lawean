@@ -26,6 +26,7 @@ e-Gov 法令 XML を読み込み、原文構造（Source IR）と法的意味（
 | [docs/13-pending-amendments.md](docs/13-pending-amendments.md) | **先行改正との競合**: 起草後・施行前に別の改正が施行されて改め文がずれる（空振り・別の項・加える本文の参照のずれ）。令3-37 附則第63条が令2-62 の改め文を改めた 3 箇所を再現。可換性（`applyUnit_comm`）で順序は消えるが正しさは出ない → **参照を id で持つ**（`Refs.lean` / `lawean-amend::body`）と描き直しが e-Gov の本文と一致する（Lean で実データ） | 実装 |
 | [docs/12-cases.md](docs/12-cases.md) | **検証ケース**: 実際の改正 24 件（通る）と、失敗例 15 件（発射台違い・順序・ハネ漏れ・番号違い・引用ミス・新旧対照表の誤記・衝突・他法令の参照切れ・施行期日、実際に起きた公職選挙法の改正漏れ。指定した検査だけが落ちる）。ブラウザの playground | 実装 |
 | [docs/playground/](docs/playground/index.html) | **改正案の検査 playground**（WASM）。実例のケース集と、[発射台を選んで改正法を書いて検査する](docs/playground/draft.html) 画面（Z3 もブラウザ内）。公開: https://bokuweb.github.io/lawean/ | — |
+| [docs/14-apply-benchmark.md](docs/14-apply-benchmark.md) | **当てる側の精度**: 衆議院の改め文（2017 年以降 3,600 単位）を e-Gov の改正前の版に当て、改正後の版と突き合わせる（`bench_apply`、`tools/fetch_egov_revisions.py`）。一致 64.7%、identity patch の経路も一致の 99.1% で揃う。不一致は読み違い・当て違いの検出 | 実装 |
 | [docs/TODO.md](docs/TODO.md) | 後回しにしたもの | — |
 | [docs/adr/](docs/adr/) | 設計判断の記録 | — |
 | [docs/design-notes.html](docs/design-notes.html) | 方針と設計のやさしい解説（HTML）。最小の Lean 例、異常検出の例、identity patch の解説つき | — |
