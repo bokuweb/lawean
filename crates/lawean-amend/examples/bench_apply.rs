@@ -604,7 +604,18 @@ fn run(mut args: Vec<String>) {
                     let (Some(before), Some(expected)) = (load(prev), load(after)) else {
                         continue;
                     };
-                    let o = try_pair(&before, &expected, &u, prev, after);
+                    // 候補の一つが落ちても（突き合わせの側の不具合でも）全体は止めない
+                    let o = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        try_pair(&before, &expected, &u, prev, after)
+                    }))
+                    .unwrap_or_else(|_| Outcome {
+                        result: "panic".into(),
+                        detail: String::new(),
+                        diff: 0,
+                        prev: prev.clone(),
+                        after: after.clone(),
+                        ident: String::new(),
+                    });
                     if std::env::var("BENCH_DEBUG").is_ok() {
                         eprintln!("  {prev} > {after}: {} {}", o.result, o.detail);
                     }
@@ -675,7 +686,12 @@ fn run(mut args: Vec<String>) {
                     .iter()
                     .map(|&(k, i)| &results[k].2.instructions[i])
                     .collect();
-                if let Some(used) = stage_match(&before, &expected, &ins, &prev, &after) {
+                let staged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    stage_match(&before, &expected, &ins, &prev, &after)
+                }))
+                .ok()
+                .flatten();
+                if let Some(used) = staged {
                     for j in used {
                         verified.insert(todo[j]);
                         stages.insert(todo[j].0, (prev.clone(), after.clone()));
