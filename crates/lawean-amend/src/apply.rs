@@ -922,15 +922,29 @@ pub(crate) fn apply_instruction(
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;
             }
-            Op::InsertHeadingsBefore { with_toc: true, .. } => {
-                return Err(ApplyError::Unsupported("条の前に目次と章名を置く".into()))
-            }
             Op::InsertHeadingsBefore {
                 before,
                 after,
                 text,
-                ..
+                with_toc,
             } => {
+                // 「第一条の前に次の目次及び章名を付する」: 内容の頭の「目次」から「附則」までが目次
+                let text: &[String] = if *with_toc {
+                    let t: Vec<&str> = text.iter().map(|l| l.trim()).collect();
+                    let (Some(i), Some(j)) = (
+                        t.iter().position(|l| *l == "目次"),
+                        t.iter().position(|l| *l == "附則"),
+                    ) else {
+                        return Err(ApplyError::BadContent("目次の行が読めない".into()));
+                    };
+                    if j < i {
+                        return Err(ApplyError::BadContent("目次の行が読めない".into()));
+                    }
+                    set_toc(doc, &text[i..=j]);
+                    &text[j + 1..]
+                } else {
+                    text
+                };
                 // 「第三条の次に次の章名を付する」: 次の条の前に
                 let at = match (before, after) {
                     (Some(n), false) => n.clone(),
@@ -944,11 +958,15 @@ pub(crate) fn apply_instruction(
                             ApplyError::BadContent(format!("{}の次の条が無い", n.to_num_string()))
                         })?
                     }
-                    (None, _) => {
-                        return Err(ApplyError::Unsupported("本則の初めに章名を置く".into()))
-                    }
+                    // 「題名の次に次の目次及び章名を付する」: 本則の最初の条の前
+                    (None, _) => crate::numbering::article_nums(doc)
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| ApplyError::BadContent("本則に条が無い".into()))?,
                 };
-                insert_structure_before(doc, &at, text)?;
+                if !text.is_empty() {
+                    insert_structure_before(doc, &at, text)?;
+                }
             }
             Op::MainToArticle { .. } => {
                 return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))
@@ -4831,8 +4849,14 @@ pub fn diff_snapshots(
                     if l != r {
                         out.push(format!(
                             "art {k} #{i}: {:?} != {:?}",
-                            l.map(|(n, t)| format!("{n}:{}", &t[..t.len().min(60)])),
-                            r.map(|(n, t)| format!("{n}:{}", &t[..t.len().min(60)]))
+                            l.map(|(n, t)| format!(
+                                "{n}:{}",
+                                t.chars().take(20).collect::<String>()
+                            )),
+                            r.map(|(n, t)| format!(
+                                "{n}:{}",
+                                t.chars().take(20).collect::<String>()
+                            ))
                         ));
                     }
                 }

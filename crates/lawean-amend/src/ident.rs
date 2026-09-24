@@ -1367,7 +1367,6 @@ impl Binder<'_> {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
                 Op::InsertContainersAfterArticle { .. }
-                | Op::InsertHeadingsBefore { .. }
                 | Op::DeleteContainer { .. }
                 | Op::ShiftBranchArticles { .. }
                 | Op::ShiftContainers { .. }
@@ -1390,8 +1389,10 @@ impl Binder<'_> {
                         "条の前後に容器を置く改正の id の対応".into(),
                     ))
                 }
-                // 表の中（欄の字句・行）は id を持たない。文書の側だけ
+                // 表の中（欄の字句・行）は id を持たない。文書の側だけ。
+                // 目次と章名を置く（「第一条の前に次の目次及び章名を付する」）も文書の側だけ（目次は id の世界で作れない）
                 Op::TableEdit { .. }
+                | Op::InsertHeadingsBefore { .. }
                 | Op::ParagraphCaption { .. }
                 | Op::DeleteToc
                 | Op::SetTitleAndToc { .. }
