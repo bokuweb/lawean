@@ -108,7 +108,7 @@ pub fn kana_of(n: u32) -> String {
 }
 
 /// 衆議院の制定法律の本文の正規化: ルビ「瑕(か)疵(し)」の半角括弧のふりがなを落とし、
-/// Shift_JIS に無い字の代替（剥→剝）を e-Gov の字に戻す
+/// Shift_JIS に無い字の代替（剥→剝、填→塡…）を e-Gov の字に戻す
 pub fn normalize_source_text(s: &str) -> String {
     static RUBY: OnceLock<Regex> = OnceLock::new();
     let ruby = RUBY.get_or_init(|| Regex::new(r"\([ぁ-ゖ]+\)").unwrap());
@@ -125,6 +125,15 @@ pub fn normalize_source_text(s: &str) -> String {
     }
     out.push_str(&s[last..]);
     out.replace('剥', "剝")
+        // 常用漢字表（2010）の字形: e-Gov は JIS X 0213:2004 の字（塡・頰・𠮟…）で持つ
+        .replace('填', "塡")
+        .replace('頬', "頰")
+        .replace('叱', "𠮟")
+        .replace('呑', "吞")
+        .replace('蝉', "蟬")
+        .replace('繋', "繫")
+        // 目次の範囲「（第四条−第二十一条）」: e-Gov は「―」
+        .replace('−', "―")
         .replace('｡', "。")
         .replace('､', "、")
         .replace('｢', "「")
@@ -1439,9 +1448,13 @@ pub(crate) fn art_num(s: &str) -> ArticleNum {
         .flat_map(|p| p.split('の'))
         .filter_map(kanji_to_u32)
         .collect();
+    // 番号として読めない条（呼び出し元の取り違えなど）で落ちない
+    let Some((&base, branch)) = parts.split_first() else {
+        return ArticleNum::Other(s.to_string());
+    };
     ArticleNum::Single {
-        base: parts[0],
-        branch: parts[1..].to_vec(),
+        base,
+        branch: branch.to_vec(),
     }
 }
 
@@ -2921,7 +2934,7 @@ fn parse_phrase_op_loose(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>
 }
 
 /// 「第一章第八節」→ [(章, 1), (節, 8)]
-fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, String)> {
+pub(crate) fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, String)> {
     static P: OnceLock<Regex> = OnceLock::new();
     let pr = P.get_or_init(|| re(r"第({N})(編|章|節|款|目)((?:の{N})*)"));
     pr.captures_iter(s)

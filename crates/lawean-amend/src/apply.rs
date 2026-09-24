@@ -45,6 +45,277 @@ pub fn apply_unit(
     refresh(&mut doc, new_version_id)
 }
 
+/// 「第三条の前に次の節名及び二条を加える」「第十条の次に次のように加える」+ 題名の行・条: 条を `at` の前に入れ、
+/// 題名ごとに、その後ろの最初の新しい条（無ければ `at`）から包む
+fn insert_structure_before(
+    doc: &mut LegalDocument,
+    at: &ArticleNum,
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    static HEAD: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let head = HEAD.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+(?:編|章|節|款|目)(?:の[一二三四五六七八九十百千]+)*[\u{3000} ]").unwrap()
+    });
+    static ART: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let art = ART.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+条(?:の[一二三四五六七八九十百千]+)*(?:(?:から|及び)第[^\u{3000}]+)?[\u{3000} ]").unwrap()
+    });
+    enum Piece {
+        Heading(String),
+        Article(Vec<String>),
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+    for l in lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+        if head.is_match(l) {
+            pieces.push(Piece::Heading(l.to_string()));
+        } else if art.is_match(l) {
+            // 直前が見出しだけの条（「（…）」）ならそこに続ける
+            match pieces.last_mut() {
+                Some(Piece::Article(v)) if v.len() == 1 && v[0].starts_with('（') => {
+                    v.push(l.to_string())
+                }
+                _ => pieces.push(Piece::Article(vec![l.to_string()])),
+            }
+        } else if l.starts_with('（')
+            && !matches!(pieces.last(), Some(Piece::Article(v)) if !v.iter().any(|x| art.is_match(x)))
+        {
+            pieces.push(Piece::Article(vec![l.to_string()]));
+        } else {
+            match pieces.last_mut() {
+                Some(Piece::Article(v)) => v.push(l.to_string()),
+                _ => return Err(ApplyError::BadContent(format!("題名の前の本文: {l}"))),
+            }
+        }
+    }
+    // 新しい条を `at` の前に、並びの順に入れる
+    let mut new_nums: Vec<Option<ArticleNum>> = Vec::new();
+    for p in &pieces {
+        match p {
+            Piece::Heading(_) => new_nums.push(None),
+            Piece::Article(v) => {
+                let a = parse_article(v)?;
+                let num = a.num.clone();
+                let path = article_path(&doc.main_provision, at)
+                    .ok_or_else(|| ApplyError::ArticleNotFound(at.to_num_string()))?;
+                let (&idx, parent) = path.split_last().expect("道筋");
+                provision_list(&mut doc.main_provision, parent).insert(idx, Provision::Article(a));
+                new_nums.push(Some(num));
+            }
+        }
+    }
+    // 題名ごとに、後ろの最初の新しい条（無ければ `at`）から包む
+    for (k, p) in pieces.iter().enumerate() {
+        if let Piece::Heading(line) = p {
+            let start = new_nums[k + 1..]
+                .iter()
+                .find_map(|n| n.clone())
+                .unwrap_or_else(|| at.clone());
+            wrap_from_article(doc, &start, line)?;
+        }
+    }
+    Ok(())
+}
+
+/// 範囲の削除の条（「第五百十七条から第五百二十条まで　削除」）から条 `num` を分ける: 前の残り・その条・後ろの残り
+fn split_range_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
+    let ArticleNum::Single { base, branch } = num else {
+        return false;
+    };
+    if !branch.is_empty() {
+        return false;
+    }
+    let single = |n: u32| ArticleNum::Single {
+        base: n,
+        branch: vec![],
+    };
+    let deleted = |from: u32, to: u32| {
+        let kanji = |n: u32| lawean_resolve::numeral::to_kanji(n);
+        let (num, title) = if from == to {
+            (single(from), format!("第{}条", kanji(from)))
+        } else if to == from + 1 {
+            (
+                ArticleNum::Range {
+                    from: Box::new(single(from)),
+                    to: Box::new(single(to)),
+                },
+                format!("第{}条及び第{}条", kanji(from), kanji(to)),
+            )
+        } else {
+            (
+                ArticleNum::Range {
+                    from: Box::new(single(from)),
+                    to: Box::new(single(to)),
+                },
+                format!("第{}条から第{}条まで", kanji(from), kanji(to)),
+            )
+        };
+        let mut p = parse_paragraph(&["削除".to_string()]).expect("削除");
+        set_label(&mut p, 1);
+        Provision::Article(Article {
+            stable_id: StableId(String::new()),
+            num,
+            caption: None,
+            title: Some(vec![Inline::Text(title)]),
+            children: vec![ArticleChild::Paragraph(p)],
+            attrs: Vec::new(),
+        })
+    };
+    for i in 0..ps.len() {
+        match &mut ps[i] {
+            Provision::Article(a) => {
+                let ArticleNum::Range { from, to } = &a.num else {
+                    continue;
+                };
+                let (
+                    ArticleNum::Single {
+                        base: f,
+                        branch: fb,
+                    },
+                    ArticleNum::Single {
+                        base: t,
+                        branch: tb,
+                    },
+                ) = (from.as_ref(), to.as_ref())
+                else {
+                    continue;
+                };
+                if !fb.is_empty() || !tb.is_empty() || !(*f <= *base && *base <= *t) {
+                    continue;
+                }
+                let (f, t, n) = (*f, *t, *base);
+                let mut parts = Vec::new();
+                if f < n {
+                    parts.push(deleted(f, n - 1));
+                }
+                parts.push(deleted(n, n));
+                if n < t {
+                    parts.push(deleted(n + 1, t));
+                }
+                ps.splice(i..=i, parts);
+                return true;
+            }
+            Provision::Container(c) => {
+                if split_range_article(&mut c.children, num) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 題名の行（「第一節　…」）と、それ以外（加える条の行）に分ける
+pub(crate) fn split_structure_lines(lines: &[String]) -> (Vec<String>, Vec<String>) {
+    static HEAD: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let head = HEAD.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+(?:編|章|節|款|目)(?:の[一二三四五六七八九十百千]+)*[\u{3000} ]").unwrap()
+    });
+    let (mut h, mut a) = (Vec::new(), Vec::new());
+    for l in lines {
+        if head.is_match(l.trim()) {
+            h.push(l.clone());
+        } else {
+            a.push(l.clone());
+        }
+    }
+    (h, a)
+}
+
+/// 条までの容器の道筋（並びの添字の列。最後が条）
+fn article_path(ps: &[Provision], at: &ArticleNum) -> Option<Vec<usize>> {
+    for (i, p) in ps.iter().enumerate() {
+        match p {
+            Provision::Article(a) if &a.num == at => return Some(vec![i]),
+            Provision::Container(c) => {
+                if let Some(mut v) = article_path(&c.children, at) {
+                    v.insert(0, i);
+                    return Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 道筋の容器の中の並び
+fn provision_list<'a>(ps: &'a mut Vec<Provision>, path: &[usize]) -> &'a mut Vec<Provision> {
+    match path.split_first() {
+        None => ps,
+        Some((&i, rest)) => match &mut ps[i] {
+            Provision::Container(c) => provision_list(&mut c.children, rest),
+            _ => unreachable!("容器の道筋"),
+        },
+    }
+}
+
+/// 「第二章中第三条の前に次の節名を付する。第一節　…」: 条 `at` から、同じ並びの次の容器（無ければ並びの終わり）までを
+/// 新しい容器（題名 `line`）で包む。`at` を含む容器が同じ種類（第一節の中の第十九条の前に第二節）なら、その容器を `at` で分ける
+fn wrap_from_article(
+    doc: &mut LegalDocument,
+    at: &ArticleNum,
+    line: &str,
+) -> Result<(), ApplyError> {
+    let path_of = article_path;
+    let list_at = provision_list;
+    let head = line.split(['\u{3000}', ' ']).next().unwrap_or("");
+    let Some((kind, num)) = crate::parse::container_path(head).pop() else {
+        return Err(ApplyError::BadContent(format!("題名が読めない: {line}")));
+    };
+    let path = path_of(&doc.main_provision, at)
+        .ok_or_else(|| ApplyError::ArticleNotFound(at.to_num_string()))?;
+    let (&idx, parent) = path.split_last().expect("道筋");
+    let new = |children: Vec<Provision>| {
+        Provision::Container(Container {
+            stable_id: StableId(String::new()),
+            kind,
+            num: Some(num.clone()),
+            title: Some(vec![Inline::Text(line.to_string())]),
+            attrs: Vec::new(),
+            children,
+        })
+    };
+    // 条を含む容器が同じ種類: その容器を条の前で分け、後ろを兄弟の容器に
+    if let Some((&pi, grand)) = parent.split_last() {
+        let list = list_at(&mut doc.main_provision, grand);
+        if let Provision::Container(c) = &mut list[pi] {
+            if c.kind == kind {
+                let tail = c.children.split_off(idx);
+                list.insert(pi + 1, new(tail));
+                return Ok(());
+            }
+        }
+    }
+    let list = list_at(&mut doc.main_provision, parent);
+    let end = list[idx..]
+        .iter()
+        .position(|p| matches!(p, Provision::Container(_)))
+        .map_or(list.len(), |k| idx + k);
+    let body: Vec<Provision> = list.drain(idx..end).collect();
+    list.insert(idx, new(body));
+    Ok(())
+}
+
+/// 括弧の番号の表記を e-Gov に揃える: 衆議院のページの半角「(1)」「(十九の七)」→ 全角「（１）」「（十九の七）」
+pub(crate) fn egov_parens(s: &str) -> String {
+    static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let r = R.get_or_init(|| {
+        regex::Regex::new(r"\(([0-9０-９]{1,3}|[一二三四五六七八九十百の]{1,8})\)").unwrap()
+    });
+    r.replace_all(s, |c: &regex::Captures| {
+        let inner: String = c[1]
+            .chars()
+            .map(|ch| match ch {
+                '0'..='9' => char::from_u32(ch as u32 - '0' as u32 + '０' as u32).unwrap_or(ch),
+                ch => ch,
+            })
+            .collect();
+        format!("（{inner}）")
+    })
+    .into_owned()
+}
+
 /// 1 文の中の項番号は文の始まりの番号（改正前）で解釈する
 pub(crate) fn apply_instruction(
     doc: &mut LegalDocument,
@@ -56,7 +327,17 @@ pub(crate) fn apply_instruction(
     let mut inserted: Vec<String> = Vec::new();
     // 別表の行は文の始まりの上欄で引く（同じ文の最初の置換で上欄が変わっても、後の置換は同じ行）
     let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
-    for op in &ins.ops {
+    // 字句の表記を e-Gov に揃える（衆議院の「(1)」→「（１）」）
+    let ops: Vec<Op> = ins
+        .ops
+        .iter()
+        .map(|o| {
+            let mut o = o.clone();
+            o.map_strings(&egov_parens);
+            o
+        })
+        .collect();
+    for op in &ops {
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
             Op::ReplaceAll { from, to } => {
@@ -136,6 +417,7 @@ pub(crate) fn apply_instruction(
                         .unwrap()
                         .push(None);
                 }
+                renumber_unnumbered(art);
             }
             Op::InsertParagraphAfter {
                 article,
@@ -152,6 +434,7 @@ pub(crate) fn apply_instruction(
                         .unwrap()
                         .insert(idx + k + 1, None);
                 }
+                renumber_unnumbered(art);
             }
             Op::RenumberParagraph { article, from, to } => {
                 let art = article_mut(doc, article)?;
@@ -624,10 +907,33 @@ pub(crate) fn apply_instruction(
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;
             }
-            Op::InsertHeadingsBefore { .. } => {
-                return Err(ApplyError::Unsupported(
-                    "条の前に章名・目次を置く（条を容器に包み直す）".into(),
-                ))
+            Op::InsertHeadingsBefore { with_toc: true, .. } => {
+                return Err(ApplyError::Unsupported("条の前に目次と章名を置く".into()))
+            }
+            Op::InsertHeadingsBefore {
+                before,
+                after,
+                text,
+                ..
+            } => {
+                // 「第三条の次に次の章名を付する」: 次の条の前に
+                let at = match (before, after) {
+                    (Some(n), false) => n.clone(),
+                    (Some(n), true) => {
+                        let all = crate::numbering::article_nums(doc);
+                        let i = all
+                            .iter()
+                            .position(|a| a == n)
+                            .ok_or_else(|| ApplyError::ArticleNotFound(n.to_num_string()))?;
+                        all.get(i + 1).cloned().ok_or_else(|| {
+                            ApplyError::BadContent(format!("{}の次の条が無い", n.to_num_string()))
+                        })?
+                    }
+                    (None, _) => {
+                        return Err(ApplyError::Unsupported("本則の初めに章名を置く".into()))
+                    }
+                };
+                insert_structure_before(doc, &at, text)?;
             }
             Op::MainToArticle { .. } => {
                 return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))
@@ -1065,6 +1371,43 @@ pub(crate) fn article_mut<'a>(
             }),
         );
     }
+    // 「第百五十条及び第百五十一条　削除」（e-Gov の Num「150:151」）の中の条: その条を分けて取り出す
+    if find_article(&mut doc.main_provision, num).is_none() {
+        split_range_article(&mut doc.main_provision, num);
+    }
+    // 本則から番号の続く附則の条（労働基準法の附則「第百三十八条」）: 改め文は「附則」を冠さずに言う。
+    // 本則の最後の条より後の番号で、本則に無ければ原始附則の中を探す
+    if find_article(&mut doc.main_provision, num).is_none() {
+        let mut last = None;
+        let mut stack: Vec<&Provision> = doc.main_provision.iter().collect();
+        while let Some(p) = stack.pop() {
+            match p {
+                Provision::Article(a) => {
+                    if let ArticleNum::Single { base, .. } = a.num {
+                        last = last.max(Some(base));
+                    }
+                }
+                Provision::Container(c) => stack.extend(c.children.iter()),
+                _ => {}
+            }
+        }
+        let beyond = matches!((num, last), (ArticleNum::Single { base, .. }, Some(l)) if *base > l);
+        if beyond {
+            if let Some(sp) = doc
+                .suppl_provisions
+                .iter_mut()
+                .find(|s| s.amend_law_num.is_none())
+            {
+                for c in sp.children.iter_mut() {
+                    if let SupplChild::Provision(Provision::Article(a)) = c {
+                        if a.num == *num {
+                            return Ok(a);
+                        }
+                    }
+                }
+            }
+        }
+    }
     find_article(&mut doc.main_provision, num)
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
 }
@@ -1309,7 +1652,23 @@ pub(crate) fn table_edit_appdx(
         }
         TableAction::Phrase { from, to } => match row {
             Some(r) => replace_appdx_row(doc, table, r, None, from, to, appdx_rows),
-            None => Err(unsupported()),
+            // 「六の項第六号中」「(に)項第一号中」: 行の中の位置。行の中に字句が一つだけなら、その一つを改める
+            None => match split_row(path) {
+                Some(r) => {
+                    let n = count_in_appdx_row(doc, table, &r, from)?;
+                    match n {
+                        0 => Err(ApplyError::PhraseNotFound {
+                            at: format!("{table}{path}"),
+                            phrase: from.clone(),
+                        }),
+                        1 => replace_appdx_row(doc, table, &r, None, from, to, appdx_rows),
+                        _ => Err(ApplyError::Unsupported(format!(
+                            "{table}の行の中の位置（字句が行に{n}か所）"
+                        ))),
+                    }
+                }
+                None => Err(unsupported()),
+            },
         },
         TableAction::Replace { text } if path.is_empty() => {
             let i = appdx_index(doc, table)?;
@@ -1340,6 +1699,38 @@ pub(crate) fn table_edit_appdx(
     }
 }
 
+/// 「六の項第六号」「(に)項第一号」→ 行（「六」「（に）」）。行を言わない位置なら None
+fn split_row(path: &str) -> Option<String> {
+    if let Some(i) = path.find("の項") {
+        let r = &path[..i];
+        return (!r.contains("及び") && !r.contains('、')).then(|| r.to_string());
+    }
+    // 「(に)項」: 閉じ括弧の前まで。上欄は e-Gov では全角の「（に）」
+    let i = [")項", "）項"].iter().filter_map(|x| path.find(x)).min()?;
+    Some(format!("{}）", &path[..i]).replace('(', "（"))
+}
+
+/// 別表の行の中の字句の数
+fn count_in_appdx_row(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    from: &str,
+) -> Result<usize, ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, row)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+    Ok(body[at..at + len]
+        .iter()
+        .map(|c| match c {
+            Node::Element(r) => r.text().matches(from).count(),
+            _ => 0,
+        })
+        .sum())
+}
+
 fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
     doc.appendices
         .iter()
@@ -1352,9 +1743,7 @@ fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
                     _ => None,
                 })
                 .unwrap_or_default();
-            title == table
-                || title.starts_with(&format!("{table}（"))
-                || title.starts_with(&format!("{table}\u{3000}"))
+            appdx_title_matches(&title, table)
         })
         .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
 }
@@ -1376,7 +1765,21 @@ pub(crate) fn table_edit_in_paragraph(
         }
         TableAction::Phrase { from, to } => match row {
             Some(r) => replace_table_row(p, r, from, to, protect),
-            None => Err(unsupported()),
+            // 「Xの項第三号中」: 行の中の位置。行の中に字句が一つだけなら、その一つを改める
+            None => match split_row(path) {
+                Some(r) => match count_in_table_row(p, &r, from) {
+                    Some(1) => replace_table_row(p, &r, from, to, protect),
+                    Some(0) => Err(ApplyError::PhraseNotFound {
+                        at: format!("表{path}"),
+                        phrase: from.clone(),
+                    }),
+                    Some(n) => Err(ApplyError::Unsupported(format!(
+                        "表の行の中の位置（字句が行に{n}か所）"
+                    ))),
+                    None => Err(ApplyError::BadContent(format!("表に「{r}」の項が無い"))),
+                },
+                None => Err(unsupported()),
+            },
         },
         TableAction::Delete => {
             let rows = table_rows_of(path).ok_or_else(unsupported)?;
@@ -2012,11 +2415,39 @@ fn fullwidth(n: u32) -> String {
 
 pub(crate) fn set_label(p: &mut Paragraph, n: u32) {
     p.num = n.to_string();
-    p.num_text = Some(if n == 1 {
+    // 項番号の無い古い法律の項（e-Gov の `OldNum="true"`）は番号を書かない
+    p.num_text = Some(if n == 1 || is_unnumbered(p) {
         Vec::new()
     } else {
         vec![Inline::Text(fullwidth(n))]
     });
+}
+
+/// 項番号を書かない項（古い法律。e-Gov の `OldNum="true"`）
+fn is_unnumbered(p: &Paragraph) -> bool {
+    p.attrs.iter().any(|(k, v)| k == "OldNum" && v == "true")
+}
+
+/// 項番号を書かない流儀の条（第2項以降がどれも番号を書かない）なら、項を位置の番号に振り直す
+pub(crate) fn renumber_unnumbered(art: &mut Article) {
+    let ps: Vec<&Paragraph> = art
+        .children
+        .iter()
+        .filter_map(|c| match c {
+            ArticleChild::Paragraph(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    if ps.len() < 2 || !ps[1..].iter().all(|p| is_unnumbered(p)) {
+        return;
+    }
+    let mut k = 0;
+    for c in &mut art.children {
+        if let ArticleChild::Paragraph(p) = c {
+            k += 1;
+            p.num = k.to_string();
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 追加する条文の構築
@@ -2044,7 +2475,8 @@ fn split_sentences(text: &str) -> Vec<String> {
 }
 
 pub(crate) fn make_sentences(text: &str) -> Vec<Sentence> {
-    let parts = split_sentences(text);
+    let text = egov_parens(text);
+    let parts = split_sentences(&text);
     let proviso_at = parts.iter().position(|s| s.starts_with("ただし、"));
     parts
         .iter()
@@ -2535,7 +2967,32 @@ pub fn parse_paragraphs(lines: &[String]) -> Result<Vec<Paragraph>, ApplyError> 
     let mut out: Vec<Paragraph> = Vec::new();
     // 項・号・イロハのどれでもない行（番号が無い）は読替え表のセル。最後の項に表として付ける
     let mut cells: Vec<String> = Vec::new();
+    // 最初の行に番号が無い: 項番号を書かない古い法律の項（「第二十五条に次の二項を加える。」+ 番号の無い文）。
+    // 続く番号の無い文（「。」で終わる）も項
+    let unnumbered = lines.first().is_some_and(|l| {
+        split_leading_number(l).0.is_none()
+            && split_item_title(l, KANJI_ITEM).is_none()
+            && split_item_title(l, KANA_SUBITEM).is_none()
+            && split_paren_number(l).is_none()
+    });
+    let old_paragraph = |l: &String| -> Result<Paragraph, ApplyError> {
+        let mut p = parse_paragraph(std::slice::from_ref(l))?;
+        p.attrs.push(("OldNum".into(), "true".into()));
+        p.num_text = Some(Vec::new());
+        Ok(p)
+    };
     for l in lines {
+        if unnumbered
+            && cells.is_empty()
+            && split_leading_number(l).0.is_none()
+            && split_item_title(l, KANJI_ITEM).is_none()
+            && split_item_title(l, KANA_SUBITEM).is_none()
+            && split_paren_number(l).is_none()
+            && l.trim_end().ends_with('。')
+        {
+            out.push(old_paragraph(l)?);
+            continue;
+        }
         if !out.is_empty()
             && split_leading_number(l).0.is_none()
             && split_item_title(l, KANJI_ITEM).is_none()
@@ -2629,6 +3086,12 @@ pub fn parse_paragraphs(lines: &[String]) -> Result<Vec<Paragraph>, ApplyError> 
     }
     if out.is_empty() {
         return Err(ApplyError::BadContent("empty".into()));
+    }
+    // 番号の無い項は並びの番号（条に加えるときは `renumber_unnumbered` が条の中の位置に振り直す）
+    if unnumbered {
+        for (k, p) in out.iter_mut().enumerate() {
+            p.num = (k + 1).to_string();
+        }
     }
     Ok(out)
 }
@@ -2739,6 +3202,12 @@ pub(crate) fn replace_articles(
     let first = articles
         .first()
         .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
+    // 範囲の削除の条（「第百五十条及び第百五十一条　削除」）の中の条は先に分けておく
+    for n in articles {
+        if find_article(&mut doc.main_provision, n).is_none() {
+            split_range_article(&mut doc.main_provision, n);
+        }
+    }
     // 旧条は先に取り除く（最初の条だけ、その位置に新しい条を置く）
     for n in &articles[1..] {
         remove_article(&mut doc.main_provision, n);
@@ -2958,6 +3427,16 @@ fn row_group_len(body: &[Node], at: usize) -> usize {
 
 // ---------------------------------------------------------------- 別表の行
 
+/// 別表の題名（空白を詰めたもの）が `table` か: 「別表第一（第二条関係）」「別表第一在外公館の名称及び位置」は
+/// 「別表第一」。「別表第十」「別表第一の二」は違う
+fn appdx_title_matches(title: &str, table: &str) -> bool {
+    let table = strip_ws(table);
+    match title.strip_prefix(table.as_str()) {
+        Some(rest) => !rest.starts_with(|c: char| "一二三四五六七八九十百千の".contains(c)),
+        None => false,
+    }
+}
+
 /// 別表（`AppdxTable`）を題で引く。「別表第一」は題が「別表第一（第三条関係）」でも当たる
 pub(crate) fn appdx_mut<'a>(
     doc: &'a mut LegalDocument,
@@ -2974,9 +3453,7 @@ pub(crate) fn appdx_mut<'a>(
                     _ => None,
                 })
                 .unwrap_or_default();
-            title == table
-                || title.starts_with(&format!("{table}（"))
-                || title.starts_with(&format!("{table}\u{3000}"))
+            appdx_title_matches(&title, table)
         })
         .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
 }
@@ -3524,6 +4001,39 @@ pub(crate) fn replace_table_row(
         });
     }
     Ok(())
+}
+
+/// 条・項の中の表の行（上欄が `row`）の中の字句の数。行が無ければ None
+fn count_in_table_row(p: &Paragraph, row: &str, from: &str) -> Option<usize> {
+    fn rows<'a>(e: &'a Element, out: &mut Vec<&'a Element>) {
+        if e.name == "TableRow" {
+            out.push(e);
+            return;
+        }
+        for c in &e.children {
+            if let Node::Element(x) = c {
+                rows(x, out);
+            }
+        }
+    }
+    let key = strip_ws(row);
+    let mut all = Vec::new();
+    for c in &p.children {
+        if let ParagraphChild::Raw(e) = c {
+            rows(e, &mut all);
+        }
+    }
+    all.into_iter()
+        .find(|r| {
+            r.children
+                .iter()
+                .find_map(|c| match c {
+                    Node::Element(x) if x.name == "TableColumn" => Some(strip_ws(&x.text())),
+                    _ => None,
+                })
+                .is_some_and(|t| t == key)
+        })
+        .map(|r| r.text().matches(from).count())
 }
 
 /// 「第三章の章名を削る」: 題名を消す。番号は残す（続く「第三章第二節から第五節までを削る」が指す）。
