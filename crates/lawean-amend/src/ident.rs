@@ -651,10 +651,11 @@ impl Binder<'_> {
                 Op::ReplaceToc { from, to } => {
                     let expected = toc_text(&self.doc).unwrap_or_default();
                     replace_toc(&mut self.doc, from, to)?;
+                    // 加えた字句の印（同じ文の後の置換から守る）は id の世界には載せない
                     self.ops.push(IdentOp::Replace {
                         id: TOC_ID.into(),
-                        expected,
-                        new: toc_text(&self.doc).unwrap_or_default(),
+                        expected: crate::apply::strip_marks(&expected),
+                        new: crate::apply::strip_marks(&toc_text(&self.doc).unwrap_or_default()),
                     });
                 }
                 // 附則の条は id の世界（本則）に無い。文書の側だけ改める
