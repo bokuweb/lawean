@@ -8,6 +8,7 @@
 //!
 //! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文）。目次・別表はまだ比べない。
 //! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）。
+//! 違いがこの単位の触らない条にだけあり、そこが e-Gov の版で変わっているものは `mismatch_other`（同じ版に入った別の改正の分）。
 //!
 //! 同じ単位を identity patch（`ident::bind` → Lean の `Ident.applyUnit` の写しの `ident::apply_unit`）でも当て、
 //! 本則の描画が e-Gov の版と一致するかを `ident` の列に出す（証明した意味論が実データで文書への適用と揃うか）
@@ -121,8 +122,42 @@ fn list(mut args: Vec<String>) {
 
 type Snapshot = BTreeMap<String, Vec<(u32, String)>>;
 
+/// 字形の揃え: e-Gov は JIS X 0213:2004 の字形（常用漢字表 2010 の「塡」「剝」「頰」…）で持つ。
+/// 衆議院のページは古い字形のことがあるので、比べる前に揃える
+fn fold_glyphs(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '填' => '塡',
+            '剥' => '剝',
+            '頬' => '頰',
+            '呑' => '吞',
+            '屏' => '屛',
+            '并' => '幷',
+            '醤' => '醬',
+            '蝉' => '蟬',
+            '繋' => '繫',
+            '鴎' => '鷗',
+            '掴' => '摑',
+            '噛' => '嚙',
+            c => c,
+        })
+        .collect()
+}
+
 /// 本則と原始附則（キーに「附則」を冠する）の条・項ごとの本文
 fn snapshot(doc: &lawean_source::LegalDocument) -> Snapshot {
+    raw_snapshot(doc)
+        .into_iter()
+        .map(|(k, v)| {
+            (
+                k,
+                v.into_iter().map(|(n, t)| (n, fold_glyphs(&t))).collect(),
+            )
+        })
+        .collect()
+}
+
+fn raw_snapshot(doc: &lawean_source::LegalDocument) -> Snapshot {
     let mut out = lawean_amend::snapshot_main(doc);
     if let Some(sp) = doc
         .suppl_provisions
@@ -182,11 +217,70 @@ impl Outcome {
         match self.result.as_str() {
             "match" => (0, 0),
             "match_trivial" => (1, 0),
-            "mismatch" => (2, self.diff),
-            "unsupported" => (3, 0),
-            _ => (4, 0),
+            "mismatch_other" => (2, self.diff),
+            "mismatch" => (3, self.diff),
+            "unsupported" => (4, 0),
+            _ => (5, 0),
         }
     }
+}
+
+/// 当てた結果と e-Gov の版の違いが、どれも「この単位が変えていない条」で「e-Gov の版では直前の版から変わった条」か
+fn other_amendments_only(before: &Snapshot, applied: &Snapshot, want: &Snapshot) -> bool {
+    let keys: std::collections::BTreeSet<&String> = applied
+        .keys()
+        .chain(want.keys())
+        .chain(before.keys())
+        .collect();
+    let mut any = false;
+    for k in keys {
+        if applied.get(k) == want.get(k) {
+            continue;
+        }
+        any = true;
+        let touched = applied.get(k) != before.get(k);
+        let changed_upstream = want.get(k) != before.get(k);
+        if touched || !changed_upstream {
+            return false;
+        }
+    }
+    any
+}
+
+/// 最初に違う条・項と、違う字の前後（当てた結果 | e-Gov）
+fn first_difference(got: &Snapshot, want: &Snapshot) -> String {
+    let keys: std::collections::BTreeSet<&String> = got.keys().chain(want.keys()).collect();
+    for k in keys {
+        match (got.get(k), want.get(k)) {
+            (Some(g), Some(w)) if g == w => continue,
+            (Some(_), None) => return format!("{k}: 当てた結果にだけある"),
+            (None, Some(_)) => return format!("{k}: e-Gov にだけある"),
+            (Some(g), Some(w)) => {
+                for i in 0..g.len().max(w.len()) {
+                    match (g.get(i), w.get(i)) {
+                        (Some(a), Some(b)) if a == b => continue,
+                        (Some(a), Some(b)) => {
+                            let (ac, bc): (Vec<char>, Vec<char>) =
+                                (a.1.chars().collect(), b.1.chars().collect());
+                            let at = ac.iter().zip(&bc).take_while(|(x, y)| x == y).count();
+                            let from = at.saturating_sub(15);
+                            let cut = |v: &[char]| -> String {
+                                v[from.min(v.len())..(at + 25).min(v.len())]
+                                    .iter()
+                                    .collect()
+                            };
+                            return format!("{k} 第{}項: …{}… | …{}…", a.0, cut(&ac), cut(&bc));
+                        }
+                        (Some(a), None) => return format!("{k} 第{}項: 当てた結果にだけある", a.0),
+                        (None, Some(b)) => return format!("{k} 第{}項: e-Gov にだけある", b.0),
+                        (None, None) => {}
+                    }
+                }
+            }
+            (None, None) => {}
+        }
+    }
+    String::new()
 }
 
 fn try_pair(
@@ -213,8 +307,24 @@ fn try_pair(
                 mk("match_trivial", String::new(), 0)
             } else if d.is_empty() {
                 mk("match", String::new(), 0)
+            } else if other_amendments_only(&snapshot(before), &snapshot(&applied), &exp) {
+                // 違いがこの単位の触らない条にだけあり、そこは e-Gov の版で直前の版から変わっている:
+                // 同じ版に入った別の改正（同じ日の施行など）の分
+                mk(
+                    "mismatch_other",
+                    first_difference(&snapshot(&applied), &exp),
+                    d.len(),
+                )
             } else {
-                mk("mismatch", format!("{} lines: {}", d.len(), d[0]), d.len())
+                mk(
+                    "mismatch",
+                    format!(
+                        "{} lines: {}",
+                        d.len(),
+                        first_difference(&snapshot(&applied), &exp)
+                    ),
+                    d.len(),
+                )
             }
         }
         Ok(Err(lawean_amend::ApplyError::Unsupported(what))) => mk("unsupported", what, 0),
@@ -347,6 +457,9 @@ fn run(mut args: Vec<String>) {
                         continue;
                     };
                     let o = try_pair(&before, &expected, &u, prev, after);
+                    if std::env::var("BENCH_DEBUG").is_ok() {
+                        eprintln!("  {prev} > {after}: {} {}", o.result, o.detail);
+                    }
                     if best.as_ref().is_none_or(|b| o.rank() < b.rank()) {
                         best = Some(o);
                     }

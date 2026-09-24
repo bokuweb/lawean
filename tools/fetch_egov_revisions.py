@@ -12,7 +12,7 @@
 
 組み合わせ（被改正法 L と改正法 A ごと）:
   L の版を日付順に並べ、A による版（施行前の版も含む）をすべて候補にする。候補は（その版の直前の版, その版）。
-  A の版が続いていれば（最初の版の直前の版, 最後の版）も候補にする（単位の中の段階施行）。
+  （最初の A の版の直前の版, 最後の A の版）も候補にする（単位の中の段階施行）。
   同じ法律を改める単位が複数あるとき、どの版にどの単位が入ったかは当てて確かめる（`bench_apply run`）。
   - A による版が無い: no_revision（e-Gov に無い・廃止済み・古すぎるなど）
   - 候補がどれも直前の版を持たない: no_base
@@ -137,8 +137,9 @@ for (law_id, amending), us in groups.items():
         rows += [(u, "no_revision", []) for u in us]
         continue
     cands = [(chron[i - 1]["law_revision_id"], chron[i]["law_revision_id"]) for i in idx if i > 0]
-    # 単位の中の段階施行（附則で一部を後から施行）: A の版が続いていれば、最初の版の直前から最後の版まで
-    if len(idx) > 1 and idx[0] > 0 and idx[-1] - idx[0] == len(idx) - 1:
+    # 単位の中の段階施行（附則で一部を後から施行）: 最初の版の直前から最後の版まで（間に別の法律の版が挟まれば、
+    # その分は bench_apply が mismatch_other に分ける）
+    if len(idx) > 1 and idx[0] > 0:
         cands.append((chron[idx[0] - 1]["law_revision_id"], chron[idx[-1]]["law_revision_id"]))
     if not cands:
         rows += [(u, "no_base", []) for u in us]
