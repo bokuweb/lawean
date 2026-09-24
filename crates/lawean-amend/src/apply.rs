@@ -2166,13 +2166,19 @@ pub(crate) fn para_index(
         return Ok(None);
     };
     let snap = &snapshots[&art.num.to_num_string()];
-    snap.iter()
+    let not_found = || ApplyError::ParagraphNotFound {
+        article: art.num.to_num_string(),
+        paragraph: *n,
+    };
+    let i = snap
+        .iter()
         .position(|o| *o == Some(*n))
-        .map(Some)
-        .ok_or_else(|| ApplyError::ParagraphNotFound {
-            article: art.num.to_num_string(),
-            paragraph: *n,
-        })
+        .ok_or_else(not_found)?;
+    // 同じ文の先の操作で項が減っていれば（文の始まりの番号の項がもう無い）、無い項
+    if i >= paragraphs(art).len() {
+        return Err(not_found());
+    }
+    Ok(Some(i))
 }
 
 // ---------------------------------------------------------------- テキスト操作
