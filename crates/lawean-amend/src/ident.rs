@@ -653,6 +653,26 @@ impl Binder<'_> {
                     }
                     inserted.push(to.clone());
                 }
+                // 本則の全部: 字句を含む条ごとに
+                Op::ReplaceAll { from, to } => {
+                    let mut hit = false;
+                    for a in crate::numbering::article_nums(&self.doc) {
+                        let has = paragraphs(article_mut(&mut self.doc, &a)?)
+                            .iter()
+                            .any(|p| crate::apply::para_text(p).contains(from.as_str()));
+                        if has {
+                            hit = true;
+                            self.replace(&Loc::new(a, None), from, to, &mut snapshots, &inserted)?;
+                        }
+                    }
+                    if !hit {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: "本則".into(),
+                            phrase: from.clone(),
+                        });
+                    }
+                    inserted.push(to.clone());
+                }
                 Op::InsertAfterPhrase { at, anchor, text } => {
                     self.replace(
                         at,
@@ -769,8 +789,8 @@ impl Binder<'_> {
                 }
                 Op::AppendArticle { path, text } => {
                     let arts = crate::apply::parse_articles(text)?;
-                    let c = crate::apply::container_mut(&mut self.doc, path)?;
-                    let mut anchor = last_para_id_in(&c.children).ok_or_else(|| {
+                    let c = crate::apply::children_mut(&mut self.doc, path)?;
+                    let mut anchor = last_para_id_in(c).ok_or_else(|| {
                         ApplyError::BadContent(format!(
                             "{}に項が無い",
                             crate::apply::container_label(path)
@@ -794,8 +814,7 @@ impl Binder<'_> {
                             children.push(ArticleChild::Paragraph(p));
                         }
                         a.children = children;
-                        crate::apply::container_mut(&mut self.doc, path)?
-                            .children
+                        crate::apply::children_mut(&mut self.doc, path)?
                             .push(Provision::Article(a));
                     }
                 }
@@ -1291,6 +1310,56 @@ impl Binder<'_> {
                 Op::DeleteCaption { article } => {
                     article_mut(&mut self.doc, article)?.caption = None;
                 }
+                Op::InsertContainersAfterArticle { .. }
+                | Op::InsertHeadingsBefore { .. }
+                | Op::DeleteContainer { .. }
+                | Op::ShiftBranchArticles { .. }
+                | Op::ShiftContainers { .. }
+                | Op::SetSupplNote { .. }
+                | Op::ShiftBranchItems { .. }
+                | Op::ReplacePairs { .. }
+                | Op::SubitemsEdit { .. }
+                | Op::ReplaceInContainer { .. }
+                | Op::SetContainerTitles { .. }
+                | Op::DeleteArticleTitle { .. }
+                | Op::ReplaceSupplNote { .. }
+                | Op::ReplaceInAmendment { .. }
+                | Op::DeleteSupplNote { .. }
+                | Op::MoveArticle { .. }
+                | Op::MoveContainer { .. }
+                | Op::MoveParagraph { .. }
+                | Op::ReplaceStructure { .. }
+                | Op::AmendmentEdit { .. } => {
+                    return Err(ApplyError::Unsupported(
+                        "条の前後に容器を置く改正の id の対応".into(),
+                    ))
+                }
+                // 表の中（欄の字句・行）は id を持たない。文書の側だけ
+                Op::TableEdit { .. }
+                | Op::ParagraphCaption { .. }
+                | Op::DeleteToc
+                | Op::SetTitleAndToc { .. }
+                | Op::DeleteTitle
+                | Op::ParagraphToArticle { .. }
+                | Op::Except { .. }
+                | Op::MainToArticle { .. }
+                | Op::ArticleToSuppl { .. } => {
+                    let one = Instruction {
+                        text: ins.text.clone(),
+                        ops: vec![op.clone()],
+                    };
+                    crate::apply::apply_instruction(&mut self.doc, &one)?;
+                }
+                // 原始附則は文書の側だけ（id の世界には載せない）
+                Op::Suppl(inner) => {
+                    let one = Instruction {
+                        text: ins.text.clone(),
+                        ops: vec![(**inner).clone()],
+                    };
+                    crate::apply::with_suppl_as_main(&mut self.doc, |d| {
+                        crate::apply::apply_instruction(d, &one)
+                    })?;
+                }
                 Op::DeleteSentencePart { at, part } => {
                     let art = article_mut(&mut self.doc, &at.article)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
@@ -1339,7 +1408,7 @@ impl Binder<'_> {
                 }
                 // 目次を付ける: id の世界では toc ノード。無ければ先頭の項の後ろに insertAfter で足す
                 // （id の操作に「先頭に加える」は無い。目次は本文ではないので並びは問わない。あれば replace）
-                Op::SetToc { text } => {
+                Op::SetToc { text, .. } => {
                     let before = toc_text(&self.doc);
                     crate::apply::set_toc(&mut self.doc, text);
                     let new = toc_text(&self.doc).unwrap_or_default();
@@ -1362,6 +1431,9 @@ impl Binder<'_> {
                     }
                 }
                 // 題名は本文ではない
+                Op::ReplaceTitle { from, to } => {
+                    crate::apply::replace_title(&mut self.doc, from, to)?
+                }
                 Op::SetTitle { text } => {
                     let t = text.join("").trim().to_string();
                     self.doc.title = Some(LawTitle {

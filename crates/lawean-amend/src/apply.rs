@@ -25,6 +25,9 @@ pub enum ApplyError {
     BadContent(String),
     #[error("re-parse: {0}")]
     Reparse(String),
+    /// 読めた（位置と操作は分かる）が、まだ当てられない形
+    #[error("まだ当てられない: {0}")]
+    Unsupported(String),
 }
 
 /// 改正単位を適用した新しいリビジョンを返す
@@ -43,7 +46,10 @@ pub fn apply_unit(
 }
 
 /// 1 文の中の項番号は文の始まりの番号（改正前）で解釈する
-fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), ApplyError> {
+pub(crate) fn apply_instruction(
+    doc: &mut LegalDocument,
+    ins: &Instruction,
+) -> Result<(), ApplyError> {
     // 条ごとに、文の始まりの項ラベル
     let mut snapshots: BTreeMap<String, Vec<Option<u32>>> = BTreeMap::new();
     // この文で加えた字句（後の置換はその中を指さない）
@@ -53,6 +59,29 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
     for op in &ins.ops {
         match op {
             Op::ReplaceToc { from, to } => replace_toc(doc, from, to)?,
+            Op::ReplaceAll { from, to } => {
+                let mut n = 0;
+                for a in crate::numbering::article_nums(doc) {
+                    let art = article_mut(doc, &a)?;
+                    n += replace_in_article_part(
+                        art,
+                        None,
+                        None,
+                        None,
+                        None,
+                        from,
+                        &mark(to),
+                        &inserted,
+                    );
+                }
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: "本則".into(),
+                        phrase: from.clone(),
+                    });
+                }
+                inserted.push(to.clone());
+            }
             Op::Replace { at, from, to } => {
                 for at in expand_range(doc, at) {
                     let art = loc_article_mut(doc, &at)?;
@@ -160,8 +189,7 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             }
             Op::AppendArticle { path, text } => {
                 let arts = parse_articles(text)?;
-                let c = container_mut(doc, path)?;
-                c.children.extend(arts.into_iter().map(Provision::Article));
+                children_mut(doc, path)?.extend(arts.into_iter().map(Provision::Article));
             }
             Op::InsertContainersAfter { path, text } => {
                 let new = parse_containers(text)?;
@@ -268,6 +296,357 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
             Op::DeleteCaption { article } => {
                 article_mut(doc, article)?.caption = None;
             }
+            Op::TableEdit {
+                table: TableRef::InArticle(at),
+                path,
+                action,
+            } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                table_edit_in_paragraph(paragraph_mut(art, idx), path, action, &inserted)?;
+            }
+            Op::TableEdit {
+                table: TableRef::Appdx(t),
+                path,
+                action,
+            } => table_edit_appdx(doc, t, path, action, &mut appdx_rows)?,
+            Op::TableEdit {
+                table: TableRef::Preamble,
+                path,
+                action,
+            } => match (path.as_str(), action, doc.preamble.as_mut()) {
+                ("", TableAction::Phrase { from, to }, Some(p)) => {
+                    if replace_text_in(p, from, to) == 0 {
+                        return Err(ApplyError::PhraseNotFound {
+                            at: "前文".into(),
+                            phrase: from.clone(),
+                        });
+                    }
+                }
+                _ => return Err(ApplyError::Unsupported(format!("前文{path}"))),
+            },
+            Op::SetSupplNote { article, text } => {
+                let art = article_mut(doc, article)?;
+                let note = Element {
+                    name: "SupplNote".into(),
+                    attrs: vec![],
+                    children: vec![Node::Text(text.join("").trim().to_string())],
+                };
+                match art
+                    .children
+                    .iter_mut()
+                    .find(|c| matches!(c, ArticleChild::Raw(e) if e.name == "SupplNote"))
+                {
+                    Some(c) => *c = ArticleChild::Raw(note),
+                    None => art.children.push(ArticleChild::Raw(note)),
+                }
+            }
+            Op::ShiftBranchItems {
+                at,
+                base,
+                from,
+                to,
+                by,
+            } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let p = paragraph_mut(art, idx);
+                let mut ks: Vec<u32> = (*from..=*to.min(&(from + 200))).collect();
+                if *by > 0 {
+                    ks.reverse();
+                }
+                for k in ks {
+                    let old = format!("{base}_{k}");
+                    let new = format!("{base}_{}", k as i32 + by);
+                    if items_mut(p)
+                        .iter()
+                        .any(|i| i.num.as_deref() == Some(old.as_str()))
+                    {
+                        renumber_item(p, &old, &new)?;
+                    }
+                }
+            }
+            Op::ReplacePairs { scope, .. } => {
+                return Err(ApplyError::Unsupported(format!(
+                    "{scope}中の表の上欄の字句を下欄の字句に改める"
+                )))
+            }
+            Op::ParagraphCaption { at, edit } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                let p = paragraph_mut(art, idx);
+                match edit {
+                    CaptionEdit::Replace { from, to } => {
+                        let cur = p
+                            .caption
+                            .as_ref()
+                            .map(|c| inline_text(c))
+                            .unwrap_or_default();
+                        if !cur.contains(from.as_str()) {
+                            return Err(ApplyError::PhraseNotFound {
+                                at: format!("{}の見出し", loc_name(at)),
+                                phrase: from.clone(),
+                            });
+                        }
+                        p.caption = Some(vec![Inline::Text(cur.replace(from.as_str(), to))]);
+                    }
+                    CaptionEdit::Set(t) | CaptionEdit::Attach(t) => {
+                        p.caption = Some(vec![Inline::Text(t.clone())]);
+                    }
+                    CaptionEdit::Delete => p.caption = None,
+                }
+            }
+            Op::DeleteToc => doc.toc = None,
+            Op::SetTitleAndToc { text } => {
+                // 最初の行が題名、「目次」の行から後が目次
+                let at = text
+                    .iter()
+                    .position(|l| l.trim() == "目次")
+                    .ok_or_else(|| ApplyError::BadContent("目次の行が無い".into()))?;
+                let title: String = text[..at].join("").trim().to_string();
+                let attrs = doc
+                    .title
+                    .as_ref()
+                    .map(|x| x.attrs.clone())
+                    .unwrap_or_default();
+                doc.title = Some(LawTitle {
+                    text: vec![Inline::Text(title)],
+                    attrs,
+                });
+                set_toc(doc, &text[at..]);
+            }
+            Op::SubitemsEdit { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "号の下のイロハの列挙の改め・削り".into(),
+                ))
+            }
+            Op::DeleteTitle => doc.title = None,
+            Op::ParagraphToArticle { .. } => {
+                return Err(ApplyError::Unsupported("附則の項を条にする".into()))
+            }
+            Op::DeleteContainer { path } => delete_container(doc, path)?,
+            Op::ShiftContainers {
+                path,
+                kind,
+                from,
+                to,
+                by,
+            } => {
+                let mut nums: Vec<u32> = children_mut(doc, path)?
+                    .iter()
+                    .filter_map(|p| match p {
+                        Provision::Container(c) if c.kind == *kind => {
+                            c.num.as_deref().and_then(|n| n.parse::<u32>().ok())
+                        }
+                        _ => None,
+                    })
+                    .filter(|n| n >= from && n <= to)
+                    .collect();
+                nums.sort();
+                if *by > 0 {
+                    nums.reverse();
+                }
+                for n in nums {
+                    let mut p = path.clone();
+                    p.push((*kind, n.to_string()));
+                    renumber_container(doc, &p, &((n as i32 + by) as u32).to_string())?;
+                }
+            }
+            Op::ShiftBranchArticles { base, from, to, by } => {
+                let mut nums: Vec<ArticleNum> = crate::numbering::article_nums(doc)
+                    .into_iter()
+                    .filter(|n| {
+                        matches!(n, ArticleNum::Single { base: b, branch }
+                            if b == base && branch.first().is_some_and(|k| k >= from && k <= to))
+                    })
+                    .collect();
+                if *by > 0 {
+                    nums.reverse();
+                }
+                for n in nums {
+                    let ArticleNum::Single { base, branch } = &n else {
+                        continue;
+                    };
+                    let mut nb = branch.clone();
+                    nb[0] = (nb[0] as i32 + by) as u32;
+                    renumber_article(
+                        doc,
+                        &n,
+                        &ArticleNum::Single {
+                            base: *base,
+                            branch: nb,
+                        },
+                    )?;
+                }
+            }
+            Op::ReplaceInContainer {
+                path,
+                except,
+                except_titles,
+                from,
+                to,
+            } => {
+                // 除く条（項・号の単位の除外はまだ当てない）
+                if except
+                    .iter()
+                    .any(|l| l.paragraph.is_some() || l.item.is_some())
+                {
+                    return Err(ApplyError::Unsupported(
+                        "（…を除く。）の項・号の単位の除外".into(),
+                    ));
+                }
+                let skip = |a: &ArticleNum| except.iter().any(|l| &l.article == a);
+                let mut n = 0;
+                // 除く容器の題名（外側からの道筋で比べる）
+                let skip_title =
+                    |p: &[(ContainerKind, String)]| except_titles.iter().any(|x| x == p);
+                #[allow(clippy::too_many_arguments)]
+                fn go(
+                    ps: &mut [Provision],
+                    at: &mut Vec<(ContainerKind, String)>,
+                    from: &str,
+                    to: &str,
+                    n: &mut usize,
+                    skip: &dyn Fn(&ArticleNum) -> bool,
+                    skip_title: &SkipTitle<'_>,
+                    protect: &[String],
+                ) {
+                    for p in ps {
+                        match p {
+                            Provision::Container(c) => {
+                                at.push((c.kind, c.num.clone().unwrap_or_default()));
+                                if let Some(t) = c.title.as_mut().filter(|_| !skip_title(at)) {
+                                    let cur = inline_text(t);
+                                    if cur.contains(from) {
+                                        *n += cur.matches(from).count();
+                                        *t = vec![Inline::Text(cur.replace(from, to))];
+                                    }
+                                }
+                                go(&mut c.children, at, from, to, n, skip, skip_title, protect);
+                                at.pop();
+                            }
+                            Provision::Article(a) if !skip(&a.num) => {
+                                *n += replace_in_article_part(
+                                    a, None, None, None, None, from, to, protect,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let list = children_mut(doc, path)?;
+                let mut at = path.clone();
+                go(
+                    list,
+                    &mut at,
+                    from,
+                    &mark(to),
+                    &mut n,
+                    &skip,
+                    &skip_title,
+                    &inserted,
+                );
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: if path.is_empty() {
+                            "本則".into()
+                        } else {
+                            container_label(path)
+                        },
+                        phrase: from.clone(),
+                    });
+                }
+                inserted.push(to.clone());
+            }
+            Op::SetContainerTitles { paths, text } => {
+                let lines: Vec<&String> = text.iter().filter(|l| !l.trim().is_empty()).collect();
+                if lines.len() != paths.len() {
+                    return Err(ApplyError::BadContent(format!(
+                        "題名の行の数（{}）が容器の数（{}）と合わない",
+                        lines.len(),
+                        paths.len()
+                    )));
+                }
+                for (path, line) in paths.iter().zip(lines) {
+                    let c = container_mut(doc, path)?;
+                    c.title = Some(vec![Inline::Text(line.trim().to_string())]);
+                }
+            }
+            Op::DeleteArticleTitle { .. } => {
+                return Err(ApplyError::Unsupported("条名を削る（条を項に戻す）".into()))
+            }
+            Op::ReplaceSupplNote { article, from, to } => {
+                let art = article_mut(doc, article)?;
+                let mut n = 0;
+                for c in &mut art.children {
+                    if let ArticleChild::Raw(e) = c {
+                        if e.name == "SupplNote" {
+                            n += replace_text_in(e, from, to);
+                        }
+                    }
+                }
+                if n == 0 {
+                    return Err(ApplyError::PhraseNotFound {
+                        at: format!("{}の付記", article_label(article)),
+                        phrase: from.clone(),
+                    });
+                }
+            }
+            Op::DeleteSupplNote { article } => {
+                let art = article_mut(doc, article)?;
+                let before = art.children.len();
+                art.children
+                    .retain(|c| !matches!(c, ArticleChild::Raw(e) if e.name == "SupplNote"));
+                if art.children.len() == before {
+                    return Err(ApplyError::BadContent(format!(
+                        "{}に付記が無い",
+                        article_label(article)
+                    )));
+                }
+            }
+            Op::MoveArticle { .. } | Op::MoveContainer { .. } | Op::MoveParagraph { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "条・容器・項を別の場所へ移す".into(),
+                ))
+            }
+            Op::ReplaceStructure { scope, .. } => {
+                return Err(ApplyError::Unsupported(format!("{scope}をまとめて改める")))
+            }
+            Op::AmendmentEdit { target, .. } => {
+                return Err(ApplyError::Unsupported(format!(
+                    "改正規定そのものの操作（{target}）"
+                )))
+            }
+            Op::ReplaceInAmendment { .. } => {
+                return Err(ApplyError::Unsupported("改正法の改正規定の中の字句".into()))
+            }
+            Op::InsertContainersAfterArticle { after, text } => {
+                let new = parse_containers(text)?;
+                insert_containers_after_article(doc, after, new)?;
+            }
+            Op::InsertHeadingsBefore { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "条の前に章名・目次を置く（条を容器に包み直す）".into(),
+                ))
+            }
+            Op::MainToArticle { .. } => {
+                return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))
+            }
+            Op::ArticleToSuppl { .. } => {
+                return Err(ApplyError::Unsupported("本則の条を附則の条にする".into()))
+            }
+            Op::Except { .. } => {
+                return Err(ApplyError::Unsupported(
+                    "除く位置（「（第三号を除く。）」）のある字句の改正".into(),
+                ))
+            }
+            Op::Suppl(inner) => {
+                let one = Instruction {
+                    text: ins.text.clone(),
+                    ops: vec![(**inner).clone()],
+                };
+                with_suppl_as_main(doc, |d| apply_instruction(d, &one))?;
+            }
             Op::DeleteSentencePart { at, part } => {
                 let art = article_mut(doc, &at.article)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
@@ -298,7 +677,8 @@ fn apply_instruction(doc: &mut LegalDocument, ins: &Instruction) -> Result<(), A
                 let p = paragraph_mut(art, idx);
                 append_sentence(p, text)?;
             }
-            Op::SetToc { text } => set_toc(doc, text),
+            Op::SetToc { text, .. } => set_toc(doc, text),
+            Op::ReplaceTitle { from, to } => replace_title(doc, from, to)?,
             Op::SetTitle { text } => {
                 let t = text.join("").trim().to_string();
                 doc.title = Some(LawTitle {
@@ -650,6 +1030,41 @@ pub(crate) fn article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,
 ) -> Result<&'a mut Article, ApplyError> {
+    // 「第一項中」: 条の無い本則（項だけ）。項を仮の条（第0条）に束ねて扱う（出力では項に戻す）
+    if matches!(num, ArticleNum::Single { base: 0, .. })
+        && doc
+            .main_provision
+            .iter()
+            .any(|p| matches!(p, Provision::Paragraph(_)))
+    {
+        let pos = doc
+            .main_provision
+            .iter()
+            .position(|p| matches!(p, Provision::Paragraph(_)))
+            .unwrap();
+        let paras: Vec<Paragraph> = doc
+            .main_provision
+            .iter()
+            .filter_map(|p| match p {
+                Provision::Paragraph(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect();
+        doc.main_provision
+            .retain(|p| !matches!(p, Provision::Paragraph(_)));
+        let stable_id = paras[0].stable_id.clone();
+        doc.main_provision.insert(
+            pos,
+            Provision::Article(Article {
+                stable_id,
+                num: num.clone(),
+                caption: None,
+                title: None,
+                children: paras.into_iter().map(ArticleChild::Paragraph).collect(),
+                attrs: Vec::new(),
+            }),
+        );
+    }
     find_article(&mut doc.main_provision, num)
         .ok_or_else(|| ApplyError::ArticleNotFound(num.to_num_string()))
 }
@@ -707,6 +1122,62 @@ pub(crate) fn suppl_article_mut<'a>(
     doc: &'a mut LegalDocument,
     num: &ArticleNum,
 ) -> Result<&'a mut Article, ApplyError> {
+    // 「附則第三項中」: 条の無い附則（項だけ）。項を仮の条（第0条）に束ねて扱う（出力では項に戻す）
+    if matches!(num, ArticleNum::Single { base: 0, .. }) {
+        let sp = doc
+            .suppl_provisions
+            .iter_mut()
+            .find(|s| s.amend_law_num.is_none())
+            .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()))?;
+        let bundled = sp.children.iter().any(|c| {
+            matches!(c, SupplChild::Provision(Provision::Article(a))
+                if matches!(&a.num, ArticleNum::Single { base: 0, .. }))
+        });
+        if !bundled {
+            let paras: Vec<Paragraph> = sp
+                .children
+                .iter()
+                .filter_map(|c| match c {
+                    SupplChild::Paragraph(p) => Some(p.clone()),
+                    _ => None,
+                })
+                .collect();
+            if paras.is_empty() {
+                return Err(ApplyError::ArticleNotFound("附則の項".into()));
+            }
+            let pos = sp
+                .children
+                .iter()
+                .position(|c| matches!(c, SupplChild::Paragraph(_)))
+                .unwrap();
+            sp.children
+                .retain(|c| !matches!(c, SupplChild::Paragraph(_)));
+            let stable_id = paras[0].stable_id.clone();
+            sp.children.insert(
+                pos,
+                SupplChild::Provision(Provision::Article(Article {
+                    stable_id,
+                    num: num.clone(),
+                    caption: None,
+                    title: None,
+                    attrs: vec![],
+                    children: paras.into_iter().map(ArticleChild::Paragraph).collect(),
+                })),
+            );
+        }
+        return sp
+            .children
+            .iter_mut()
+            .find_map(|c| match c {
+                SupplChild::Provision(Provision::Article(a))
+                    if matches!(&a.num, ArticleNum::Single { base: 0, .. }) =>
+                {
+                    Some(a)
+                }
+                _ => None,
+            })
+            .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()));
+    }
     for sp in doc
         .suppl_provisions
         .iter_mut()
@@ -736,6 +1207,282 @@ pub(crate) fn suppl_article_mut<'a>(
     )))
 }
 
+/// 「第二章の二を削る」: 容器 1 つを消す
+pub(crate) fn delete_container(
+    doc: &mut LegalDocument,
+    path: &[(ContainerKind, String)],
+) -> Result<(), ApplyError> {
+    let Some(((kind, num), parent)) = path.split_last() else {
+        return Err(ApplyError::BadContent("容器が無い".into()));
+    };
+    let list = children_mut(doc, parent)?;
+    let before = list.len();
+    list.retain(|p| !matches!(p, Provision::Container(c) if c.kind == *kind && c.num.as_deref() == Some(num.as_str())));
+    if list.len() == before {
+        return Err(ApplyError::BadContent(format!(
+            "{}が無い",
+            container_label(path)
+        )));
+    }
+    Ok(())
+}
+
+/// 「第八条の次に次の二章を加える」: 条のある並び（本則または容器の中）で、条の後ろに容器を置く
+pub(crate) fn insert_containers_after_article(
+    doc: &mut LegalDocument,
+    after: &ArticleNum,
+    new: Vec<Container>,
+) -> Result<(), ApplyError> {
+    fn go(ps: &mut Vec<Provision>, after: &ArticleNum, new: &mut Option<Vec<Container>>) -> bool {
+        if let Some(i) = ps
+            .iter()
+            .position(|p| matches!(p, Provision::Article(a) if &a.num == after))
+        {
+            let v = new.take().unwrap();
+            for (k, c) in v.into_iter().enumerate() {
+                ps.insert(i + 1 + k, Provision::Container(c));
+            }
+            return true;
+        }
+        ps.iter_mut().any(|p| match p {
+            Provision::Container(c) => go(&mut c.children, after, new),
+            _ => false,
+        })
+    }
+    let mut new = Some(new);
+    if go(&mut doc.main_provision, after, &mut new) {
+        Ok(())
+    } else {
+        Err(ApplyError::ArticleNotFound(after.to_num_string()))
+    }
+}
+
+/// 「A、B及びCの項」「Aの項及びBの項」→ 行の上欄の列
+fn table_rows_of(path: &str) -> Option<Vec<String>> {
+    let body = path.strip_suffix("の項")?;
+    let rows: Vec<String> = body
+        .split("及び")
+        .flat_map(|x| x.split('、'))
+        .map(|x| x.trim_end_matches("の項").to_string())
+        .filter(|x| !x.is_empty())
+        .collect();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn replace_text_in(e: &mut Element, from: &str, to: &str) -> usize {
+    let mut n = 0;
+    for c in &mut e.children {
+        match c {
+            Node::Text(t) => {
+                let (nt, k) = replace_protected(t, from, to, &[]);
+                n += k;
+                *t = nt;
+            }
+            Node::Element(x) => n += replace_text_in(x, from, to),
+        }
+    }
+    n
+}
+
+/// 別表の中の位置への操作。位置が表の全部か行（「Xの項」）なら当てる。それ以外の位置（欄・類・号・備考など）はまだ当てない
+pub(crate) fn table_edit_appdx(
+    doc: &mut LegalDocument,
+    table: &str,
+    path: &str,
+    action: &TableAction,
+    appdx_rows: &mut BTreeMap<(String, String), usize>,
+) -> Result<(), ApplyError> {
+    let unsupported = || ApplyError::Unsupported(format!("{table}{path}"));
+    let row = path
+        .strip_suffix("の項")
+        .filter(|r| !r.contains("及び") && !r.contains('、'));
+    match action {
+        TableAction::Phrase { from, to } if path.is_empty() => {
+            let ap = appdx_mut(doc, table)?;
+            if replace_text_in(ap, from, to) == 0 {
+                return Err(ApplyError::PhraseNotFound {
+                    at: table.to_string(),
+                    phrase: from.clone(),
+                });
+            }
+            Ok(())
+        }
+        TableAction::Phrase { from, to } => match row {
+            Some(r) => replace_appdx_row(doc, table, r, None, from, to, appdx_rows),
+            None => Err(unsupported()),
+        },
+        TableAction::Replace { text } if path.is_empty() => {
+            let i = appdx_index(doc, table)?;
+            let order = doc.body_order.clone();
+            append_appdx(doc, text, None)?;
+            let new = doc.appendices.pop().expect("appended");
+            doc.body_order = order;
+            doc.appendices[i] = new;
+            Ok(())
+        }
+        TableAction::Replace { text } => match row {
+            Some(r) => replace_appdx_row_whole(doc, table, r, text),
+            None => Err(unsupported()),
+        },
+        TableAction::Delete => match table_rows_of(path) {
+            Some(rows) => delete_appdx_rows(doc, table, &rows),
+            None => Err(unsupported()),
+        },
+        TableAction::InsertAfter { text } => match row {
+            Some(r) => insert_appdx_rows_after(doc, table, r, text),
+            None => Err(unsupported()),
+        },
+        TableAction::Renumber { to } => match (row, to.strip_suffix("の項")) {
+            (Some(r), Some(t)) => renumber_appdx_row(doc, table, r, t),
+            _ => Err(unsupported()),
+        },
+        _ => Err(unsupported()),
+    }
+}
+
+fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
+    doc.appendices
+        .iter()
+        .position(|ap| {
+            let title = ap
+                .children
+                .iter()
+                .find_map(|c| match c {
+                    Node::Element(x) if x.name.ends_with("Title") => Some(strip_ws(&x.text())),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            title == table
+                || title.starts_with(&format!("{table}（"))
+                || title.starts_with(&format!("{table}\u{3000}"))
+        })
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
+}
+
+/// 条・項の中の表への操作。表の全部の字句、行（「Xの項」）の字句、行の削除を当てる
+pub(crate) fn table_edit_in_paragraph(
+    p: &mut Paragraph,
+    path: &str,
+    action: &TableAction,
+    protect: &[String],
+) -> Result<(), ApplyError> {
+    let unsupported = || ApplyError::Unsupported(format!("表{path}"));
+    let row = path
+        .strip_suffix("の項")
+        .filter(|r| !r.contains("及び") && !r.contains('、'));
+    match action {
+        TableAction::Phrase { from, to } if path.is_empty() => {
+            replace_table_row(p, "", from, to, protect)
+        }
+        TableAction::Phrase { from, to } => match row {
+            Some(r) => replace_table_row(p, r, from, to, protect),
+            None => Err(unsupported()),
+        },
+        TableAction::Delete => {
+            let rows = table_rows_of(path).ok_or_else(unsupported)?;
+            fn remove(e: &mut Element, key: &str) -> bool {
+                let before = e.children.len();
+                e.children.retain(
+                    |c| !matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key),
+                );
+                if e.children.len() != before {
+                    return true;
+                }
+                e.children.iter_mut().any(|c| match c {
+                    Node::Element(x) => remove(x, key),
+                    _ => false,
+                })
+            }
+            for r in rows {
+                let key = strip_ws(&r);
+                let hit = p.children.iter_mut().any(|c| match c {
+                    ParagraphChild::Raw(e) => remove(e, &key),
+                    _ => false,
+                });
+                if !hit {
+                    return Err(ApplyError::BadContent(format!("表に「{r}」の項が無い")));
+                }
+            }
+            Ok(())
+        }
+        _ => Err(unsupported()),
+    }
+}
+
+/// 「題名中「A」を「B」に改める」
+pub(crate) fn replace_title(
+    doc: &mut LegalDocument,
+    from: &str,
+    to: &str,
+) -> Result<(), ApplyError> {
+    let cur = doc
+        .title
+        .as_ref()
+        .map(|t| inline_text(&t.text))
+        .unwrap_or_default();
+    if !cur.contains(from) {
+        return Err(ApplyError::PhraseNotFound {
+            at: "題名".into(),
+            phrase: from.to_string(),
+        });
+    }
+    let attrs = doc
+        .title
+        .as_ref()
+        .map(|x| x.attrs.clone())
+        .unwrap_or_default();
+    doc.title = Some(LawTitle {
+        text: vec![Inline::Text(cur.replace(from, to))],
+        attrs,
+    });
+    Ok(())
+}
+
+/// 原始附則を本則に見立てて `f` を当てる（項だけの附則は仮の条（第0条）に束ねる。出力では項に戻る）
+pub(crate) fn with_suppl_as_main<T>(
+    doc: &mut LegalDocument,
+    f: impl FnOnce(&mut LegalDocument) -> Result<T, ApplyError>,
+) -> Result<T, ApplyError> {
+    let si = doc
+        .suppl_provisions
+        .iter()
+        .position(|s| s.amend_law_num.is_none())
+        .ok_or_else(|| ApplyError::ArticleNotFound("附則".into()))?;
+    if doc.suppl_provisions[si]
+        .children
+        .iter()
+        .any(|c| matches!(c, SupplChild::Paragraph(_)))
+    {
+        suppl_article_mut(
+            doc,
+            &ArticleNum::Single {
+                base: 0,
+                branch: vec![],
+            },
+        )?;
+    }
+    let provs: Vec<Provision> = std::mem::take(&mut doc.suppl_provisions[si].children)
+        .into_iter()
+        .map(|c| match c {
+            SupplChild::Provision(p) => p,
+            SupplChild::Paragraph(p) => Provision::Paragraph(p),
+            SupplChild::Raw(e) => Provision::Raw(e),
+        })
+        .collect();
+    let main = std::mem::replace(&mut doc.main_provision, provs);
+    let r = f(doc);
+    let provs = std::mem::replace(&mut doc.main_provision, main);
+    doc.suppl_provisions[si].children = provs
+        .into_iter()
+        .map(|p| match p {
+            Provision::Paragraph(p) => SupplChild::Paragraph(p),
+            Provision::Raw(e) => SupplChild::Raw(e),
+            p => SupplChild::Provision(p),
+        })
+        .collect();
+    r
+}
+
 /// 位置に応じて本則か原始附則の条
 pub(crate) fn loc_article_mut<'a>(
     doc: &'a mut LegalDocument,
@@ -749,6 +1496,17 @@ pub(crate) fn loc_article_mut<'a>(
 }
 
 /// 「第一章第八節」のように外側から辿った容器
+/// 容器の中身（`path` が空なら本則）
+pub(crate) fn children_mut<'a>(
+    doc: &'a mut LegalDocument,
+    path: &[(ContainerKind, String)],
+) -> Result<&'a mut Vec<Provision>, ApplyError> {
+    if path.is_empty() {
+        return Ok(&mut doc.main_provision);
+    }
+    Ok(&mut container_mut(doc, path)?.children)
+}
+
 pub(crate) fn container_mut<'a>(
     doc: &'a mut LegalDocument,
     path: &[(ContainerKind, String)],
@@ -1156,6 +1914,11 @@ pub(crate) fn replace_in_article_part(
                 SentencePart::Proviso => ss
                     .iter()
                     .position(|s| s.function == SentenceFunction::Proviso)
+                    .into_iter()
+                    .collect(),
+                SentencePart::Nth(n) => mains
+                    .get((n as usize).saturating_sub(1))
+                    .copied()
                     .into_iter()
                     .collect(),
             };
@@ -2042,6 +2805,9 @@ pub(crate) fn replace_containers(
 /// 行は上欄が `row` の `TableRow`（`rowspan` や上欄の空欄で続く行も同じ項）。`sub` があればその細目の文だけ。
 /// 同じ文（改め文の 1 文）の中では行を一度だけ引く（最初の置換で上欄が変わっても、後の置換は同じ行）
 #[allow(clippy::too_many_arguments)]
+/// 容器の題名を字句の置換から外すか（外側からの道筋で）
+type SkipTitle<'a> = dyn Fn(&[(ContainerKind, String)]) -> bool + 'a;
+
 pub(crate) fn replace_appdx_row(
     doc: &mut LegalDocument,
     table: &str,
@@ -2361,9 +3127,24 @@ pub(crate) fn delete_appdx_rows(
     let ap = appdx_mut(doc, table)?;
     let body =
         table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let group = |body: &Vec<Node>, row: &str| {
+        row_group(body, row)
+            .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))
+    };
     for row in rows {
-        let (at, len) = row_group(body, row)
-            .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+        // 「Aの項からBの項まで」
+        if let Some((a, b)) = row.split_once('〜') {
+            let (at, _) = group(body, a)?;
+            let (bt, blen) = group(body, b)?;
+            if bt < at {
+                return Err(ApplyError::BadContent(format!(
+                    "{table}の「{row}」の順が逆"
+                )));
+            }
+            body.drain(at..bt + blen);
+            continue;
+        }
+        let (at, len) = group(body, row)?;
         body.drain(at..at + len);
     }
     Ok(())
@@ -2709,6 +3490,20 @@ pub(crate) fn replace_table_row(
         if let ParagraphChild::Raw(e) = c {
             all_rows(e, &mut all);
         }
+    }
+    // 行を言わない「第二十四条第一項の表中「A」を「B」に改める」: 表の全部の行
+    if key.is_empty() {
+        let n: usize = all
+            .into_iter()
+            .map(|r| replace_in(r, from, to, protect))
+            .sum();
+        if n == 0 {
+            return Err(ApplyError::PhraseNotFound {
+                at: "表".into(),
+                phrase: from.to_string(),
+            });
+        }
+        return Ok(());
     }
     let hit = all.into_iter().find(|r| {
         r.children
@@ -3091,6 +3886,7 @@ pub(crate) fn sentence_part_index(p: &Paragraph, part: SentencePart) -> Option<u
     match part {
         SentencePart::Front | SentencePart::Main | SentencePart::Chapeau => mains.first().copied(),
         SentencePart::Back => mains.get(1).copied().or_else(|| mains.last().copied()),
+        SentencePart::Nth(n) => mains.get((n as usize).saturating_sub(1)).copied(),
         SentencePart::Proviso => p
             .sentences
             .iter()

@@ -36,10 +36,57 @@ impl Loc {
     }
 }
 
+/// 見出しの操作（項の見出しにも）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptionEdit {
+    /// 「見出し中「A」を「B」に改め」（削りは `to` が空、「の下に」は `to = A + B`）
+    Replace { from: String, to: String },
+    /// 「見出しを「（X）」に改め」「見出しを次のように改める」+「（X）」
+    Set(String),
+    /// 「見出しとして「（X）」を付する」
+    Attach(String),
+    /// 「見出しを削る」
+    Delete,
+}
+
+/// 表の在りか
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableRef {
+    /// 別表（「別表第一」「別表甲号」「別表第一号表」。列挙「別表第一から第四まで」は字面のまま）
+    Appdx(String),
+    /// 条・項の中の表（「第十三条第一項の表」）
+    InArticle(Loc),
+    /// 前文（「前文のうち第五項中」）。表ではないが字面の位置で改める
+    Preamble,
+}
+
+/// 表の中の位置への操作
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TableAction {
+    /// 「中「A」を「B」に改め」（削りは `to` が空、「の下に「B」を加え」は `to = A + B`）
+    Phrase { from: String, to: String },
+    /// 「を次のように改める」+ 内容
+    Replace { text: Vec<String> },
+    /// 「を削る」
+    Delete,
+    /// 「の次に次の…を加える」+ 内容
+    InsertAfter { text: Vec<String> },
+    /// 「の前に次の…を加える」+ 内容
+    InsertBefore { text: Vec<String> },
+    /// 「に次の…を加える」「に次のように加える」+ 内容
+    Append { text: Vec<String> },
+    /// 「を…とする」
+    Renumber { to: String },
+    /// 「第三号から第五号までを一号ずつ繰り上げる」: 位置の範囲の番号を `by` 動かす
+    Shift { by: i32 },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     /// 「目次中「A」を「B」に改める」
     ReplaceToc { from: String, to: String },
+    /// 「本則中「A」を「B」に改める」、古い法律の位置を書かない「「勅令」を「政令」に改める」: 本則の全部の条で置き換える
+    ReplaceAll { from: String, to: String },
     /// 「第N条[第M項]中「A」を「B」に改める」— 対象内の全出現
     Replace { at: Loc, from: String, to: String },
     /// 「第N条[第M項]中「A」の下に「B」を加える」
@@ -137,8 +184,114 @@ pub enum Op {
     ReplaceItem { at: Loc, text: Vec<String> },
     /// 「題名を次のように改める」+ 題名の行
     SetTitle { text: Vec<String> },
+    /// 「題名中「A」を「B」に改める」「題名中「A」の下に「B」を加える」（`to = A + B`）
+    ReplaceTitle { from: String, to: String },
+    /// 「目次を削る」
+    DeleteToc,
+    /// 「題名及び目次を次のように改める」+ 題名の行と目次の行
+    SetTitleAndToc { text: Vec<String> },
+    /// 「題名を削る」
+    DeleteTitle,
+    /// 「附則を附則第一条とし」「附則第一項を附則第一条とし」: 項だけの附則の項を条に（原始附則）
+    /// 「附則第十六項を附則第二十六条第一項とし」: 条の中の項に（`para`）
+    ParagraphToArticle {
+        from: u32,
+        to: ArticleNum,
+        para: Option<u32>,
+    },
+    /// 「第二章の二を削る」: 枝番の容器 1 つ（`path` は外側から、最後が消す容器）
+    DeleteContainer {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+    },
+    /// 「第六章を第七章とし、以下順次一章ずつ繰り下げ」: 容器（`path` の中の `kind`）の番号の範囲を `by` 動かす
+    ShiftContainers {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        kind: lawean_source::ContainerKind,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
+    /// 「第十三条の十一から第十三条の十五までを一条ずつ繰り下げ」: 枝番の条の範囲の枝番を `by` 動かす
+    ShiftBranchArticles {
+        base: u32,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
+    /// 「第三章中「第五節　収容」を「第五節　収容及保管」に改める」: 容器の中の字句（容器の題名・条の本文）。
+    /// 「本則（第九条…を除く。）中」「第三章（第四十九条…を除く。）中」は `except` の条を除く（`path` が空なら本則）
+    ReplaceInContainer {
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        except: Vec<Loc>,
+        /// 除く容器の題名（「本則（第四章の章名…を除く。）中」）
+        except_titles: Vec<Vec<(lawean_source::ContainerKind, String)>>,
+        from: String,
+        to: String,
+    },
+    /// 「第四章の章名及び同章第一節の節名を次のように改める」+ 題名の行（順に各容器へ）
+    SetContainerTitles {
+        paths: Vec<Vec<(lawean_source::ContainerKind, String)>>,
+        text: Vec<String>,
+    },
+    /// 「第一条の条名を削る」「附則第一条の見出し及び条名を削る」: 残った 1 条の「第N条」を外す（条の無い本則・附則に）
+    DeleteArticleTitle { article: ArticleNum },
+    /// 「第七十一条の付記中「A」を「B」に改める」: 条の付記（罰則の注記）の字句
+    ReplaceSupplNote {
+        article: ArticleNum,
+        from: String,
+        to: String,
+    },
+    /// 「第百一条の付記を削る」
+    DeleteSupplNote { article: ArticleNum },
+    /// 「同条を第四章第三節中第三十六条とする」: 条を別の容器（`path`）へ移して番号を付け替える
+    MoveArticle {
+        from: ArticleNum,
+        path: Vec<(lawean_source::ContainerKind, String)>,
+        to: ArticleNum,
+    },
+    /// 「第四章の二第三節を第四章の三第一節とする」: 容器を別の容器の中へ移す
+    MoveContainer {
+        from: Vec<(lawean_source::ContainerKind, String)>,
+        to: Vec<(lawean_source::ContainerKind, String)>,
+    },
+    /// 「同条第二項を第百十三条の二の六とする」「同項を附則第二十一条第一項とし」: 項を条（の項）にする
+    MoveParagraph {
+        article: ArticleNum,
+        paragraph: u32,
+        to: String,
+    },
+    /// 「第二編第三章の章名及び第八十一条から第八十八条までを次のように改める」「同条ただし書及び各号を次のように改める」:
+    /// 種類の違う位置をまとめて改める。`scope` は位置の字面
+    ReplaceStructure { scope: String, text: Vec<String> },
+    /// 「第六十五条の付記を次のように改める」+ 付記の行
+    SetSupplNote {
+        article: ArticleNum,
+        text: Vec<String>,
+    },
+    /// 「第五号の二から第五号の四までを一号ずつ繰り下げ」: 号（`at` の項の中）の枝番の範囲を `by` 動かす
+    ShiftBranchItems {
+        at: Loc,
+        base: u32,
+        from: u32,
+        to: u32,
+        by: i32,
+    },
+    /// 「第十八条中X法第四十二条の三の改正規定を次のように改める」「…の改正規定を削る」「…の改正規定の次に次のように加える」
+    /// 「第九条に次の改正規定を加える」: 改正法の改正規定そのものの操作。`target` は位置の字面
+    AmendmentEdit { target: String, action: TableAction },
+    /// 「第二条のうち、X法目次の改正規定中「A」を「B」に改める」: 改正法の改正規定の中の字句
+    ReplaceInAmendment {
+        article: ArticleNum,
+        target: String,
+        from: String,
+        to: String,
+    },
     /// 「題名の次に次の目次を付する」+ 目次の行（「目次」「第一章　総則（第一条）」…「附則」）。目次の無い法律に目次を足す
-    SetToc { text: Vec<String> },
+    SetToc {
+        text: Vec<String>,
+        /// 「目次を次のように改める」（目次の差し替え）。false は目次の無い法律に付ける形
+        replace: bool,
+    },
     /// 「第三章の章名を削る」: 題名の無くなった章は前の章に併合される（中の条は前の章の末尾に）
     DeleteContainerTitle {
         path: Vec<(lawean_source::ContainerKind, String)>,
@@ -171,7 +324,8 @@ pub enum Op {
         row: String,
         text: Vec<String>,
     },
-    /// 「別表第一中九の項及び一〇の項を削り」「別表第一建築士法（…）の項を削り」
+    /// 「別表第一中九の項及び一〇の項を削り」「別表第一建築士法（…）の項を削り」。
+    /// 数えられない行の範囲（「Aの項からBの項まで」）は `A〜B`
     DeleteAppdxRows { table: String, rows: Vec<String> },
     /// 「同項を同表の九の項とし」「同表中一二の項を一一の項とし」: 別表の行の番号（上欄）の付け替え
     RenumberAppdxRow {
@@ -307,6 +461,46 @@ pub enum Op {
         part: SentencePart,
         text: Vec<String>,
     },
+    /// 「附則第三項を附則第四項とし」「附則第二条中第一項を…」: 原始附則に向けた操作。中の操作を、原始附則を本則に見立てて当てる
+    /// （項だけの附則は仮の条（第0条）に束ねる）。文書の側だけ改める（id の世界には載せない）
+    Suppl(Box<Op>),
+    /// 「本則を第一条とし」: 条の無い本則を条にする
+    MainToArticle { to: ArticleNum },
+    /// 「第百一条から第百五条までを附則第一条から第五条までとし」: 本則の条を附則の条にする
+    ArticleToSuppl { from: ArticleNum, to: ArticleNum },
+    /// 「同項（第三号を除く。）及び同条第三項第一号中「A」を「B」に改める」: 除く位置のある字句の操作（`except` は位置の中で除くところ）
+    Except { op: Box<Op>, except: Vec<Loc> },
+    /// 「第八条の次に次の二章を加える」「第十条の次に次の一款を加える」+ 章・款の内容: 条の後ろに容器を置く
+    InsertContainersAfterArticle {
+        after: ArticleNum,
+        text: Vec<String>,
+    },
+    /// 「第一条の前に次の章名を加える」「第五条の前に次の目次及び章名を加える」「題名の次に次の目次及び章名を附する」
+    /// + 目次・章名の行: 条の前に容器の題名を置く（その条から次の題名までがその容器）。`before` が None なら本則の最初
+    InsertHeadingsBefore {
+        before: Option<ArticleNum>,
+        /// 「第三条の次に次の章名を付する」: 条の後ろ（次の条の前）
+        after: bool,
+        with_toc: bool,
+        text: Vec<String>,
+    },
+    /// 「同号イからニまでを次のように改める」「同号イ及びロを削る」: 号（`at` の item）の下のイロハの列挙。
+    /// `text` が None なら削る
+    SubitemsEdit {
+        at: Loc,
+        subs: Vec<String>,
+        text: Option<Vec<String>>,
+    },
+    /// 「第N条中次の表の上欄に掲げる字句を同表の下欄に掲げる字句に改める」+ 字句の対の表。`scope` は位置の字面
+    ReplacePairs { scope: String, text: Vec<String> },
+    /// 「附則第十四項の見出し中「A」を「B」に改め」「附則第六項の前の見出しを削る」: 項の見出し
+    ParagraphCaption { at: Loc, edit: CaptionEdit },
+    /// 表の中の位置（「第四表名称の欄」「第二類第五号」「備考」「A及びBの項」）への操作。位置は改め文の字面のまま（空は表の全部）
+    TableEdit {
+        table: TableRef,
+        path: String,
+        action: TableAction,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +513,8 @@ pub enum SentencePart {
     Main,
     /// 各号列記以外の部分（項の文。号を除く）
     Chapeau,
+    /// 「第四段」: 項の N 番目の文（ただし書を除いて数える）
+    Nth(u32),
 }
 
 impl Op {
@@ -326,6 +522,7 @@ impl Op {
     pub fn article(&self) -> Option<&ArticleNum> {
         match self {
             Op::ReplaceToc { .. }
+            | Op::ReplaceAll { .. }
             | Op::SetToc { .. }
             | Op::AppendSupplArticles { .. }
             | Op::AppendContainers { .. }
@@ -335,6 +532,7 @@ impl Op {
             | Op::RenumberContainer { .. }
             | Op::ReplaceContainerTitle { .. }
             | Op::SetTitle { .. }
+            | Op::ReplaceTitle { .. }
             | Op::SetContainerTitle { .. }
             | Op::DeleteContainerTitle { .. }
             | Op::DeleteContainers { .. }
@@ -349,7 +547,37 @@ impl Op {
             | Op::InsertAppdxAfter { .. }
             | Op::DeleteAppdxRowSub { .. }
             | Op::RenumberAppdxRowSub { .. }
-            | Op::DeleteAppdx { .. } => None,
+            | Op::DeleteAppdx { .. }
+            | Op::InsertHeadingsBefore { .. }
+            | Op::DeleteToc
+            | Op::MoveContainer { .. }
+            | Op::ReplaceStructure { .. }
+            | Op::AmendmentEdit { .. }
+            | Op::SetTitleAndToc { .. }
+            | Op::ReplacePairs { .. }
+            | Op::DeleteTitle
+            | Op::ParagraphToArticle { .. }
+            | Op::DeleteContainer { .. }
+            | Op::ShiftBranchArticles { .. }
+            | Op::ShiftContainers { .. }
+            | Op::ReplaceInContainer { .. }
+            | Op::SetContainerTitles { .. }
+            | Op::Suppl(_)
+            | Op::MainToArticle { .. }
+            | Op::ArticleToSuppl { .. }
+            | Op::Except { .. } => None,
+            Op::InsertContainersAfterArticle { after, .. } => Some(after),
+            Op::MoveArticle { from, .. } => Some(from),
+            Op::DeleteArticleTitle { article }
+            | Op::DeleteSupplNote { article }
+            | Op::MoveParagraph { article, .. }
+            | Op::SetSupplNote { article, .. }
+            | Op::ReplaceSupplNote { article, .. }
+            | Op::ReplaceInAmendment { article, .. } => Some(article),
+            Op::TableEdit { table, .. } => match table {
+                TableRef::InArticle(at) => Some(&at.article),
+                TableRef::Appdx(_) | TableRef::Preamble => None,
+            },
             Op::ReplaceArticles { articles, .. } => articles.first(),
             Op::Replace { at, .. }
             | Op::InsertAfterPhrase { at, .. }
@@ -385,7 +613,10 @@ impl Op {
             | Op::AppendTable { at, .. }
             | Op::RenumberSubitem { at, .. }
             | Op::ShiftSubitems { at, .. }
-            | Op::InsertSubitemAfter { at, .. } => Some(&at.article),
+            | Op::InsertSubitemAfter { at, .. }
+            | Op::SubitemsEdit { at, .. }
+            | Op::ShiftBranchItems { at, .. }
+            | Op::ParagraphCaption { at, .. } => Some(&at.article),
         }
     }
 
@@ -420,8 +651,148 @@ impl Op {
         }
     }
 
+    /// 位置（`at`）を持つ操作の位置
+    pub fn loc_mut(&mut self) -> Option<&mut Loc> {
+        match self {
+            Op::Replace { at, .. }
+            | Op::InsertAfterPhrase { at, .. }
+            | Op::AppendSentence { at, .. }
+            | Op::Delete { at }
+            | Op::ReplaceSentencePart { at, .. }
+            | Op::DeleteSentencePart { at, .. }
+            | Op::ReplaceParagraph { at, .. }
+            | Op::ReplaceItem { at, .. }
+            | Op::RenumberItem { at, .. }
+            | Op::ShiftItems { at, .. }
+            | Op::InsertItemAfter { at, .. }
+            | Op::InsertItemBefore { at, .. }
+            | Op::AppendItem { at, .. }
+            | Op::InsertItemFirst { at, .. }
+            | Op::ReplaceItems { at, .. }
+            | Op::ReplaceItemSet { at, .. }
+            | Op::ReplaceTableRow { at, .. }
+            | Op::AppendTable { at, .. }
+            | Op::RenumberSubitem { at, .. }
+            | Op::ShiftSubitems { at, .. }
+            | Op::InsertSubitemAfter { at, .. }
+            | Op::SubitemsEdit { at, .. }
+            | Op::ShiftBranchItems { at, .. }
+            | Op::ParagraphCaption { at, .. } => Some(at),
+            Op::TableEdit {
+                table: TableRef::InArticle(at),
+                ..
+            } => Some(at),
+            _ => None,
+        }
+    }
+
+    /// 字句（置換の前後・加える字句・表の中の位置…）に `f` を当てる（字句の中で伏せた「」を戻すのに使う）
+    pub fn map_strings(&mut self, f: &dyn Fn(&str) -> String) {
+        let m = |x: &mut String| *x = f(x);
+        match self {
+            Op::ReplaceToc { from, to }
+            | Op::ReplaceAll { from, to }
+            | Op::Replace { from, to, .. }
+            | Op::ReplaceTitle { from, to }
+            | Op::ReplaceCaption { from, to, .. }
+            | Op::ReplaceContainerTitle { from, to, .. }
+            | Op::ReplaceSupplNote { from, to, .. }
+            | Op::ReplaceInContainer { from, to, .. }
+            | Op::ReplaceAppdxRow { from, to, .. }
+            | Op::ReplaceInAmendment { from, to, .. } => {
+                m(from);
+                m(to);
+            }
+            Op::ReplaceTableRow { row, from, to, .. } => {
+                m(row);
+                m(from);
+                m(to);
+            }
+            Op::InsertAfterPhrase { anchor, text, .. } => {
+                m(anchor);
+                m(text);
+            }
+            Op::ParagraphCaption {
+                edit: CaptionEdit::Replace { from, to },
+                ..
+            } => {
+                m(from);
+                m(to);
+            }
+            Op::TableEdit { path, action, .. } => {
+                m(path);
+                if let TableAction::Phrase { from, to } = action {
+                    m(from);
+                    m(to);
+                }
+            }
+            Op::AmendmentEdit { target, .. } => m(target),
+            Op::SetCaption { text, .. } | Op::AttachCaption { text, .. } => m(text),
+            Op::Suppl(inner) => inner.map_strings(f),
+            Op::Except { op, .. } => op.map_strings(f),
+            _ => {}
+        }
+    }
+
+    /// 原始附則に向けた操作（`suppl`）を `Op::Suppl` に包む。附則を自分で扱う操作（字句の置換・条の追加・条ずれ）はそのまま
+    pub fn in_suppl(mut self, suppl: bool) -> Op {
+        let suppl = match self.loc_mut() {
+            Some(l) => l.suppl,
+            None => suppl,
+        };
+        if !suppl || self.article().is_none() {
+            return self;
+        }
+        match self {
+            Op::Replace { .. }
+            | Op::InsertAfterPhrase { .. }
+            | Op::InsertArticleAfter { .. }
+            | Op::InsertArticleBefore { .. }
+            | Op::RenumberArticle { .. } => self,
+            mut op => {
+                if let Some(l) = op.loc_mut() {
+                    l.suppl = false;
+                }
+                Op::Suppl(Box::new(op))
+            }
+        }
+    }
+
     /// 続く条文（インデント 1 の行）を受け取る操作か
     pub fn takes_content(&self) -> bool {
+        if let Op::Suppl(inner) = self {
+            return inner.takes_content();
+        }
+        // 「第二十四条の見出しを次のように改める」+「（見出し）」
+        if let Op::SetCaption { text, .. } = self {
+            return text.is_empty();
+        }
+        if let Op::SubitemsEdit { text, .. } = self {
+            return text.is_some();
+        }
+        if let Op::ReplacePairs { .. }
+        | Op::SetSupplNote { .. }
+        | Op::SetTitleAndToc { .. }
+        | Op::ReplaceStructure { .. } = self
+        {
+            return true;
+        }
+        if let Op::ParagraphCaption {
+            edit: CaptionEdit::Set(text),
+            ..
+        } = self
+        {
+            return text.is_empty();
+        }
+        if let Op::TableEdit { action, .. } | Op::AmendmentEdit { action, .. } = self {
+            return matches!(
+                action,
+                TableAction::Replace { .. }
+                    | TableAction::InsertAfter { .. }
+                    | TableAction::InsertBefore { .. }
+                    | TableAction::Append { .. }
+            );
+        }
         matches!(
             self,
             Op::AppendParagraph { .. }
@@ -456,6 +827,9 @@ impl Op {
                 | Op::ReplaceArticles { .. }
                 | Op::ReplaceContainers { .. }
                 | Op::ReplaceSentencePart { .. }
+                | Op::InsertContainersAfterArticle { .. }
+                | Op::InsertHeadingsBefore { .. }
+                | Op::SetContainerTitles { .. }
         )
     }
 
@@ -493,6 +867,38 @@ impl Op {
             | Op::ReplaceArticles { text, .. }
             | Op::ReplaceContainers { text, .. }
             | Op::ReplaceSentencePart { text, .. } => text.push(line),
+            Op::Suppl(inner) => inner.push_content(line),
+            Op::SetCaption { text, .. } if text.is_empty() => *text = line.trim().to_string(),
+            Op::SubitemsEdit {
+                text: Some(text), ..
+            }
+            | Op::ReplacePairs { text, .. }
+            | Op::SetSupplNote { text, .. }
+            | Op::SetTitleAndToc { text }
+            | Op::ReplaceStructure { text, .. } => text.push(line),
+            Op::ParagraphCaption {
+                edit: CaptionEdit::Set(text),
+                ..
+            } if text.is_empty() => *text = line.trim().to_string(),
+            Op::InsertContainersAfterArticle { text, .. }
+            | Op::InsertHeadingsBefore { text, .. }
+            | Op::SetContainerTitles { text, .. } => text.push(line),
+            Op::TableEdit {
+                action:
+                    TableAction::Replace { text }
+                    | TableAction::InsertAfter { text }
+                    | TableAction::InsertBefore { text }
+                    | TableAction::Append { text },
+                ..
+            }
+            | Op::AmendmentEdit {
+                action:
+                    TableAction::Replace { text }
+                    | TableAction::InsertAfter { text }
+                    | TableAction::InsertBefore { text }
+                    | TableAction::Append { text },
+                ..
+            } => text.push(line),
             _ => {}
         }
     }

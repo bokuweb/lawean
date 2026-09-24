@@ -21,13 +21,14 @@ pub fn article_label(n: &ArticleNum) -> String {
     }
 }
 
-fn part_label(p: SentencePart) -> &'static str {
+fn part_label(p: SentencePart) -> String {
     match p {
-        SentencePart::Front => "前段",
-        SentencePart::Back => "後段",
-        SentencePart::Proviso => "ただし書",
-        SentencePart::Main => "本文",
-        SentencePart::Chapeau => "各号列記以外の部分",
+        SentencePart::Front => "前段".into(),
+        SentencePart::Back => "後段".into(),
+        SentencePart::Proviso => "ただし書".into(),
+        SentencePart::Main => "本文".into(),
+        SentencePart::Chapeau => "各号列記以外の部分".into(),
+        SentencePart::Nth(n) => format!("第{}段", to_kanji(n)),
     }
 }
 
@@ -112,9 +113,27 @@ fn loc_label(l: &Loc) -> String {
         s.push_str(k);
     }
     if let Some(p) = l.part {
-        s.push_str(part_label(p));
+        s.push_str(&part_label(p));
     }
     s
+}
+
+/// 繰り下げ・繰り上げの範囲。`to` が `u32::MAX` なら「以下」（「第二号を第一号とし、以下…」の最後まで）
+fn shift_range(from: u32, to: u32, unit: &str) -> String {
+    if to == u32::MAX {
+        format!("第{}{unit}以下", to_kanji(from))
+    } else {
+        format!("第{}{unit}から第{}{unit}まで", to_kanji(from), to_kanji(to))
+    }
+}
+
+/// 表の中の位置の前置き（別表の名と位置の間は「中」）
+fn sep(path: &str) -> String {
+    if path.is_empty() {
+        String::new()
+    } else {
+        format!("中{path}")
+    }
 }
 
 /// 1 操作を、文の途中（`last = false`）または文末（`last = true`）の形にする
@@ -127,6 +146,338 @@ fn segment(op: &Op, last: bool) -> String {
         }
     };
     match op {
+        Op::ParagraphCaption { at, edit } => match edit {
+            CaptionEdit::Replace { from, to } if to.is_empty() => {
+                format!(
+                    "{}の見出し中「{from}」を{}",
+                    loc_label(at),
+                    end("削り", "削る")
+                )
+            }
+            CaptionEdit::Replace { from, to } => format!(
+                "{}の見出し中「{from}」を「{to}」に{}",
+                loc_label(at),
+                end("改め", "改める")
+            ),
+            CaptionEdit::Set(t) => format!(
+                "{}の見出しを「{t}」に{}",
+                loc_label(at),
+                end("改め", "改める")
+            ),
+            CaptionEdit::Attach(t) => {
+                format!(
+                    "{}の前に見出しとして「{t}」を{}",
+                    loc_label(at),
+                    end("付し", "付する")
+                )
+            }
+            CaptionEdit::Delete => format!("{}の見出しを{}", loc_label(at), end("削り", "削る")),
+        },
+        Op::InsertContainersAfterArticle { after, .. } => {
+            format!(
+                "{}の次に次のように{}",
+                article_label(after),
+                end("加え", "加える")
+            )
+        }
+        Op::DeleteToc => format!("目次を{}", end("削り", "削る")),
+        Op::SetTitleAndToc { .. } => format!("題名及び目次を次のように{}", end("改め", "改める")),
+        Op::SetSupplNote { article, .. } => format!(
+            "{}の付記を次のように{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::ShiftBranchItems {
+            at,
+            base,
+            from,
+            to,
+            by,
+        } => format!(
+            "{}中第{b}号の{}から第{b}号の{}までを{}号ずつ繰り{}",
+            loc_label(at),
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            },
+            b = to_kanji(*base)
+        ),
+        Op::ReplacePairs { scope, .. } => format!(
+            "{scope}中次の表の上欄に掲げる字句を同表の下欄に掲げる字句に{}",
+            end("改め", "改める")
+        ),
+        Op::SubitemsEdit { at, subs, text } => format!(
+            "{}{}を{}",
+            loc_label(at),
+            subs.join("及び"),
+            match text {
+                Some(_) => format!("次のように{}", end("改め", "改める")),
+                None => end("削り", "削る"),
+            }
+        ),
+        Op::DeleteTitle => format!("題名を{}", end("削り", "削る")),
+        Op::ParagraphToArticle { from, to, para } => format!(
+            "附則第{}項を附則{}{}と{}",
+            to_kanji(*from),
+            article_label(to),
+            para.map(|p| format!("第{}項", to_kanji(p)))
+                .unwrap_or_default(),
+            end("し", "する")
+        ),
+        Op::DeleteContainer { path } => format!("{}を{}", path_label(path), end("削り", "削る")),
+        Op::ShiftContainers {
+            path,
+            kind,
+            from,
+            to,
+            by,
+        } => {
+            let unit = kind_label(*kind);
+            let range = if *to == u32::MAX {
+                format!("第{}{unit}以下", to_kanji(*from))
+            } else {
+                format!(
+                    "第{}{unit}から第{}{unit}まで",
+                    to_kanji(*from),
+                    to_kanji(*to)
+                )
+            };
+            let pre = if path.is_empty() {
+                String::new()
+            } else {
+                format!("{}中", path_label(path))
+            };
+            format!(
+                "{pre}{range}を{}{unit}ずつ繰り{}",
+                to_kanji(by.unsigned_abs()),
+                if *by > 0 {
+                    end("下げ", "下げる")
+                } else {
+                    end("上げ", "上げる")
+                }
+            )
+        }
+        Op::ShiftBranchArticles { base, from, to, by } => format!(
+            "第{b}条の{}から第{b}条の{}までを{}条ずつ繰り{}",
+            to_kanji(*from),
+            to_kanji(*to),
+            to_kanji(by.unsigned_abs()),
+            if *by > 0 {
+                end("下げ", "下げる")
+            } else {
+                end("上げ", "上げる")
+            },
+            b = to_kanji(*base)
+        ),
+        Op::ReplaceInContainer {
+            path,
+            except,
+            except_titles,
+            from,
+            to,
+        } => {
+            let scope = if path.is_empty() {
+                "本則".to_string()
+            } else {
+                path_label(path)
+            };
+            let names: Vec<String> = except_titles
+                .iter()
+                .map(|p| {
+                    let kind = p.last().map(|(k, _)| kind_label(*k)).unwrap_or("章");
+                    format!("{}の{kind}名", path_label(p))
+                })
+                .chain(except.iter().map(loc_label))
+                .collect();
+            let ex = if names.is_empty() {
+                String::new()
+            } else {
+                format!("（{}を除く。）", names.join("、"))
+            };
+            if to.is_empty() {
+                format!("{scope}{ex}中「{from}」を{}", end("削り", "削る"))
+            } else {
+                format!(
+                    "{scope}{ex}中「{from}」を「{to}」に{}",
+                    end("改め", "改める")
+                )
+            }
+        }
+        Op::SetContainerTitles { paths, .. } => format!(
+            "{}を次のように{}",
+            paths
+                .iter()
+                .map(|p| format!(
+                    "{}の{}名",
+                    path_label(p),
+                    p.last().map(|(k, _)| kind_label(*k)).unwrap_or("")
+                ))
+                .collect::<Vec<_>>()
+                .join("及び"),
+            end("改め", "改める")
+        ),
+        Op::DeleteArticleTitle { article } => {
+            format!("{}の条名を{}", article_label(article), end("削り", "削る"))
+        }
+        Op::ReplaceSupplNote { article, from, to } => format!(
+            "{}の付記中「{from}」を「{to}」に{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::DeleteSupplNote { article } => {
+            format!("{}の付記を{}", article_label(article), end("削り", "削る"))
+        }
+        Op::MoveArticle { from, path, to } => format!(
+            "{}を{}中{}と{}",
+            article_label(from),
+            path_label(path),
+            article_label(to),
+            end("し", "する")
+        ),
+        Op::MoveContainer { from, to } => {
+            format!(
+                "{}を{}と{}",
+                path_label(from),
+                path_label(to),
+                end("し", "する")
+            )
+        }
+        Op::MoveParagraph {
+            article,
+            paragraph,
+            to,
+        } => format!(
+            "{}第{}項を{to}と{}",
+            article_label(article),
+            to_kanji(*paragraph),
+            end("し", "する")
+        ),
+        Op::ReplaceStructure { scope, .. } => {
+            format!("{scope}を次のように{}", end("改め", "改める"))
+        }
+        Op::AmendmentEdit { target, action } => match action {
+            TableAction::Replace { .. } => format!("{target}を次のように{}", end("改め", "改める")),
+            TableAction::Delete => format!("{target}を{}", end("削り", "削る")),
+            TableAction::InsertAfter { .. } => {
+                format!("{target}の次に次のように{}", end("加え", "加える"))
+            }
+            TableAction::Append { .. } => {
+                format!("{target}に次の改正規定を{}", end("加え", "加える"))
+            }
+            TableAction::InsertBefore { .. } => {
+                format!("{target}の前に次のように{}", end("加え", "加える"))
+            }
+            _ => format!("{target}を{}", end("改め", "改める")),
+        },
+        Op::ReplaceInAmendment {
+            article,
+            target,
+            from,
+            to,
+        } => format!(
+            "{}のうち、{target}中「{from}」を「{to}」に{}",
+            article_label(article),
+            end("改め", "改める")
+        ),
+        Op::InsertHeadingsBefore {
+            before,
+            after,
+            with_toc,
+            ..
+        } => {
+            let what = if *with_toc {
+                "目次及び章名"
+            } else {
+                "章名"
+            };
+            let side = if *after { "次" } else { "前" };
+            match before {
+                Some(a) => format!(
+                    "{}の{side}に次の{what}を{}",
+                    article_label(a),
+                    end("加え", "加える")
+                ),
+                None => format!("題名の次に次の{what}を{}", end("付し", "付する")),
+            }
+        }
+        Op::TableEdit {
+            table,
+            path,
+            action,
+        } => {
+            let t = match table {
+                TableRef::Appdx(t) => t.clone(),
+                TableRef::InArticle(at) => format!("{}の表", loc_label(at)),
+                TableRef::Preamble => "前文".to_string(),
+            };
+            let p = path.clone();
+            match action {
+                TableAction::Phrase { from, to } if to.is_empty() => {
+                    format!("{t}{}中「{from}」を{}", sep(&p), end("削り", "削る"))
+                }
+                TableAction::Phrase { from, to } => {
+                    format!(
+                        "{t}{}中「{from}」を「{to}」に{}",
+                        sep(&p),
+                        end("改め", "改める")
+                    )
+                }
+                TableAction::Replace { .. } => {
+                    format!("{t}{}を次のように{}", sep(&p), end("改め", "改める"))
+                }
+                TableAction::Delete => format!("{t}{}を{}", sep(&p), end("削り", "削る")),
+                TableAction::InsertAfter { .. } => {
+                    format!("{t}{}の次に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::InsertBefore { .. } => {
+                    format!("{t}{}の前に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::Append { .. } => {
+                    format!("{t}{}に次のように{}", sep(&p), end("加え", "加える"))
+                }
+                TableAction::Renumber { to } => {
+                    format!("{t}{}を{to}と{}", sep(&p), end("し", "する"))
+                }
+                TableAction::Shift { by } => format!(
+                    "{t}{}を{}ずつ繰り{}",
+                    sep(&p),
+                    to_kanji(by.unsigned_abs()),
+                    if *by > 0 {
+                        end("下げ", "下げる")
+                    } else {
+                        end("上げ", "上げる")
+                    }
+                ),
+            }
+        }
+        // 除く位置: 位置の後に「（…を除く。）」
+        Op::Except { op, except } => {
+            let s = segment(op, last);
+            let ex = except.iter().map(loc_label).collect::<Vec<_>>().join("、");
+            match s.find("中「") {
+                Some(i) => format!("{}（{ex}を除く。）{}", &s[..i], &s[i..]),
+                None => s,
+            }
+        }
+        // 原始附則: 中の操作の位置に「附則」を冠する（項だけの附則は仮の第0条）
+        Op::Suppl(inner) => {
+            let s = segment(inner, last);
+            if s.starts_with("第0条") {
+                s.replacen("第0条", "附則", 1)
+            } else {
+                format!("附則{s}")
+            }
+        }
+        Op::ReplaceAll { from, to } if to.is_empty() => {
+            format!("本則中「{from}」を{}", end("削り", "削る"))
+        }
+        Op::ReplaceAll { from, to } => {
+            format!("本則中「{from}」を「{to}」に{}", end("改め", "改める"))
+        }
         Op::ReplaceToc { from, to } if to.is_empty() => {
             format!("目次中「{from}」を{}", end("削り", "削る"))
         }
@@ -271,7 +622,14 @@ fn segment(op: &Op, last: bool) -> String {
             ),
             end("加え", "加える")
         ),
+        Op::ReplaceTitle { from, to } if to.is_empty() => {
+            format!("題名中「{from}」を{}", end("削り", "削る"))
+        }
+        Op::ReplaceTitle { from, to } => {
+            format!("題名中「{from}」を「{to}」に{}", end("改め", "改める"))
+        }
         Op::SetTitle { .. } => format!("題名を次のように{}", end("改め", "改める")),
+        Op::SetToc { replace: true, .. } => format!("目次を次のように{}", end("改め", "改める")),
         Op::SetToc { .. } => "題名の次に次の目次を付する".to_string(),
         Op::DeleteContainerTitle { path } => format!(
             "{}の{}名を{}",
@@ -341,10 +699,9 @@ fn segment(op: &Op, last: bool) -> String {
             end("し", "する")
         ),
         Op::ShiftItems { at, from, to, by } => format!(
-            "{}中第{}号から第{}号までを{}号ずつ繰り{}",
+            "{}中{}を{}号ずつ繰り{}",
             loc_label(at),
-            to_kanji(*from),
-            to_kanji(*to),
+            shift_range(*from, *to, "号"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
@@ -375,6 +732,14 @@ fn segment(op: &Op, last: bool) -> String {
         Op::ReplaceItems { at, .. } => {
             format!("{}各号を次のように{}", loc_label(at), end("改め", "改める"))
         }
+        Op::ReplaceTableRow { at, row, from, to } if row.is_empty() && to.is_empty() => {
+            format!("{}の表中「{from}」を{}", loc_label(at), end("削り", "削る"))
+        }
+        Op::ReplaceTableRow { at, row, from, to } if row.is_empty() => format!(
+            "{}の表中「{from}」を「{to}」に{}",
+            loc_label(at),
+            end("改め", "改める")
+        ),
         Op::ReplaceTableRow { at, row, from, to } if to.is_empty() => format!(
             "{}の表{row}の項中「{from}」を{}",
             loc_label(at),
@@ -395,7 +760,10 @@ fn segment(op: &Op, last: bool) -> String {
         Op::DeleteAppdxRows { table, rows } => format!(
             "{table}中{}を{}",
             rows.iter()
-                .map(|r| format!("{r}の項"))
+                .map(|r| match r.split_once('〜') {
+                    Some((a, b)) => format!("{a}の項から{b}の項まで"),
+                    None => format!("{r}の項"),
+                })
                 .collect::<Vec<_>>()
                 .join("及び"),
             end("削り", "削る")
@@ -410,6 +778,13 @@ fn segment(op: &Op, last: bool) -> String {
         ),
         Op::AppendAppdx { .. } => format!("附則の次に次の別表を{}", end("加え", "加える")),
         Op::RenameAppdx { from, to } => format!("{from}を{to}と{}", end("し", "する")),
+        Op::MainToArticle { to } => format!("本則を{}と{}", article_label(to), end("し", "する")),
+        Op::ArticleToSuppl { from, to } => format!(
+            "{}を附則{}と{}",
+            article_label(from),
+            article_label(to),
+            end("し", "する")
+        ),
         Op::InsertAppdxAfter { after, .. } => {
             format!("{after}の次に次の一表を{}", end("加え", "加える"))
         }
@@ -530,10 +905,9 @@ fn segment(op: &Op, last: bool) -> String {
             to,
             by,
         } => format!(
-            "{}中第{}項から第{}項までを{}項ずつ繰り{}",
+            "{}中{}を{}項ずつ繰り{}",
             article_label(article),
-            to_kanji(*from),
-            to_kanji(*to),
+            shift_range(*from, *to, "項"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
@@ -551,9 +925,8 @@ fn segment(op: &Op, last: bool) -> String {
             end("し", "する")
         ),
         Op::ShiftArticles { from, to, by } => format!(
-            "第{}条から第{}条までを{}条ずつ繰り{}",
-            to_kanji(*from),
-            to_kanji(*to),
+            "{}を{}条ずつ繰り{}",
+            shift_range(*from, *to, "条"),
             to_kanji(by.unsigned_abs()),
             if *by > 0 {
                 end("下げ", "下げる")
@@ -647,6 +1020,33 @@ fn content_of(op: &Op) -> &[String] {
         | Op::ReplaceArticles { text, .. }
         | Op::ReplaceContainers { text, .. }
         | Op::ReplaceSentencePart { text, .. } => text,
+        Op::TableEdit {
+            action:
+                TableAction::Replace { text }
+                | TableAction::InsertAfter { text }
+                | TableAction::InsertBefore { text }
+                | TableAction::Append { text },
+            ..
+        } => text,
+        Op::Suppl(inner) => content_of(inner),
+        Op::AmendmentEdit {
+            action:
+                TableAction::Replace { text }
+                | TableAction::InsertAfter { text }
+                | TableAction::InsertBefore { text }
+                | TableAction::Append { text },
+            ..
+        } => text,
+        Op::SubitemsEdit {
+            text: Some(text), ..
+        }
+        | Op::ReplacePairs { text, .. }
+        | Op::SetSupplNote { text, .. }
+        | Op::SetTitleAndToc { text }
+        | Op::ReplaceStructure { text, .. } => text,
+        Op::InsertContainersAfterArticle { text, .. }
+        | Op::InsertHeadingsBefore { text, .. }
+        | Op::SetContainerTitles { text, .. } => text,
         _ => &[],
     }
 }
