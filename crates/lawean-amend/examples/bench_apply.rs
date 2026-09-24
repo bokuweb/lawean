@@ -6,7 +6,7 @@
 //! 3. 当てて突き合わせる:
 //!    cargo run --release -p lawean-amend --example bench_apply -- run <txt のディレクトリ> --pairs pairs.tsv [--out result.tsv]
 //!
-//! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文）。目次・別表はまだ比べない。
+//! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文。目次を含む）、項の中の表、別表の本文。
 //! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）。
 //! 違いがこの単位の触らない条にだけあり、そこが e-Gov の版で変わっているものは `mismatch_other`（同じ版に入った別の改正の分）。
 //! 段階施行（附則で文ごとに施行日が違う）の単位は、候補の版ごとにその版に近づく文だけを当て、一致すれば `match_staged`。
@@ -185,6 +185,39 @@ fn raw_snapshot(doc: &lawean_source::LegalDocument) -> Snapshot {
             out.insert(format!("附則{k}"), v);
         }
     }
+    // 項の中の表（読替え表・税率表など）と別表: `snapshot_main` の本文には入らないので、ここで足す
+    let ws = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    fn tables(ps: &[lawean_source::Provision], ws: &dyn Fn(&str) -> String, out: &mut Snapshot) {
+        for p in ps {
+            match p {
+                lawean_source::Provision::Container(c) => tables(&c.children, ws, out),
+                lawean_source::Provision::Article(a) => {
+                    let mut v = Vec::new();
+                    let mut k = 0;
+                    for c in &a.children {
+                        if let lawean_source::ArticleChild::Paragraph(p) = c {
+                            k += 1;
+                            for pc in &p.children {
+                                if let lawean_source::ParagraphChild::Raw(e) = pc {
+                                    v.push((k, ws(&e.text())));
+                                }
+                            }
+                        }
+                    }
+                    if !v.is_empty() {
+                        out.insert(format!("{}の表", a.num.to_num_string()), v);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    tables(&doc.main_provision, &ws, &mut out);
+    for ap in &doc.appendices {
+        let text = ws(&ap.text());
+        let title: String = text.chars().take(12).collect();
+        out.insert(format!("別表:{title}"), vec![(0, text)]);
+    }
     out
 }
 
@@ -350,7 +383,7 @@ fn stage_match(
             instructions: vec![(*one).clone()],
         };
         let Ok(Ok(next)) =
-            std::panic::catch_unwind(|| lawean_amend::apply_unit(&cur, &unit, "staged"))
+            std::panic::catch_unwind(|| lawean_amend::apply_unit_unrefreshed(&cur, &unit))
         else {
             continue;
         };
@@ -618,7 +651,8 @@ fn run(mut args: Vec<String>) {
                 .iter()
                 .flat_map(|&k| (0..results[k].2.instructions.len()).map(move |i| (k, i)))
                 .collect();
-            if pool.len() < 2 {
+            // 文が多すぎる法律（税法の一括改正など）は時間が掛かるので試さない
+            if pool.len() < 2 || pool.len() > 150 {
                 continue;
             }
             let mut verified: std::collections::BTreeSet<(usize, usize)> = Default::default();
