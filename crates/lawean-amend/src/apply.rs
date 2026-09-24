@@ -1424,7 +1424,21 @@ pub(crate) fn table_edit_in_paragraph(
         }
         TableAction::Phrase { from, to } => match row {
             Some(r) => replace_table_row(p, r, from, to, protect),
-            None => Err(unsupported()),
+            // 「Xの項第三号中」: 行の中の位置。行の中に字句が一つだけなら、その一つを改める
+            None => match split_row(path) {
+                Some(r) => match count_in_table_row(p, &r, from) {
+                    Some(1) => replace_table_row(p, &r, from, to, protect),
+                    Some(0) => Err(ApplyError::PhraseNotFound {
+                        at: format!("表{path}"),
+                        phrase: from.clone(),
+                    }),
+                    Some(n) => Err(ApplyError::Unsupported(format!(
+                        "表の行の中の位置（字句が行に{n}か所）"
+                    ))),
+                    None => Err(ApplyError::BadContent(format!("表に「{r}」の項が無い"))),
+                },
+                None => Err(unsupported()),
+            },
         },
         TableAction::Delete => {
             let rows = table_rows_of(path).ok_or_else(unsupported)?;
@@ -3572,6 +3586,39 @@ pub(crate) fn replace_table_row(
         });
     }
     Ok(())
+}
+
+/// 条・項の中の表の行（上欄が `row`）の中の字句の数。行が無ければ None
+fn count_in_table_row(p: &Paragraph, row: &str, from: &str) -> Option<usize> {
+    fn rows<'a>(e: &'a Element, out: &mut Vec<&'a Element>) {
+        if e.name == "TableRow" {
+            out.push(e);
+            return;
+        }
+        for c in &e.children {
+            if let Node::Element(x) = c {
+                rows(x, out);
+            }
+        }
+    }
+    let key = strip_ws(row);
+    let mut all = Vec::new();
+    for c in &p.children {
+        if let ParagraphChild::Raw(e) = c {
+            rows(e, &mut all);
+        }
+    }
+    all.into_iter()
+        .find(|r| {
+            r.children
+                .iter()
+                .find_map(|c| match c {
+                    Node::Element(x) if x.name == "TableColumn" => Some(strip_ws(&x.text())),
+                    _ => None,
+                })
+                .is_some_and(|t| t == key)
+        })
+        .map(|r| r.text().matches(from).count())
 }
 
 /// 「第三章の章名を削る」: 題名を消す。番号は残す（続く「第三章第二節から第五節までを削る」が指す）。
