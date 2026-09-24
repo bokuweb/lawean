@@ -595,6 +595,59 @@ impl Binder<'_> {
         let mut appdx_rows: BTreeMap<(String, String), usize> = BTreeMap::new();
         for op in &ins.ops {
             match op {
+                // 「第三条の前に次の節名及び二条を加える」: 条を加える操作（id の世界）と、題名だけで包む操作
+                // （文書の側だけ。項の id は動かない）に分ける。同じ文で先に番号が変わることがあるので、ここで解く
+                Op::InsertHeadingsBefore {
+                    before: Some(n),
+                    after,
+                    with_toc: false,
+                    text,
+                } => {
+                    let at = if *after {
+                        let all = crate::numbering::article_nums(&self.doc);
+                        let i = all
+                            .iter()
+                            .position(|a| a == n)
+                            .ok_or_else(|| ApplyError::ArticleNotFound(n.to_num_string()))?;
+                        all.get(i + 1).cloned().ok_or_else(|| {
+                            ApplyError::BadContent(format!("{}の次の条が無い", n.to_num_string()))
+                        })?
+                    } else {
+                        n.clone()
+                    };
+                    let (headings, articles) = crate::apply::split_structure_lines(text);
+                    let start = match articles.first() {
+                        Some(_) => crate::apply::parse_articles(&articles)?
+                            .first()
+                            .map(|a| a.num.clone())
+                            .unwrap_or_else(|| at.clone()),
+                        None => at.clone(),
+                    };
+                    if !articles.is_empty() {
+                        self.instruction(&Instruction {
+                            text: ins.text.clone(),
+                            ops: vec![Op::InsertArticleBefore {
+                                before: at,
+                                text: articles,
+                                suppl: false,
+                            }],
+                        })?;
+                    }
+                    if !headings.is_empty() {
+                        crate::apply::apply_instruction(
+                            &mut self.doc,
+                            &Instruction {
+                                text: ins.text.clone(),
+                                ops: vec![Op::InsertHeadingsBefore {
+                                    before: Some(start),
+                                    after: false,
+                                    with_toc: false,
+                                    text: headings,
+                                }],
+                            },
+                        )?;
+                    }
+                }
                 Op::ReplaceToc { from, to } => {
                     let expected = toc_text(&self.doc).unwrap_or_default();
                     replace_toc(&mut self.doc, from, to)?;

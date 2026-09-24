@@ -2927,7 +2927,7 @@ fn parse_phrase_op_loose(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>
 }
 
 /// 「第一章第八節」→ [(章, 1), (節, 8)]
-fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, String)> {
+pub(crate) fn container_path(s: &str) -> Vec<(lawean_source::ContainerKind, String)> {
     static P: OnceLock<Regex> = OnceLock::new();
     let pr = P.get_or_init(|| re(r"第({N})(編|章|節|款|目)((?:の{N})*)"));
     pr.captures_iter(s)

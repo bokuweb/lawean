@@ -45,6 +45,169 @@ pub fn apply_unit(
     refresh(&mut doc, new_version_id)
 }
 
+/// 「第三条の前に次の節名及び二条を加える」「第十条の次に次のように加える」+ 題名の行・条: 条を `at` の前に入れ、
+/// 題名ごとに、その後ろの最初の新しい条（無ければ `at`）から包む
+fn insert_structure_before(
+    doc: &mut LegalDocument,
+    at: &ArticleNum,
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    static HEAD: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let head = HEAD.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+(?:編|章|節|款|目)(?:の[一二三四五六七八九十百千]+)*[\u{3000} ]").unwrap()
+    });
+    static ART: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let art = ART.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+条(?:の[一二三四五六七八九十百千]+)*(?:(?:から|及び)第[^\u{3000}]+)?[\u{3000} ]").unwrap()
+    });
+    enum Piece {
+        Heading(String),
+        Article(Vec<String>),
+    }
+    let mut pieces: Vec<Piece> = Vec::new();
+    for l in lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+        if head.is_match(l) {
+            pieces.push(Piece::Heading(l.to_string()));
+        } else if art.is_match(l) {
+            // 直前が見出しだけの条（「（…）」）ならそこに続ける
+            match pieces.last_mut() {
+                Some(Piece::Article(v)) if v.len() == 1 && v[0].starts_with('（') => {
+                    v.push(l.to_string())
+                }
+                _ => pieces.push(Piece::Article(vec![l.to_string()])),
+            }
+        } else if l.starts_with('（')
+            && !matches!(pieces.last(), Some(Piece::Article(v)) if !v.iter().any(|x| art.is_match(x)))
+        {
+            pieces.push(Piece::Article(vec![l.to_string()]));
+        } else {
+            match pieces.last_mut() {
+                Some(Piece::Article(v)) => v.push(l.to_string()),
+                _ => return Err(ApplyError::BadContent(format!("題名の前の本文: {l}"))),
+            }
+        }
+    }
+    // 新しい条を `at` の前に、並びの順に入れる
+    let mut new_nums: Vec<Option<ArticleNum>> = Vec::new();
+    for p in &pieces {
+        match p {
+            Piece::Heading(_) => new_nums.push(None),
+            Piece::Article(v) => {
+                let a = parse_article(v)?;
+                let num = a.num.clone();
+                let path = article_path(&doc.main_provision, at)
+                    .ok_or_else(|| ApplyError::ArticleNotFound(at.to_num_string()))?;
+                let (&idx, parent) = path.split_last().expect("道筋");
+                provision_list(&mut doc.main_provision, parent).insert(idx, Provision::Article(a));
+                new_nums.push(Some(num));
+            }
+        }
+    }
+    // 題名ごとに、後ろの最初の新しい条（無ければ `at`）から包む
+    for (k, p) in pieces.iter().enumerate() {
+        if let Piece::Heading(line) = p {
+            let start = new_nums[k + 1..]
+                .iter()
+                .find_map(|n| n.clone())
+                .unwrap_or_else(|| at.clone());
+            wrap_from_article(doc, &start, line)?;
+        }
+    }
+    Ok(())
+}
+
+/// 題名の行（「第一節　…」）と、それ以外（加える条の行）に分ける
+pub(crate) fn split_structure_lines(lines: &[String]) -> (Vec<String>, Vec<String>) {
+    static HEAD: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let head = HEAD.get_or_init(|| {
+        regex::Regex::new(r"^第[一二三四五六七八九十百千]+(?:編|章|節|款|目)(?:の[一二三四五六七八九十百千]+)*[\u{3000} ]").unwrap()
+    });
+    let (mut h, mut a) = (Vec::new(), Vec::new());
+    for l in lines {
+        if head.is_match(l.trim()) {
+            h.push(l.clone());
+        } else {
+            a.push(l.clone());
+        }
+    }
+    (h, a)
+}
+
+/// 条までの容器の道筋（並びの添字の列。最後が条）
+fn article_path(ps: &[Provision], at: &ArticleNum) -> Option<Vec<usize>> {
+    for (i, p) in ps.iter().enumerate() {
+        match p {
+            Provision::Article(a) if &a.num == at => return Some(vec![i]),
+            Provision::Container(c) => {
+                if let Some(mut v) = article_path(&c.children, at) {
+                    v.insert(0, i);
+                    return Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 道筋の容器の中の並び
+fn provision_list<'a>(ps: &'a mut Vec<Provision>, path: &[usize]) -> &'a mut Vec<Provision> {
+    match path.split_first() {
+        None => ps,
+        Some((&i, rest)) => match &mut ps[i] {
+            Provision::Container(c) => provision_list(&mut c.children, rest),
+            _ => unreachable!("容器の道筋"),
+        },
+    }
+}
+
+/// 「第二章中第三条の前に次の節名を付する。第一節　…」: 条 `at` から、同じ並びの次の容器（無ければ並びの終わり）までを
+/// 新しい容器（題名 `line`）で包む。`at` を含む容器が同じ種類（第一節の中の第十九条の前に第二節）なら、その容器を `at` で分ける
+fn wrap_from_article(
+    doc: &mut LegalDocument,
+    at: &ArticleNum,
+    line: &str,
+) -> Result<(), ApplyError> {
+    let path_of = article_path;
+    let list_at = provision_list;
+    let head = line.split(['\u{3000}', ' ']).next().unwrap_or("");
+    let Some((kind, num)) = crate::parse::container_path(head).pop() else {
+        return Err(ApplyError::BadContent(format!("題名が読めない: {line}")));
+    };
+    let path = path_of(&doc.main_provision, at)
+        .ok_or_else(|| ApplyError::ArticleNotFound(at.to_num_string()))?;
+    let (&idx, parent) = path.split_last().expect("道筋");
+    let new = |children: Vec<Provision>| {
+        Provision::Container(Container {
+            stable_id: StableId(String::new()),
+            kind,
+            num: Some(num.clone()),
+            title: Some(vec![Inline::Text(line.to_string())]),
+            attrs: Vec::new(),
+            children,
+        })
+    };
+    // 条を含む容器が同じ種類: その容器を条の前で分け、後ろを兄弟の容器に
+    if let Some((&pi, grand)) = parent.split_last() {
+        let list = list_at(&mut doc.main_provision, grand);
+        if let Provision::Container(c) = &mut list[pi] {
+            if c.kind == kind {
+                let tail = c.children.split_off(idx);
+                list.insert(pi + 1, new(tail));
+                return Ok(());
+            }
+        }
+    }
+    let list = list_at(&mut doc.main_provision, parent);
+    let end = list[idx..]
+        .iter()
+        .position(|p| matches!(p, Provision::Container(_)))
+        .map_or(list.len(), |k| idx + k);
+    let body: Vec<Provision> = list.drain(idx..end).collect();
+    list.insert(idx, new(body));
+    Ok(())
+}
+
 /// 括弧の番号の表記を e-Gov に揃える: 衆議院のページの半角「(1)」「(十九の七)」→ 全角「（１）」「（十九の七）」
 pub(crate) fn egov_parens(s: &str) -> String {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
@@ -655,10 +818,33 @@ pub(crate) fn apply_instruction(
                 let new = parse_containers(text)?;
                 insert_containers_after_article(doc, after, new)?;
             }
-            Op::InsertHeadingsBefore { .. } => {
-                return Err(ApplyError::Unsupported(
-                    "条の前に章名・目次を置く（条を容器に包み直す）".into(),
-                ))
+            Op::InsertHeadingsBefore { with_toc: true, .. } => {
+                return Err(ApplyError::Unsupported("条の前に目次と章名を置く".into()))
+            }
+            Op::InsertHeadingsBefore {
+                before,
+                after,
+                text,
+                ..
+            } => {
+                // 「第三条の次に次の章名を付する」: 次の条の前に
+                let at = match (before, after) {
+                    (Some(n), false) => n.clone(),
+                    (Some(n), true) => {
+                        let all = crate::numbering::article_nums(doc);
+                        let i = all
+                            .iter()
+                            .position(|a| a == n)
+                            .ok_or_else(|| ApplyError::ArticleNotFound(n.to_num_string()))?;
+                        all.get(i + 1).cloned().ok_or_else(|| {
+                            ApplyError::BadContent(format!("{}の次の条が無い", n.to_num_string()))
+                        })?
+                    }
+                    (None, _) => {
+                        return Err(ApplyError::Unsupported("本則の初めに章名を置く".into()))
+                    }
+                };
+                insert_structure_before(doc, &at, text)?;
             }
             Op::MainToArticle { .. } => {
                 return Err(ApplyError::Unsupported("条の無い本則を条にする".into()))

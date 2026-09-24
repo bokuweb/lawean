@@ -383,7 +383,16 @@ fn ident_path(
     let r = std::panic::catch_unwind(|| {
         let b = ident::bind(before, u, "bench").map_err(|e| e.to_string())?;
         let got = ident::apply_unit(&ident::from_document(before), &b.ops).ok_or("none")?;
-        Ok::<bool, String>(got.render() == ident::from_document(expected).render())
+        let (g, w) = (got.render(), ident::from_document(expected).render());
+        if g != w && std::env::var("BENCH_DEBUG").is_ok() {
+            if let Some(i) = (0..g.len().max(w.len())).find(|&i| g.get(i) != w.get(i)) {
+                let cut = |x: Option<&(String, String)>| {
+                    x.map(|(a, t)| format!("{a}:{}", t.chars().take(40).collect::<String>()))
+                };
+                eprintln!("ident diff #{i}: {:?} | {:?}", cut(g.get(i)), cut(w.get(i)));
+            }
+        }
+        Ok::<bool, String>(g == w)
     });
     match r {
         Ok(Ok(true)) => "ident_match".into(),
