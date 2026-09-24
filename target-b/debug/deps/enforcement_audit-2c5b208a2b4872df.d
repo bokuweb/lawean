@@ -1,0 +1,10 @@
+/Users/bokuweb/ghq/github.com/bokuweb/lawean-apply-benchmark/target-b/debug/deps/enforcement_audit-2c5b208a2b4872df.d: crates/lawean-extract/tests/enforcement_audit.rs Cargo.toml
+
+/Users/bokuweb/ghq/github.com/bokuweb/lawean-apply-benchmark/target-b/debug/deps/libenforcement_audit-2c5b208a2b4872df.rmeta: crates/lawean-extract/tests/enforcement_audit.rs Cargo.toml
+
+crates/lawean-extract/tests/enforcement_audit.rs:
+Cargo.toml:
+
+# env-dep:CARGO_MANIFEST_DIR=/Users/bokuweb/ghq/github.com/bokuweb/lawean-apply-benchmark/crates/lawean-extract
+# env-dep:CLIPPY_ARGS=
+# env-dep:CLIPPY_CONF_DIR

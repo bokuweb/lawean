@@ -358,6 +358,49 @@ fn distance(got: &Snapshot, want: &Snapshot) -> (usize, i64) {
     (n, -close)
 }
 
+/// 段階施行の突き合わせの一回り: 候補の版ごとに、まだ確かめていない断片（文か操作）のうち、その版に近づくものだけを当てる。
+/// 一致した版で使った断片を確かめたとする。返すのは（確かめた断片の鍵, 鍵の最初の key.0 → 一致した版）
+#[allow(clippy::type_complexity)]
+fn staged_pass(
+    pieces: &[((usize, usize), lawean_amend::Instruction)],
+    cands: &[(String, String)],
+    egov: &Path,
+    docs: &mut BTreeMap<String, Option<std::rc::Rc<lawean_source::LegalDocument>>>,
+    mut verified: std::collections::BTreeSet<(usize, usize)>,
+) -> (
+    std::collections::BTreeSet<(usize, usize)>,
+    BTreeMap<usize, (String, String)>,
+) {
+    let mut stages: BTreeMap<usize, (String, String)> = BTreeMap::new();
+    for (prev, after) in cands {
+        let mut load = |id: &str| {
+            docs.entry(id.to_string())
+                .or_insert_with(|| load_rev(egov, id).map(std::rc::Rc::new))
+                .clone()
+        };
+        let (Some(before), Some(expected)) = (load(prev), load(after)) else {
+            continue;
+        };
+        let todo: Vec<&((usize, usize), lawean_amend::Instruction)> = pieces
+            .iter()
+            .filter(|(k, _)| !verified.contains(k))
+            .collect();
+        let ins: Vec<&lawean_amend::Instruction> = todo.iter().map(|(_, x)| x).collect();
+        let staged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stage_match(&before, &expected, &ins, prev, after)
+        }))
+        .ok()
+        .flatten();
+        if let Some(used) = staged {
+            for j in used {
+                verified.insert(todo[j].0);
+                stages.insert(todo[j].0 .0, (prev.clone(), after.clone()));
+            }
+        }
+    }
+    (verified, stages)
+}
+
 /// 段階施行: 文を順に試し、その版に近づく文だけを当てる。最後に一致すれば、当てた文の添字
 fn stage_match(
     before: &lawean_source::LegalDocument,
@@ -658,43 +701,70 @@ fn run(mut args: Vec<String>) {
             }
         }
         for (_, ks) in groups {
-            let pool: Vec<(usize, usize)> = ks
-                .iter()
-                .flat_map(|&k| (0..results[k].2.instructions.len()).map(move |i| (k, i)))
-                .collect();
+            let n_ins: usize = ks.iter().map(|&k| results[k].2.instructions.len()).sum();
             // 文が多すぎる法律（税法の一括改正など）は時間が掛かるので試さない
-            if pool.len() < 2 || pool.len() > 150 {
+            if n_ins < 2 || n_ins > 150 {
                 continue;
             }
-            let mut verified: std::collections::BTreeSet<(usize, usize)> = Default::default();
-            let mut stages: BTreeMap<usize, (String, String)> = BTreeMap::new();
-            for (prev, after) in results[ks[0]].4.clone() {
-                let mut load = |id: &str| {
-                    docs.entry(id.to_string())
-                        .or_insert_with(|| load_rev(egov, id).map(std::rc::Rc::new))
-                        .clone()
-                };
-                let (Some(before), Some(expected)) = (load(&prev), load(&after)) else {
-                    continue;
-                };
-                let todo: Vec<(usize, usize)> = pool
+            let cands = results[ks[0]].4.clone();
+            // 文ごと: （単位, 文）
+            let pieces: Vec<((usize, usize), lawean_amend::Instruction)> = ks
+                .iter()
+                .flat_map(|&k| {
+                    results[k]
+                        .2
+                        .instructions
+                        .iter()
+                        .enumerate()
+                        .map(move |(i, x)| ((k, i), x.clone()))
+                })
+                .collect();
+            let (mut verified, mut stages) =
+                staged_pass(&pieces, &cands, egov, &mut docs, Default::default());
+            // 文の一部だけ施行日が違う（「…の改正規定（「A」を「B」に改める部分に限る。）」）: 確かめられなかった文を操作ごとに
+            let rest: Vec<((usize, usize), lawean_amend::Instruction)> = pieces
+                .iter()
+                .filter(|(key, x)| !verified.contains(key) && x.ops.len() > 1)
+                .flat_map(|(key, x)| {
+                    x.ops.iter().map(move |op| {
+                        (
+                            *key,
+                            lawean_amend::Instruction {
+                                text: x.text.clone(),
+                                ops: vec![op.clone()],
+                            },
+                        )
+                    })
+                })
+                .collect();
+            if !rest.is_empty() && rest.len() <= 150 {
+                // 操作ごとの確かめ: 文の操作が全部確かめられたら、その文は確かめられた
+                let mut op_ids: Vec<((usize, usize), usize)> = Vec::new();
+                let mut counter: BTreeMap<(usize, usize), usize> = BTreeMap::new();
+                for (key, _) in &rest {
+                    let c = counter.entry(*key).or_default();
+                    op_ids.push((*key, *c));
+                    *c += 1;
+                }
+                let op_pieces: Vec<((usize, usize), lawean_amend::Instruction)> = rest
                     .iter()
-                    .copied()
-                    .filter(|x| !verified.contains(x))
+                    .enumerate()
+                    .map(|(j, (_, x))| ((usize::MAX, j), x.clone()))
                     .collect();
-                let ins: Vec<&lawean_amend::Instruction> = todo
-                    .iter()
-                    .map(|&(k, i)| &results[k].2.instructions[i])
-                    .collect();
-                let staged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    stage_match(&before, &expected, &ins, &prev, &after)
-                }))
-                .ok()
-                .flatten();
-                if let Some(used) = staged {
-                    for j in used {
-                        verified.insert(todo[j]);
-                        stages.insert(todo[j].0, (prev.clone(), after.clone()));
+                let (ok_ops, op_stages) =
+                    staged_pass(&op_pieces, &cands, egov, &mut docs, Default::default());
+                for (key, total) in &counter {
+                    let all = (0..*total).all(|o| {
+                        op_ids
+                            .iter()
+                            .position(|x| x == &(*key, o))
+                            .is_some_and(|j| ok_ops.contains(&(usize::MAX, j)))
+                    });
+                    if all {
+                        verified.insert(*key);
+                        if let Some(st) = op_stages.values().next() {
+                            stages.entry(key.0).or_insert_with(|| st.clone());
+                        }
                     }
                 }
             }
