@@ -1743,9 +1743,7 @@ fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
                     _ => None,
                 })
                 .unwrap_or_default();
-            title == table
-                || title.starts_with(&format!("{table}（"))
-                || title.starts_with(&format!("{table}\u{3000}"))
+            appdx_title_matches(&title, table)
         })
         .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
 }
@@ -3429,6 +3427,16 @@ fn row_group_len(body: &[Node], at: usize) -> usize {
 
 // ---------------------------------------------------------------- 別表の行
 
+/// 別表の題名（空白を詰めたもの）が `table` か: 「別表第一（第二条関係）」「別表第一在外公館の名称及び位置」は
+/// 「別表第一」。「別表第十」「別表第一の二」は違う
+fn appdx_title_matches(title: &str, table: &str) -> bool {
+    let table = strip_ws(table);
+    match title.strip_prefix(table.as_str()) {
+        Some(rest) => !rest.starts_with(|c: char| "一二三四五六七八九十百千の".contains(c)),
+        None => false,
+    }
+}
+
 /// 別表（`AppdxTable`）を題で引く。「別表第一」は題が「別表第一（第三条関係）」でも当たる
 pub(crate) fn appdx_mut<'a>(
     doc: &'a mut LegalDocument,
@@ -3445,9 +3453,7 @@ pub(crate) fn appdx_mut<'a>(
                     _ => None,
                 })
                 .unwrap_or_default();
-            title == table
-                || title.starts_with(&format!("{table}（"))
-                || title.starts_with(&format!("{table}\u{3000}"))
+            appdx_title_matches(&title, table)
         })
         .ok_or_else(|| ApplyError::BadContent(format!("{table}が無い")))
 }
