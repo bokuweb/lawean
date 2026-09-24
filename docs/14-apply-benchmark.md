@@ -32,6 +32,12 @@ cargo run --release -p lawean-amend --example bench_apply -- run ~/.cache/lawean
    - 比べる前に字形（JIS2004 の「塡」「剝」…）と括弧番号（「(1)」→「（１）」）を揃える
 4. **identity patch の経路**（`ident` の列）: 同じ単位を `ident::bind` で発射台に束縛し、Lean の `Ident.applyUnit` の写し
    （`ident::apply_unit`）で当てて e-Gov の版と比べる。**証明した意味論が、実データで文書への適用と揃うか**を見る
+5. **データセットに書き出す**（`bench_apply export`、`examples/corpus/export.rs`）: 一致した単位（`match` と `mismatch_other`）を当て直して確かめ、
+   （改め文の原文, 改正前の版の変わった条, 改正後の版の変わった条）の組を JSONL に出す。条文は構造付き plain text
+   （`{"type": "paragraph"|"table", …}` の列）。改め文を生成する側（totoro の `fixtures/shugiin_egov`）の評価に使う。いまは 2,441 件
+   ```
+   cargo run --release -p lawean-amend --example bench_apply -- export ~/.cache/lawean/shugiin/txt --result result.tsv --index ~/.cache/lawean/shugiin/index.tsv --out cases.jsonl
+   ```
 
 ## 2. 結果（2026-09-24）
 
