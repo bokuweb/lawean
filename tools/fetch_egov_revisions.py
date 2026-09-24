@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """改正単位（`bench_apply list` の出力）ごとに、e-Gov の被改正法の「直前の版」と「直後の版」を決めて取ってくる。
 
-    python3 tools/fetch_egov_revisions.py units.tsv pairs.tsv [--cache ~/.cache/lawean/egov] [--no-xml]
+    python3 tools/fetch_egov_revisions.py units.tsv pairs.tsv [--cache ~/.cache/lawean/egov] [--no-xml] [--xml-since 20190501]
+
+--xml-since: 版の本文は、公布日（ページの 4〜11 桁目）がこの日以後の改正法の単位の分だけ取る
 
 キャッシュ（再開できる）:
   <cache>/laws.json                 法令番号 → 法令 ID
   <cache>/revisions/<法令ID>.json   改正履歴（e-Gov API v2 law_revisions）
-  <cache>/rev/<版ID>.xml            版の本文（law_data、response_format=xml）
+  <cache>/rev/<版ID>.xml.gz         版の本文（law_data、response_format=xml、gzip）
 
 組み合わせ（被改正法 L と改正法 A ごと）:
   L の版を日付順に並べ、A による版（施行前の版も含む）をすべて候補にする。候補は（その版の直前の版, その版）。
@@ -15,6 +17,7 @@
   - A による版が無い: no_revision（e-Gov に無い・廃止済み・古すぎるなど）
   - 候補がどれも直前の版を持たない: no_base
 """
+import gzip
 import json
 import os
 import sys
@@ -37,6 +40,7 @@ def flag(name, default=None):
 
 
 cache = os.path.expanduser(flag("--cache", "~/.cache/lawean/egov"))
+xml_since = flag("--xml-since", "")
 no_xml = "--no-xml" in args
 if no_xml:
     args.remove("--no-xml")
@@ -71,7 +75,7 @@ with open(units_path, encoding="utf-8") as f:
 # 法令番号 → 法令 ID
 laws_path = os.path.join(cache, "laws.json")
 laws = json.load(open(laws_path)) if os.path.exists(laws_path) else {}
-WORKERS = 4
+WORKERS = 8
 
 
 def resolve(num):
@@ -137,8 +141,9 @@ for (law_id, amending), us in groups.items():
         continue
     for u in us:
         rows.append((u, "ok", cands))
-    for a, b in cands:
-        need.update([a, b])
+        if u["page"][3:11] >= xml_since:
+            for a, b in cands:
+                need.update([a, b])
 
 with open(pairs_path, "w", encoding="utf-8") as f:
     f.write("page\tblock\tunit\tstatus\tcandidates\ttitle\n")
@@ -153,13 +158,15 @@ print("pairs:", stats, f"revisions needed: {len(need)}", file=sys.stderr)
 
 if not no_xml:
     total = 0
-    todo = sorted(r for r in need if not os.path.exists(os.path.join(cache, "rev", f"{r}.xml")))
+    todo = sorted(r for r in need if not os.path.exists(os.path.join(cache, "rev", f"{r}.xml.gz")))
 
     def fetch(r):
         data = get(f"{API}/law_data/{r}?response_format=xml", binary=True)
         if data is not None:
-            with open(os.path.join(cache, "rev", f"{r}.xml"), "wb") as f:
+            tmp = os.path.join(cache, "rev", f"{r}.xml.gz.tmp")
+            with gzip.open(tmp, "wb") as f:
                 f.write(data)
+            os.replace(tmp, os.path.join(cache, "rev", f"{r}.xml.gz"))
         return len(data or b"")
 
     with ThreadPoolExecutor(WORKERS) as ex:

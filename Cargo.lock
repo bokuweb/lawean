@@ -827,6 +827,7 @@ dependencies = [
 name = "lawean-amend"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "lawean-extract",
  "lawean-render",
  "lawean-resolve",

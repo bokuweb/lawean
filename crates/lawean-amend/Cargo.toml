@@ -17,3 +17,5 @@ lawean-render = { path = "../lawean-render" }
 lawean-semantic = { path = "../lawean-semantic" }
 lawean-extract = { path = "../lawean-extract" }
 serde_json.workspace = true
+# examples/bench_apply: e-Gov の版を gzip で持つ
+flate2 = "1"

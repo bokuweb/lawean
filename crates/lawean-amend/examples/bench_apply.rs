@@ -150,7 +150,17 @@ fn snapshot(doc: &lawean_source::LegalDocument) -> Snapshot {
 
 /// e-Gov の版（`fetch_egov_revisions.py` が保存した law_data_response の XML）
 fn load_rev(dir: &Path, id: &str) -> Option<lawean_source::LegalDocument> {
-    let xml = std::fs::read_to_string(dir.join(format!("{id}.xml"))).ok()?;
+    use std::io::Read;
+    let xml = match std::fs::File::open(dir.join(format!("{id}.xml.gz"))) {
+        Ok(f) => {
+            let mut s = String::new();
+            flate2::read::GzDecoder::new(f)
+                .read_to_string(&mut s)
+                .ok()?;
+            s
+        }
+        Err(_) => std::fs::read_to_string(dir.join(format!("{id}.xml"))).ok()?,
+    };
     lawean_source::parse_response(&xml).ok()
 }
 

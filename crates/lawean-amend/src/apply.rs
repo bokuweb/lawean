@@ -1309,7 +1309,23 @@ pub(crate) fn table_edit_appdx(
         }
         TableAction::Phrase { from, to } => match row {
             Some(r) => replace_appdx_row(doc, table, r, None, from, to, appdx_rows),
-            None => Err(unsupported()),
+            // 「六の項第六号中」「(に)項第一号中」: 行の中の位置。行の中に字句が一つだけなら、その一つを改める
+            None => match split_row(path) {
+                Some(r) => {
+                    let n = count_in_appdx_row(doc, table, &r, from)?;
+                    match n {
+                        0 => Err(ApplyError::PhraseNotFound {
+                            at: format!("{table}{path}"),
+                            phrase: from.clone(),
+                        }),
+                        1 => replace_appdx_row(doc, table, &r, None, from, to, appdx_rows),
+                        _ => Err(ApplyError::Unsupported(format!(
+                            "{table}の行の中の位置（字句が行に{n}か所）"
+                        ))),
+                    }
+                }
+                None => Err(unsupported()),
+            },
         },
         TableAction::Replace { text } if path.is_empty() => {
             let i = appdx_index(doc, table)?;
@@ -1338,6 +1354,38 @@ pub(crate) fn table_edit_appdx(
         },
         _ => Err(unsupported()),
     }
+}
+
+/// 「六の項第六号」「(に)項第一号」→ 行（「六」「（に）」）。行を言わない位置なら None
+fn split_row(path: &str) -> Option<String> {
+    if let Some(i) = path.find("の項") {
+        let r = &path[..i];
+        return (!r.contains("及び") && !r.contains('、')).then(|| r.to_string());
+    }
+    // 「(に)項」: 閉じ括弧の前まで。上欄は e-Gov では全角の「（に）」
+    let i = [")項", "）項"].iter().filter_map(|x| path.find(x)).min()?;
+    Some(format!("{}）", &path[..i]).replace('(', "（"))
+}
+
+/// 別表の行の中の字句の数
+fn count_in_appdx_row(
+    doc: &mut LegalDocument,
+    table: &str,
+    row: &str,
+    from: &str,
+) -> Result<usize, ApplyError> {
+    let ap = appdx_mut(doc, table)?;
+    let body =
+        table_body_mut(ap).ok_or_else(|| ApplyError::BadContent(format!("{table}に表が無い")))?;
+    let (at, len) = row_group(body, row)
+        .ok_or_else(|| ApplyError::BadContent(format!("{table}に「{row}」の項が無い")))?;
+    Ok(body[at..at + len]
+        .iter()
+        .map(|c| match c {
+            Node::Element(r) => r.text().matches(from).count(),
+            _ => 0,
+        })
+        .sum())
 }
 
 fn appdx_index(doc: &LegalDocument, table: &str) -> Result<usize, ApplyError> {
