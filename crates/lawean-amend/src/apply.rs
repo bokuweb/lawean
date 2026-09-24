@@ -3318,6 +3318,27 @@ pub(crate) fn replace_articles(
     text: &[String],
 ) -> Result<(), ApplyError> {
     let new = parse_articles(text)?;
+    // 「第九百三十条から第九百三十二条までを次のように改める」: 範囲は、文書に範囲の条（「930:932」）が無ければ、
+    // 文書の並びでその間にある条（枝番も）に広げる
+    let mut expanded: Vec<ArticleNum> = Vec::new();
+    for n in articles {
+        if let ArticleNum::Range { from, to } = n {
+            if find_article(&mut doc.main_provision, n).is_none() {
+                let all = crate::numbering::article_nums(doc);
+                if let (Some(i), Some(j)) = (
+                    all.iter().position(|a| a == from.as_ref()),
+                    all.iter().position(|a| a == to.as_ref()),
+                ) {
+                    if i <= j {
+                        expanded.extend(all[i..=j].iter().cloned());
+                        continue;
+                    }
+                }
+            }
+        }
+        expanded.push(n.clone());
+    }
+    let articles = expanded.as_slice();
     let first = articles
         .first()
         .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
