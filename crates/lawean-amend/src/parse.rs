@@ -124,6 +124,21 @@ pub fn normalize_source_text(s: &str) -> String {
         last = m.end();
     }
     out.push_str(&s[last..]);
+    // 全角の括弧の振り仮名「口蹄（てい）疫」「禁錮（こ）」: e-Gov は Ruby で持ち、本文の字には含めない。
+    // 漢字の直後のひらがなだけの括弧を落とす（「別表第二（い）項」のように番号として続くものは残す）
+    static RUBY_FW: OnceLock<Regex> = OnceLock::new();
+    let ruby_fw = RUBY_FW.get_or_init(|| Regex::new(r"([\p{Han}々])（([ぁ-ゖ]{1,4})）").unwrap());
+    let mut folded = String::with_capacity(out.len());
+    let mut last = 0;
+    for c in ruby_fw.captures_iter(&out) {
+        let m = c.get(0).expect("全体");
+        let keep = out[m.end()..].starts_with(['項', '欄', '号', '表']);
+        folded.push_str(&out[last..m.start()]);
+        folded.push_str(if keep { m.as_str() } else { &c[1] });
+        last = m.end();
+    }
+    folded.push_str(&out[last..]);
+    let out = folded;
     out.replace('剥', "剝")
         // 常用漢字表（2010）の字形: e-Gov は JIS X 0213:2004 の字（塡・頰・𠮟…）で持つ
         .replace('填', "塡")
