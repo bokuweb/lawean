@@ -9,6 +9,7 @@
 //! 突き合わせは本則と原始附則（`snapshot_main`: 条・項ごとの本文）。目次・別表はまだ比べない。
 //! e-Gov の直前の版と直後の版で比べる部分が変わっていない単位は `match_trivial`（一致しても当てたことの確かめにならない）。
 //! 違いがこの単位の触らない条にだけあり、そこが e-Gov の版で変わっているものは `mismatch_other`（同じ版に入った別の改正の分）。
+//! 段階施行（附則で文ごとに施行日が違う）の単位は、候補の版ごとにその版に近づく文だけを当て、一致すれば `match_staged`。
 //!
 //! 同じ単位を identity patch（`ident::bind` → Lean の `Ident.applyUnit` の写しの `ident::apply_unit`）でも当て、
 //! 本則の描画が e-Gov の版と一致するかを `ident` の列に出す（証明した意味論が実データで文書への適用と揃うか）
@@ -221,6 +222,7 @@ impl Outcome {
         match self.result.as_str() {
             "match" => (0, 0),
             "match_trivial" => (1, 0),
+            "match_staged" => (1, 0),
             "mismatch_other" => (2, self.diff),
             "mismatch" => (3, self.diff),
             "unsupported" => (4, 0),
@@ -286,6 +288,92 @@ fn first_difference(got: &Snapshot, want: &Snapshot) -> String {
         }
     }
     String::new()
+}
+
+/// 違いの大きさ: （違う条・項の数, 違う条・項の本文の前後の一致の長さの和の符号を返したもの）
+fn distance(got: &Snapshot, want: &Snapshot) -> (usize, i64) {
+    let keys: std::collections::BTreeSet<&String> = got.keys().chain(want.keys()).collect();
+    let (mut n, mut close) = (0usize, 0i64);
+    for k in keys {
+        let (g, w) = (got.get(k), want.get(k));
+        if g == w {
+            continue;
+        }
+        let (g, w) = (
+            g.cloned().unwrap_or_default(),
+            w.cloned().unwrap_or_default(),
+        );
+        for i in 0..g.len().max(w.len()) {
+            let (a, b) = (g.get(i).map(|x| &x.1), w.get(i).map(|x| &x.1));
+            if a == b {
+                continue;
+            }
+            n += 1;
+            if let (Some(a), Some(b)) = (a, b) {
+                let (ac, bc): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+                let pre = ac.iter().zip(&bc).take_while(|(x, y)| x == y).count();
+                let suf = ac
+                    .iter()
+                    .rev()
+                    .zip(bc.iter().rev())
+                    .take_while(|(x, y)| x == y)
+                    .count();
+                close += (pre + suf).min(ac.len().min(bc.len())) as i64;
+            }
+        }
+    }
+    (n, -close)
+}
+
+/// 段階施行: 文を順に試し、その版に近づく文だけを当てる。最後に一致すれば、当てた文の添字
+fn stage_match(
+    before: &lawean_source::LegalDocument,
+    expected: &lawean_source::LegalDocument,
+    ins: &[&lawean_amend::Instruction],
+    prev: &str,
+    after: &str,
+) -> Option<Vec<usize>> {
+    if raw_snapshot(before).is_empty() || raw_snapshot(expected).is_empty() {
+        return None;
+    }
+    let exp = snapshot(expected);
+    let mut cur = before.clone();
+    let mut d = distance(&snapshot(&cur), &exp);
+    if d.0 == 0 {
+        return None;
+    }
+    let mut used = Vec::new();
+    for (j, one) in ins.iter().enumerate() {
+        let unit = lawean_amend::AmendUnit {
+            article_of_amending_law: String::new(),
+            target_title: String::new(),
+            instructions: vec![(*one).clone()],
+        };
+        let Ok(Ok(next)) =
+            std::panic::catch_unwind(|| lawean_amend::apply_unit(&cur, &unit, "staged"))
+        else {
+            continue;
+        };
+        let nd = distance(&snapshot(&next), &exp);
+        if nd < d {
+            cur = next;
+            d = nd;
+            used.push(j);
+        }
+    }
+    if std::env::var("BENCH_DEBUG").is_ok() {
+        eprintln!(
+            "  staged {prev} > {after}: used {}, left {} {}",
+            used.len(),
+            d.0,
+            if d.0 > 0 {
+                first_difference(&snapshot(&cur), &exp)
+            } else {
+                String::new()
+            }
+        );
+    }
+    (d.0 == 0 && !used.is_empty()).then_some(used)
 }
 
 fn try_pair(
@@ -459,6 +547,15 @@ fn run(mut args: Vec<String>) {
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
         };
+        // 版を読み込んだもの（docs）は、同じページの中だけ持つ（大きい法令の版で溢れないように）
+        #[allow(clippy::type_complexity)]
+        let mut results: Vec<(
+            usize,
+            usize,
+            lawean_amend::AmendUnit,
+            Outcome,
+            Vec<(String, String)>,
+        )> = Vec::new();
         for (bi, ui, _, u) in units_of(&text) {
             let Some((status, cands)) = want.get(&(page.to_string(), bi, ui)) else {
                 continue;
@@ -494,7 +591,6 @@ fn run(mut args: Vec<String>) {
                     }
                 }
             }
-            // 版を読み込んだものは、同じページの中だけ持つ（大きい法令の版で溢れないように）
             let o = best.unwrap_or(Outcome {
                 result: if status == "ok" {
                     "skip:no_xml".into()
@@ -507,6 +603,67 @@ fn run(mut args: Vec<String>) {
                 after: String::new(),
                 ident: String::new(),
             });
+            results.push((bi, ui, u, o, cands.clone()));
+        }
+        // 段階施行（附則で文ごとに施行日が違う）: 同じ法律を改める単位の文をまとめ、改正法の版ごとに
+        // その版に近づく文だけを当てる。一致した版で使った文は確かめられた。文が全部確かめられた単位は match_staged
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (k, r) in results.iter().enumerate() {
+            if !r.3.result.starts_with("match") && !r.3.result.starts_with("skip") {
+                groups.entry(r.2.target_title.clone()).or_default().push(k);
+            }
+        }
+        for (_, ks) in groups {
+            let pool: Vec<(usize, usize)> = ks
+                .iter()
+                .flat_map(|&k| (0..results[k].2.instructions.len()).map(move |i| (k, i)))
+                .collect();
+            if pool.len() < 2 {
+                continue;
+            }
+            let mut verified: std::collections::BTreeSet<(usize, usize)> = Default::default();
+            let mut stages: BTreeMap<usize, (String, String)> = BTreeMap::new();
+            for (prev, after) in results[ks[0]].4.clone() {
+                let mut load = |id: &str| {
+                    docs.entry(id.to_string())
+                        .or_insert_with(|| load_rev(egov, id).map(std::rc::Rc::new))
+                        .clone()
+                };
+                let (Some(before), Some(expected)) = (load(&prev), load(&after)) else {
+                    continue;
+                };
+                let todo: Vec<(usize, usize)> = pool
+                    .iter()
+                    .copied()
+                    .filter(|x| !verified.contains(x))
+                    .collect();
+                let ins: Vec<&lawean_amend::Instruction> = todo
+                    .iter()
+                    .map(|&(k, i)| &results[k].2.instructions[i])
+                    .collect();
+                if let Some(used) = stage_match(&before, &expected, &ins, &prev, &after) {
+                    for j in used {
+                        verified.insert(todo[j]);
+                        stages.insert(todo[j].0, (prev.clone(), after.clone()));
+                    }
+                }
+            }
+            for &k in &ks {
+                let n = results[k].2.instructions.len();
+                if (0..n).all(|i| verified.contains(&(k, i))) {
+                    let (prev, after) = stages.get(&k).cloned().unwrap_or_default();
+                    results[k].3 = Outcome {
+                        result: "match_staged".into(),
+                        detail: format!("{n} 文"),
+                        diff: 0,
+                        prev,
+                        after,
+                        ident: String::new(),
+                    };
+                }
+            }
+        }
+        for (bi, ui, u, o, _) in results {
             if o.result == "unsupported" || o.result == "apply_error" {
                 *unsupported
                     .entry(format!("{} {}", o.result, coarse(&o.detail)))

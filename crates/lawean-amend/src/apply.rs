@@ -2200,6 +2200,9 @@ pub(crate) fn strip_marks_doc(doc: &mut LegalDocument) {
         }
     }
     provisions(&mut doc.main_provision);
+    if let Some(t) = doc.toc.as_mut() {
+        element(t);
+    }
     for sp in &mut doc.suppl_provisions {
         for c in &mut sp.children {
             match c {
@@ -2366,13 +2369,15 @@ fn replace_in_sentence(s: &mut Sentence, from: &str, to: &str, protect: &[String
     n
 }
 
+/// 目次の字句を改める。加えた字句には印を付ける（同じ文の「「第五章…」を「第五章…第六章…」に、「第六章」を「第七章」に」の
+/// 後の置換は、先に加えた「第六章」を指さない。印は文の終わりに外す）
 pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
     fn go(e: &mut Element, from: &str, to: &str) -> usize {
         let mut n = 0;
         for c in &mut e.children {
             match c {
                 Node::Text(t) => {
-                    let (nt, c) = replace_protected(t, from, to, &[]);
+                    let (nt, c) = replace_protected(t, from, &mark(to), &[]);
                     n += c;
                     *t = nt;
                 }
@@ -2394,7 +2399,7 @@ pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Resu
             if f.is_empty() || !flat.contains(&f) {
                 return Err(ApplyError::TocPhraseNotFound(from.into()));
             }
-            let (new, _) = replace_protected(&flat, &f, &t, &[]);
+            let (new, _) = replace_protected(&flat, &f, &mark(&t), &[]);
             doc.toc = Some(Element {
                 name: "TOC".into(),
                 attrs: vec![],
