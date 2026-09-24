@@ -224,6 +224,7 @@ impl Outcome {
             "mismatch_other" => (2, self.diff),
             "mismatch" => (3, self.diff),
             "unsupported" => (4, 0),
+            "skip:empty_rev" => (6, 0),
             _ => (5, 0),
         }
     }
@@ -302,6 +303,10 @@ fn try_pair(
         after: after.into(),
         ident: String::new(),
     };
+    // e-Gov の古い版には本文の無いもの（MainProvision が空）がある
+    if raw_snapshot(before).is_empty() || raw_snapshot(expected).is_empty() {
+        return mk("skip:empty_rev", String::new(), 0);
+    }
     match std::panic::catch_unwind(|| lawean_amend::apply_unit(before, u, "applied")) {
         Ok(Ok(applied)) => {
             let exp = snapshot(expected);

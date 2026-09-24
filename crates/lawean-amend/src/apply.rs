@@ -116,6 +116,95 @@ fn insert_structure_before(
     Ok(())
 }
 
+/// 範囲の削除の条（「第五百十七条から第五百二十条まで　削除」）から条 `num` を分ける: 前の残り・その条・後ろの残り
+fn split_range_article(ps: &mut Vec<Provision>, num: &ArticleNum) -> bool {
+    let ArticleNum::Single { base, branch } = num else {
+        return false;
+    };
+    if !branch.is_empty() {
+        return false;
+    }
+    let single = |n: u32| ArticleNum::Single {
+        base: n,
+        branch: vec![],
+    };
+    let deleted = |from: u32, to: u32| {
+        let kanji = |n: u32| lawean_resolve::numeral::to_kanji(n);
+        let (num, title) = if from == to {
+            (single(from), format!("第{}条", kanji(from)))
+        } else if to == from + 1 {
+            (
+                ArticleNum::Range {
+                    from: Box::new(single(from)),
+                    to: Box::new(single(to)),
+                },
+                format!("第{}条及び第{}条", kanji(from), kanji(to)),
+            )
+        } else {
+            (
+                ArticleNum::Range {
+                    from: Box::new(single(from)),
+                    to: Box::new(single(to)),
+                },
+                format!("第{}条から第{}条まで", kanji(from), kanji(to)),
+            )
+        };
+        let mut p = parse_paragraph(&["削除".to_string()]).expect("削除");
+        set_label(&mut p, 1);
+        Provision::Article(Article {
+            stable_id: StableId(String::new()),
+            num,
+            caption: None,
+            title: Some(vec![Inline::Text(title)]),
+            children: vec![ArticleChild::Paragraph(p)],
+            attrs: Vec::new(),
+        })
+    };
+    for i in 0..ps.len() {
+        match &mut ps[i] {
+            Provision::Article(a) => {
+                let ArticleNum::Range { from, to } = &a.num else {
+                    continue;
+                };
+                let (
+                    ArticleNum::Single {
+                        base: f,
+                        branch: fb,
+                    },
+                    ArticleNum::Single {
+                        base: t,
+                        branch: tb,
+                    },
+                ) = (from.as_ref(), to.as_ref())
+                else {
+                    continue;
+                };
+                if !fb.is_empty() || !tb.is_empty() || !(*f <= *base && *base <= *t) {
+                    continue;
+                }
+                let (f, t, n) = (*f, *t, *base);
+                let mut parts = Vec::new();
+                if f < n {
+                    parts.push(deleted(f, n - 1));
+                }
+                parts.push(deleted(n, n));
+                if n < t {
+                    parts.push(deleted(n + 1, t));
+                }
+                ps.splice(i..=i, parts);
+                return true;
+            }
+            Provision::Container(c) => {
+                if split_range_article(&mut c.children, num) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// 題名の行（「第一節　…」）と、それ以外（加える条の行）に分ける
 pub(crate) fn split_structure_lines(lines: &[String]) -> (Vec<String>, Vec<String>) {
     static HEAD: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
@@ -1281,6 +1370,10 @@ pub(crate) fn article_mut<'a>(
                 attrs: Vec::new(),
             }),
         );
+    }
+    // 「第百五十条及び第百五十一条　削除」（e-Gov の Num「150:151」）の中の条: その条を分けて取り出す
+    if find_article(&mut doc.main_provision, num).is_none() {
+        split_range_article(&mut doc.main_provision, num);
     }
     // 本則から番号の続く附則の条（労働基準法の附則「第百三十八条」）: 改め文は「附則」を冠さずに言う。
     // 本則の最後の条より後の番号で、本則に無ければ原始附則の中を探す
@@ -3111,6 +3204,12 @@ pub(crate) fn replace_articles(
     let first = articles
         .first()
         .ok_or_else(|| ApplyError::BadContent("条が無い".into()))?;
+    // 範囲の削除の条（「第百五十条及び第百五十一条　削除」）の中の条は先に分けておく
+    for n in articles {
+        if find_article(&mut doc.main_provision, n).is_none() {
+            split_range_article(&mut doc.main_provision, n);
+        }
+    }
     // 旧条は先に取り除く（最初の条だけ、その位置に新しい条を置く）
     for n in &articles[1..] {
         remove_article(&mut doc.main_provision, n);

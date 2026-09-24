@@ -108,7 +108,7 @@ pub fn kana_of(n: u32) -> String {
 }
 
 /// 衆議院の制定法律の本文の正規化: ルビ「瑕(か)疵(し)」の半角括弧のふりがなを落とし、
-/// Shift_JIS に無い字の代替（剥→剝）を e-Gov の字に戻す
+/// Shift_JIS に無い字の代替（剥→剝、填→塡…）を e-Gov の字に戻す
 pub fn normalize_source_text(s: &str) -> String {
     static RUBY: OnceLock<Regex> = OnceLock::new();
     let ruby = RUBY.get_or_init(|| Regex::new(r"\([ぁ-ゖ]+\)").unwrap());
@@ -125,6 +125,13 @@ pub fn normalize_source_text(s: &str) -> String {
     }
     out.push_str(&s[last..]);
     out.replace('剥', "剝")
+        // 常用漢字表（2010）の字形: e-Gov は JIS X 0213:2004 の字（塡・頰・𠮟…）で持つ
+        .replace('填', "塡")
+        .replace('頬', "頰")
+        .replace('叱', "𠮟")
+        .replace('呑', "吞")
+        .replace('蝉', "蟬")
+        .replace('繋', "繫")
         // 目次の範囲「（第四条−第二十一条）」: e-Gov は「―」
         .replace('−', "―")
         .replace('｡', "。")
