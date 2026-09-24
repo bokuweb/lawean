@@ -5,6 +5,7 @@ pub mod consistency;
 pub mod enforcement;
 pub mod smt;
 pub mod temporal;
+pub mod transitional;
 pub mod validity;
 
 pub use check::{

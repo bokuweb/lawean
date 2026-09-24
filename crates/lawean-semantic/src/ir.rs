@@ -275,8 +275,18 @@ pub enum TimeCond {
 pub struct RuleTemporal {
     pub effective_from: Option<Event>,
     pub effective_to: Option<Event>,
-    /// 経過措置: この時点より前に生じた事実にも（またはだけ）適用する
-    pub facts_before: Option<Event>,
+    /// 経過措置: 境の日より前に生じた事実への及び方
+    pub facts_before: Option<FactsBefore>,
+}
+
+/// 経過措置で決まる、境の日より前に生じた事実への及び方（docs/10 §3 の 4）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactsBefore {
+    /// 「この法律の施行前に生じた事項にも適用する」（附則第4条）。新法が施行前の事実にも及ぶ（遡及）
+    Also(Event),
+    /// 「施行前に設定された〜に関しては、なお従前の例による」（附則第6条）。
+    /// 旧法が効力を失った後も、境の日より前に生じた事実にだけ及ぶ
+    Only(Event),
 }
 
 // ---------------------------------------------------------------- Definition
