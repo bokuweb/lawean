@@ -139,6 +139,11 @@ pub fn normalize_source_text(s: &str) -> String {
     }
     folded.push_str(&out[last..]);
     let out = folded;
+    // 数の位取り「３７３,０００」: e-Gov は全角の「，」
+    static COMMA: OnceLock<Regex> = OnceLock::new();
+    let comma = COMMA.get_or_init(|| Regex::new(r"([0-9０-９]),([0-9０-９])").unwrap());
+    let out = comma.replace_all(&out, "$1，$2").into_owned();
+    let out = comma.replace_all(&out, "$1，$2").into_owned();
     out.replace('剥', "剝")
         // 常用漢字表（2010）の字形: e-Gov は JIS X 0213:2004 の字（塡・頰・𠮟…）で持つ
         .replace('填', "塡")
