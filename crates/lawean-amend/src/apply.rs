@@ -45,6 +45,21 @@ pub fn apply_unit(
     refresh(&mut doc, new_version_id)
 }
 
+/// `apply_unit` の再パース（stable_id の振り直し）を省いたもの。本文を比べるだけの用途（段階施行の突き合わせで、
+/// 文を一つずつ試す）に。結果を次の改正単位の発射台に使うなら `apply_unit`
+pub fn apply_unit_unrefreshed(
+    doc: &LegalDocument,
+    unit: &AmendUnit,
+) -> Result<LegalDocument, ApplyError> {
+    let mut doc = doc.clone();
+    for ins in &unit.instructions {
+        apply_instruction(&mut doc, ins)?;
+    }
+    collapse_untitled(&mut doc.main_provision);
+    check_numbering(&doc)?;
+    Ok(doc)
+}
+
 /// 「第三条の前に次の節名及び二条を加える」「第十条の次に次のように加える」+ 題名の行・条: 条を `at` の前に入れ、
 /// 題名ごとに、その後ろの最初の新しい条（無ければ `at`）から包む
 fn insert_structure_before(
@@ -1808,8 +1823,83 @@ pub(crate) fn table_edit_in_paragraph(
             }
             Ok(())
         }
+        // 「第四条第一項の表を次のように改める」: 表の全部
+        TableAction::Replace { text } if path.is_empty() => {
+            let at = p
+                .children
+                .iter()
+                .position(|c| matches!(c, ParagraphChild::Raw(e) if e.name == "TableStruct"))
+                .ok_or_else(|| ApplyError::BadContent("項に表が無い".into()))?;
+            p.children[at] = ParagraphChild::Raw(build_table(text));
+            Ok(())
+        }
+        // 「同表Xの項を次のように改める」「Xの項の次に次のように加える」「表に次のように加える」: 行
+        TableAction::Replace { text }
+        | TableAction::InsertAfter { text }
+        | TableAction::InsertBefore { text }
+        | TableAction::Append { text } => {
+            let new_rows = table_rows_of_struct(build_table(text));
+            let rows = paragraph_table_rows(p)
+                .ok_or_else(|| ApplyError::BadContent("項に表が無い".into()))?;
+            if let TableAction::Append { .. } = action {
+                if !path.is_empty() {
+                    return Err(unsupported());
+                }
+                rows.extend(new_rows);
+                return Ok(());
+            }
+            let r = row.ok_or_else(unsupported)?;
+            let key = strip_ws(r);
+            let at = rows
+                .iter()
+                .position(
+                    |c| matches!(c, Node::Element(x) if x.name == "TableRow" && row_key(x) == key),
+                )
+                .ok_or_else(|| ApplyError::BadContent(format!("表に「{r}」の項が無い")))?;
+            match action {
+                TableAction::Replace { .. } => {
+                    rows.splice(at..=at, new_rows);
+                }
+                TableAction::InsertAfter { .. } => {
+                    rows.splice(at + 1..at + 1, new_rows);
+                }
+                _ => {
+                    rows.splice(at..at, new_rows);
+                }
+            }
+            Ok(())
+        }
         _ => Err(unsupported()),
     }
+}
+
+/// `build_table` の表の行
+fn table_rows_of_struct(e: Element) -> Vec<Node> {
+    e.children
+        .into_iter()
+        .filter_map(|c| match c {
+            Node::Element(t) if t.name == "Table" => Some(t.children),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// 項の中の最初の表の行の並び（`Table` の children）
+fn paragraph_table_rows(p: &mut Paragraph) -> Option<&mut Vec<Node>> {
+    fn find(e: &mut Element) -> Option<&mut Vec<Node>> {
+        if e.name == "Table" {
+            return Some(&mut e.children);
+        }
+        e.children.iter_mut().find_map(|c| match c {
+            Node::Element(x) => find(x),
+            _ => None,
+        })
+    }
+    p.children.iter_mut().find_map(|c| match c {
+        ParagraphChild::Raw(e) if e.name == "TableStruct" => find(e),
+        _ => None,
+    })
 }
 
 /// 「題名中「A」を「B」に改める」

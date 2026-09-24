@@ -10,8 +10,8 @@ pub mod parse;
 pub mod scenario;
 
 pub use apply::{
-    apply_unit, article_label, diff_snapshots, para_text, paragraph_mapping, snapshot_main,
-    toc_text, ApplyError,
+    apply_unit, apply_unit_unrefreshed, article_label, diff_snapshots, para_text,
+    paragraph_mapping, snapshot_main, toc_text, ApplyError,
 };
 pub use hane::{article_mapping, hane_candidates, HaneCandidate};
 pub use op::*;
