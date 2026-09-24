@@ -45,10 +45,99 @@ fn elems(e: &Element) -> impl Iterator<Item = &Element> {
 }
 
 fn para(out: &mut Vec<Value>, text: String) {
-    let t = text.trim().to_string();
-    if !t.is_empty() {
-        out.push(json!({"type": "paragraph", "text": t}));
+    para_line(out, Line::text(text));
+}
+
+/// 段落の本文。Ruby は読みと一緒に持つ（「禁錮（こ）」を「禁錮」にする改正は、読みが無いと旧新が同じになる）
+#[derive(Default)]
+struct Line(Vec<Seg>);
+
+enum Seg {
+    Text(String),
+    Ruby(String, String),
+}
+
+impl Line {
+    fn text(t: impl Into<String>) -> Line {
+        Line(vec![Seg::Text(t.into())])
     }
+
+    fn is_empty(&self) -> bool {
+        self.0.iter().all(|s| match s {
+            Seg::Text(t) => t.trim().is_empty(),
+            Seg::Ruby(..) => false,
+        })
+    }
+
+    /// 空でない部分を全角の空白でつなぐ（「第二条」+「　」+ 本文）
+    fn join(parts: Vec<Line>) -> Line {
+        let mut out = Line::default();
+        for p in parts.into_iter().filter(|p| !p.is_empty()) {
+            if !out.0.is_empty() {
+                out.0.push(Seg::Text("\u{3000}".into()));
+            }
+            out.0.extend(p.0);
+        }
+        out
+    }
+}
+
+fn inline_line(inl: &[lawean_source::Inline]) -> Line {
+    let mut line = Line::default();
+    for i in inl {
+        match i {
+            lawean_source::Inline::Text(t) => line.0.push(Seg::Text(t.clone())),
+            lawean_source::Inline::Raw(e) if e.name == "Ruby" => {
+                let reading: String = elems(e).filter(|x| x.name == "Rt").map(el_text).collect();
+                line.0.push(Seg::Ruby(el_text(e), reading));
+            }
+            lawean_source::Inline::Raw(e) => line.0.push(Seg::Text(el_text(e))),
+        }
+    }
+    line
+}
+
+fn para_line(out: &mut Vec<Value>, line: Line) {
+    if line.is_empty() {
+        return;
+    }
+    if !line.0.iter().any(|s| matches!(s, Seg::Ruby(..))) {
+        let t: String = line
+            .0
+            .iter()
+            .map(|s| match s {
+                Seg::Text(t) => t.as_str(),
+                Seg::Ruby(..) => "",
+            })
+            .collect();
+        out.push(json!({"type": "paragraph", "text": t.trim()}));
+        return;
+    }
+    let n = line.0.len();
+    let content: Vec<Value> = line
+        .0
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, s)| match s {
+            Seg::Text(t) => {
+                let t = if i == 0 {
+                    t.trim_start().to_string()
+                } else {
+                    t
+                };
+                let t = if i + 1 == n {
+                    t.trim_end().to_string()
+                } else {
+                    t
+                };
+                (!t.is_empty()).then(|| json!({"type": "text", "text": t}))
+            }
+            Seg::Ruby(base, reading) => {
+                Some(json!({"type": "ruby", "baseText": base, "reading": reading}))
+            }
+        })
+        .collect();
+    out.push(json!({"type": "paragraph", "content": content}));
 }
 
 fn table(e: &Element, out: &mut Vec<Value>) {
@@ -89,37 +178,26 @@ fn raw(e: &Element, out: &mut Vec<Value>) {
     }
 }
 
-fn sentences(ss: &[lawean_source::Sentence]) -> String {
-    ss.iter()
-        .map(|s| lawean_source::inline_text(&s.text))
-        .collect()
+fn sentences(ss: &[lawean_source::Sentence]) -> Line {
+    let mut line = Line::default();
+    for s in ss {
+        line.0.extend(inline_line(&s.text).0);
+    }
+    line
+}
+
+fn opt_line(inl: &Option<Vec<lawean_source::Inline>>) -> Line {
+    inl.as_deref().map(inline_line).unwrap_or_default()
 }
 
 fn item(it: &Item, out: &mut Vec<Value>) {
-    let title = it
-        .title
-        .as_deref()
-        .map(lawean_source::inline_text)
-        .unwrap_or_default();
     let body = match &it.body {
         ItemBody::Sentences(ss) => sentences(ss),
-        ItemBody::Columns(cs) => cs
-            .iter()
-            .map(|c| sentences(&c.sentences))
-            .collect::<Vec<_>>()
-            .join("\u{3000}"),
-        ItemBody::Mixed(e) => el_text(e),
-        ItemBody::None => String::new(),
+        ItemBody::Columns(cs) => Line::join(cs.iter().map(|c| sentences(&c.sentences)).collect()),
+        ItemBody::Mixed(e) => Line::text(el_text(e)),
+        ItemBody::None => Line::default(),
     };
-    para(
-        out,
-        [title, body]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\u{3000}"),
-    );
+    para_line(out, Line::join(vec![opt_line(&it.title), body]));
     for c in &it.children {
         match c {
             ItemChild::Subitem(s) => item(s, out),
@@ -128,26 +206,10 @@ fn item(it: &Item, out: &mut Vec<Value>) {
     }
 }
 
-fn paragraph(p: &Paragraph, head: Option<String>, out: &mut Vec<Value>) {
-    if let Some(c) = &p.caption {
-        para(out, lawean_source::inline_text(c));
-    }
-    let num = head.unwrap_or_else(|| {
-        p.num_text
-            .as_deref()
-            .map(lawean_source::inline_text)
-            .unwrap_or_default()
-    });
-    let body = sentences(&p.sentences);
-    para(
-        out,
-        [num, body]
-            .iter()
-            .filter(|s| !s.is_empty())
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\u{3000}"),
-    );
+fn paragraph(p: &Paragraph, head: Option<Line>, out: &mut Vec<Value>) {
+    para_line(out, opt_line(&p.caption));
+    let num = head.unwrap_or_else(|| opt_line(&p.num_text));
+    para_line(out, Line::join(vec![num, sentences(&p.sentences)]));
     for c in &p.children {
         match c {
             ParagraphChild::Item(it) => item(it, out),
@@ -157,30 +219,120 @@ fn paragraph(p: &Paragraph, head: Option<String>, out: &mut Vec<Value>) {
 }
 
 fn article(a: &Article, out: &mut Vec<Value>) {
-    if let Some(c) = &a.caption {
-        para(out, lawean_source::inline_text(c));
-    }
-    let title = a
-        .title
-        .as_deref()
-        .map(lawean_source::inline_text)
-        .unwrap_or_default();
+    para_line(out, opt_line(&a.caption));
     let mut first = true;
     for c in &a.children {
         match c {
             ArticleChild::Paragraph(p) => {
-                paragraph(p, first.then(|| title.clone()), out);
+                paragraph(p, first.then(|| opt_line(&a.title)), out);
                 first = false;
             }
             ArticleChild::Raw(e) => raw(e, out),
         }
     }
     if first {
-        para(out, title);
+        para_line(out, opt_line(&a.title));
     }
 }
 
-/// 目次: 見出しと条の範囲を 1 行ずつ（「第一章　総則（第一条―第五条）」）
+/// 読み（Ruby）を「本体《読み》」で含めた本文（見出しの読みだけの改正も比べる）
+fn with_reading(inl: &[lawean_source::Inline]) -> String {
+    inline_line(inl)
+        .0
+        .into_iter()
+        .map(|s| match s {
+            Seg::Text(t) => t,
+            Seg::Ruby(base, reading) => format!("{base}《{reading}》"),
+        })
+        .collect()
+}
+
+/// 条の見出しと、その条から始まる編・章・節の題名（`snapshot` は本文だけを比べるので、見出しの改正は別に見る）
+fn headings(doc: &LegalDocument) -> BTreeMap<String, String> {
+    fn go(
+        ps: &[Provision],
+        prefix: &str,
+        pending: &mut String,
+        out: &mut BTreeMap<String, String>,
+    ) {
+        for p in ps {
+            match p {
+                Provision::Container(c) => {
+                    pending.push_str(&c.title.as_deref().map(with_reading).unwrap_or_default());
+                    pending.push('\n');
+                    go(&c.children, prefix, pending, out);
+                }
+                Provision::Article(a) => {
+                    let mut h = std::mem::take(pending);
+                    h.push_str(&a.caption.as_deref().map(with_reading).unwrap_or_default());
+                    out.insert(format!("{prefix}{}", a.num.to_num_string()), h);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    go(&doc.main_provision, "", &mut String::new(), &mut out);
+    if let Some(sp) = doc
+        .suppl_provisions
+        .iter()
+        .find(|s| s.amend_law_num.is_none())
+    {
+        let ps: Vec<Provision> = sp
+            .children
+            .iter()
+            .filter_map(|c| match c {
+                SupplChild::Provision(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect();
+        go(&ps, "附則", &mut String::new(), &mut out);
+    }
+    out
+}
+
+/// 本文の Ruby（読み）: `snapshot` は読みを落とすので、読みだけの改正（「禁錮（こ）」→「禁錮」）は別に見る
+fn rubies(doc: &LegalDocument) -> BTreeMap<String, Vec<String>> {
+    fn collect(e: &Element, out: &mut Vec<String>) {
+        if e.name == "Ruby" {
+            out.push(e.text());
+        }
+        for c in elems(e) {
+            collect(c, out);
+        }
+    }
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let emitted = lawean_source::emit_law(doc);
+    fn walk(e: &Element, out: &mut BTreeMap<String, Vec<String>>, in_suppl: bool, original: bool) {
+        for c in elems(e) {
+            match c.name.as_str() {
+                "SupplProvision" => {
+                    let orig = !c.attrs.iter().any(|(k, _)| k == "AmendLawNum");
+                    walk(c, out, true, orig);
+                }
+                "Article" if !in_suppl || original => {
+                    let num = c
+                        .attrs
+                        .iter()
+                        .find(|(k, _)| k == "Num")
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_default();
+                    let k = format!("{}{}", if in_suppl { "附則" } else { "" }, num);
+                    let mut v = Vec::new();
+                    collect(c, &mut v);
+                    if !v.is_empty() {
+                        out.insert(k, v);
+                    }
+                }
+                "Article" => {}
+                _ => walk(c, out, in_suppl, original),
+            }
+        }
+    }
+    walk(&emitted, &mut out, false, false);
+    out
+}
+
 fn toc(e: &Element, out: &mut Vec<Value>) {
     for c in elems(e).filter(|c| c.name.starts_with("TOC")) {
         let line: String = c
@@ -215,13 +367,7 @@ fn provisions(ps: &[Provision], want: &BTreeSet<String>, main_key: &str, out: &m
         }
         match p {
             Provision::Container(c) => {
-                para(
-                    out,
-                    c.title
-                        .as_deref()
-                        .map(lawean_source::inline_text)
-                        .unwrap_or_default(),
-                );
+                para_line(out, opt_line(&c.title));
                 provisions(&c.children, want, main_key, out);
             }
             Provision::Article(a) => article(a, out),
@@ -250,11 +396,11 @@ fn appendix_key(e: &Element) -> String {
 /// 先頭は法令の題名（totoro の plain text 入力と同じ）
 fn render(doc: &LegalDocument, keys: &BTreeSet<String>) -> Vec<Value> {
     let mut out = Vec::new();
-    para(
+    para_line(
         &mut out,
         doc.title
             .as_ref()
-            .map(|t| lawean_source::inline_text(&t.text))
+            .map(|t| inline_line(&t.text))
             .unwrap_or_default(),
     );
     if keys.contains("TOC") {
@@ -392,6 +538,14 @@ fn changed_keys(a: &Snapshot, b: &Snapshot) -> BTreeSet<String> {
         .collect()
 }
 
+fn changed_in<V: PartialEq>(a: &BTreeMap<String, V>, b: &BTreeMap<String, V>) -> BTreeSet<String> {
+    a.keys()
+        .chain(b.keys())
+        .filter(|k| a.get(*k) != b.get(*k))
+        .cloned()
+        .collect()
+}
+
 /// 文書の順（目次、本則の条、附則の条、別表）に並べるための鍵
 fn doc_order(k: &str) -> (u8, Vec<u32>, String) {
     let nums = |s: &str| -> Vec<u32> {
@@ -475,12 +629,34 @@ pub fn export(mut args: Vec<String>) {
                 continue;
             };
             let (sb, sa, se) = (snapshot(&before), snapshot(&applied), snapshot(&expected));
-            // この単位が変えた所。どれも e-Gov の改正後の版と一致していなければ出さない
-            let keys = changed_keys(&sb, &sa);
+            let (hb, ha, he) = (headings(&before), headings(&applied), headings(&expected));
+            let (rb, re) = (rubies(&before), rubies(&expected));
+            // この単位が変えた所（本文、見出し、読み）。どれも e-Gov の改正後の版と一致していなければ出さない
+            let mut keys = changed_keys(&sb, &sa);
+            keys.extend(changed_in(&hb, &ha));
+            let heading_ok = changed_in(&hb, &ha).iter().all(|k| ha.get(k) == he.get(k));
+            // 読みは lawean が当てない（読みを落として比べる）ので、e-Gov の版で読みが変わった条を足す
+            keys.extend(
+                changed_in(&rb, &re)
+                    .into_iter()
+                    .filter(|k| sa.contains_key(k) || se.contains_key(k)),
+            );
             let ok = !keys.is_empty()
                 && keys.iter().all(|k| sa.get(k) == se.get(k))
-                && (status != "match" || sa == se);
+                && heading_ok
+                && (status != "match" || (sa == se && ha == he));
             if !ok {
+                if std::env::var_os("BENCH_DEBUG").is_some() {
+                    for k in changed_in(&ha, &he) {
+                        // 見出し: 直前の版, 当てた結果, 直後の版
+                        eprintln!(
+                            "{page}_{bi}_{ui}\t{k}\t{:?}\t{:?}\t{:?}",
+                            hb.get(&k),
+                            ha.get(&k),
+                            he.get(&k)
+                        );
+                    }
+                }
                 *counts.entry(format!("skip:reverify_{status}")).or_default() += 1;
                 continue;
             }
