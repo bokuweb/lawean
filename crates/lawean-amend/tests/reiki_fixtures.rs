@@ -85,10 +85,37 @@ fn reiki_fixtures_hold_aratamebun_and_sources_only() {
     );
 }
 
-/// `materialize.py` で組み立てた改正前・改正後の条文がそろっている。組み立てていなければ飛ばす。
-/// lawean の読み（`parse_units`）がどれだけ例規の改め文を読めるかも出す（算用数字の横書きは法律の書式と違う。いまは測るだけ）
+fn blocks(v: &Value) -> Vec<lawean_amend::reiki::Block> {
+    use lawean_amend::reiki::Block;
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|b| match b["type"].as_str() {
+            Some("table") => Block::Table(
+                b["rows"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| {
+                        r.as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|c| c.as_str().unwrap_or_default().to_string())
+                            .collect()
+                    })
+                    .collect(),
+            ),
+            _ => Block::Paragraph(b["text"].as_str().unwrap_or_default().to_string()),
+        })
+        .collect()
+}
+
+/// `materialize.py` で組み立てた改正前・改正後の条文で、改め文を当てて確かめる。組み立てていなければ飛ばす。
+///
+/// **回帰の gate**: `fixtures/reiki/apply_baseline.txt` の case（いま当てて改正後と一致するもの）が 1 件でも一致しなくなったら失敗する。
+/// 新しく一致した case は表示する（`LAWEAN_REIKI_UPDATE_BASELINE=1` で書き換える）
 #[test]
-fn materialized_reiki_cases_have_old_and_new() {
+fn materialized_reiki_cases_keep_applying_to_the_amended_text() {
     let full = root().join("full");
     let all = cases(&full);
     if all.is_empty() {
@@ -104,27 +131,77 @@ fn materialized_reiki_cases_have_old_and_new() {
         committed,
         "materialize again: fixtures/reiki/full is out of date"
     );
-    let mut parsed = 0;
+    let mut matched = BTreeSet::new();
+    let mut failures = std::collections::BTreeMap::new();
     for (at, c) in &all {
         let (old, new) = (&c["old"], &c["new"]);
-        assert!(
-            old.as_array().is_some_and(|a| !a.is_empty()),
-            "{at}: no old"
-        );
-        assert!(
-            new.as_array().is_some_and(|a| !a.is_empty()),
-            "{at}: no new"
-        );
         assert_ne!(old, new, "{at}: old and new are identical");
-        let text: Vec<&str> = c["aratamebun"]
+        let lines: Vec<&str> = c["aratamebun"]
             .as_array()
             .unwrap()
             .iter()
             .filter_map(Value::as_str)
             .collect();
-        if lawean_amend::parse_units(&text.join("\n")).is_ok_and(|u| !u.is_empty()) {
-            parsed += 1;
+        let id = c["case_id"].as_str().unwrap().to_string();
+        match std::panic::catch_unwind(|| {
+            lawean_amend::reiki::check(&blocks(old), &blocks(new), &lines)
+        }) {
+            Ok(Ok(())) => {
+                matched.insert(id);
+            }
+            Ok(Err(e)) => {
+                failures.insert(id, format!("{}: {}", e.kind(), e.detail()));
+            }
+            Err(_) => {
+                failures.insert(id, "panic".into());
+            }
         }
     }
-    eprintln!("reiki: {} cases, parse_units read {parsed}", all.len());
+    let path = root().join("apply_baseline.txt");
+    if std::env::var_os("LAWEAN_REIKI_UPDATE_BASELINE").is_some() {
+        let header: String = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .lines()
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let body: String = matched.iter().map(|id| format!("{id}\n")).collect();
+        std::fs::write(&path, header + &body).unwrap();
+        eprintln!("apply baseline updated: {} cases", matched.len());
+        return;
+    }
+    let text = std::fs::read_to_string(&path).unwrap();
+    let baseline: BTreeSet<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    let regressions: Vec<String> = baseline
+        .iter()
+        .filter(|id| !matched.contains(**id))
+        .map(|id| {
+            format!(
+                "{id}: {}",
+                failures.get(*id).map_or("missing", String::as_str)
+            )
+        })
+        .collect();
+    let newly: Vec<&String> = matched
+        .iter()
+        .filter(|id| !baseline.contains(id.as_str()))
+        .collect();
+    eprintln!(
+        "reiki apply: matched {} / {}, baseline {}, regressions {}, newly matched {}",
+        matched.len(),
+        all.len(),
+        baseline.len(),
+        regressions.len(),
+        newly.len()
+    );
+    assert!(
+        regressions.is_empty(),
+        "{} baseline cases no longer apply to the amended text:\n{}",
+        regressions.len(),
+        regressions.join("\n")
+    );
 }

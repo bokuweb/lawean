@@ -7,6 +7,7 @@ pub mod ident;
 pub mod numbering;
 pub mod op;
 pub mod parse;
+pub mod reiki;
 pub mod scenario;
 
 pub use apply::{
