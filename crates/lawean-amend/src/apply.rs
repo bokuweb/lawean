@@ -1183,7 +1183,8 @@ pub(crate) fn apply_instruction(
                 art.children = a.children;
             }
             Op::Delete { at } if at.item.is_some() => {
-                let art = article_mut(doc, &at.article)?;
+                // 附則の項の号（「附則第三項第二号を削る」）は原始附則の中
+                let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                 delete_item(paragraph_mut(art, idx), at.item.as_deref().unwrap_or(""))?;
             }
@@ -1194,7 +1195,8 @@ pub(crate) fn apply_instruction(
                 }
             }
             Op::Delete { at } => {
-                let art = article_mut(doc, &at.article)?;
+                // 「附則第三項の前の見出し並びに同項及び第四項を削る」: 附則の項は原始附則の中
+                let art = loc_article_mut(doc, at)?;
                 match para_index(art, &at.paragraph, &mut snapshots)? {
                     Some(idx) => {
                         let pos = nth_paragraph_child(art, idx);
@@ -3640,7 +3642,12 @@ fn row_group(body: &[Node], key: &str) -> Option<(usize, usize)> {
     let hit = rows
         .iter()
         .position(|(_, r)| row_key(r) == key)
-        .or_else(|| rows.iter().position(|(_, r)| row_key(r).starts_with(&key)))?;
+        .or_else(|| rows.iter().position(|(_, r)| row_key(r).starts_with(&key)));
+    let hit = match hit {
+        Some(h) => h,
+        // 「伊勢崎市赤堀せせらぎ公園の部研修棟の項」: 区分（上欄）の中の行
+        None => return row_in_part(&rows, &key),
+    };
     // 最初の欄の rowspan がこの行の数
     let span = rows[hit]
         .1
@@ -3670,6 +3677,43 @@ fn row_group(body: &[Node], key: &str) -> Option<(usize, usize)> {
         .map(|(i, _)| *i)
         .unwrap_or(rows[rows.len() - 1].0);
     Some((start, end - start + 1))
+}
+
+/// 「Xの部Yの項」: 上欄が X の区分の中で、欄のどれかが Y の行。区分の続きの行は上欄を省く（欄が少ない）ので、
+/// 欄のそろった次の行までを区分とする
+fn row_in_part(rows: &[(usize, &Element)], key: &str) -> Option<(usize, usize)> {
+    let (part, rest) = key.rsplit_once("の部")?;
+    let cols = |r: &Element| {
+        r.children
+            .iter()
+            .filter(|c| matches!(c, Node::Element(x) if x.name == "TableColumn"))
+            .count()
+    };
+    let cells = |r: &Element| -> Vec<String> {
+        r.children
+            .iter()
+            .filter_map(|c| match c {
+                Node::Element(x) if x.name == "TableColumn" => Some(strip_ws(&x.text())),
+                _ => None,
+            })
+            .collect()
+    };
+    let start = rows
+        .iter()
+        .position(|(_, r)| row_key(r) == part || row_key(r).starts_with(part))?;
+    let full = cols(rows[start].1);
+    let end = rows[start + 1..]
+        .iter()
+        .position(|(_, r)| cols(r) >= full)
+        .map_or(rows.len(), |p| start + 1 + p);
+    if rest.is_empty() {
+        let (a, b) = (rows[start].0, rows[end - 1].0);
+        return Some((a, b - a + 1));
+    }
+    rows[start..end]
+        .iter()
+        .find(|(_, r)| cells(r).iter().any(|c| c == rest))
+        .map(|(i, _)| (*i, 1))
 }
 
 /// 行の内容（「八」「再審の訴えの提起」「四千円」…）から `TableRow` を組む。`cols` 欄ずつ 1 行に
