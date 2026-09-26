@@ -8,3 +8,4 @@ fixtures/revisions/322AC0000000067_*.xml
 # 例規の改正前・改正後の条文は条例Webアーカイブの版から手元で組み立てる（tools/reiki/materialize.py）。規約により公開しない
 fixtures/reiki/full/
 __pycache__/
+/target-*

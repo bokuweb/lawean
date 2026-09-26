@@ -23,12 +23,35 @@ python3 tools/reiki/materialize.py        # fixtures/reiki/cases → fixtures/re
 cargo test -p lawean-amend --test reiki_fixtures -- --nocapture
 ```
 
-`crates/lawean-amend/tests/reiki_fixtures.rs` は、置いたデータに条文が紛れ込んでいないことを見る。`full/` があれば、
-旧・新がそろっていることと、`parse_units` で読める改め文の数（いまは 918 件中 61 件。算用数字の横書きは法律の書式と違う）を出す。
+## 当てて確かめる
+
+`crates/lawean-amend/src/reiki.rs`:
+- `to_law_style`: 例規の改め文を法律の書き方に写して `parse_units` で読む（「」の外の数字を漢数字に、号「(1)」「⑴」を「一」に。
+  「」の中の字句と加える条文の本文はそのまま）
+- `document`: 例規の条文（構造付き plain text）を e-Gov の形に起こす（条・項・号・細目、ただし書、附則、目次、別表）
+- `canonical`: 数字・括弧・位取りの幅を揃える（公布された改め文は全角、例規集は 2 桁以上を半角）
+- `check`: 改め文を改正前に当て、改正後と突き合わせる
+
+```sh
+cargo run --release -p lawean-amend --example reiki_apply -- --out result.tsv
+```
+
+| 結果 | 件数 |
+|---|---|
+| **当てて改正後と一致** | **415（45.2%）** → `apply_baseline.txt` |
+| 当てたが改正後と違う | 146 |
+| 読めない（様式の改正、PDF の切り出しの崩れ など） | 171 |
+| 当てられない（字句・位置・表の行が見つからない） | 123 |
+| 未対応の操作 | 63 |
+
+`crates/lawean-amend/tests/reiki_fixtures.rs`:
+- 置いたデータに条文（`old` / `new`）が紛れ込んでいないこと（いつも）
+- `full/` があれば、全件を当てて、`apply_baseline.txt` の case が 1 件でも一致しなくなったら失敗する（回帰の gate）。
+  新しく一致した case は `LAWEAN_REIKI_UPDATE_BASELINE=1` で baseline に足す
 
 ## 整合
 
-改め文の字句の組（「A」を「B」に、「A」を削る、「A」の次に「B」を加える）が、どれも改正前・改正後の変わった所に現れる組だけ。
-lawean で改め文を当てて確かめてはいない（例規の書式を読めるようにしたら、法律の `bench_apply` と同じく当てて確かめたい）。
+改め文の字句の組（「A」を「B」に、「A」を削る、「A」の次に「B」を加える）が、どれも改正前・改正後の変わった所に現れる組だけを入れている。
+そのうち 415 件は、上のとおり lawean で当てて確かめた。
 
 改め文（条例・規則の本文）は著作権法第 13 条により権利の目的とならない。

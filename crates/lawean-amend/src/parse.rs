@@ -2440,13 +2440,19 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
             if matches!(tail, "に" | "に改め" | "に改める") {
                 let mut v: Vec<Op> = Vec::new();
                 if with_caption {
+                    // 項があれば項の見出し（「附則第六項（見出しを含む。）中」は附則の項の見出し）。附則なら附則に向ける
                     for at in &ats {
                         for from in &phrases {
-                            v.push(Op::ReplaceCaption {
-                                article: at.article.clone(),
-                                from: from.clone(),
-                                to: b.clone(),
-                            });
+                            v.push(
+                                caption_op(
+                                    at.clone(),
+                                    CaptionEdit::Replace {
+                                        from: from.clone(),
+                                        to: b.clone(),
+                                    },
+                                )
+                                .in_suppl(at.suppl),
+                            );
                         }
                     }
                 }
