@@ -505,7 +505,25 @@ fn try_pair(
             }
         }
         Ok(Err(lawean_amend::ApplyError::Unsupported(what))) => mk("unsupported", what, 0),
-        Ok(Err(e)) => mk("apply_error", e.to_string(), 0),
+        Ok(Err(e)) => {
+            if std::env::var("BENCH_DEBUG").is_ok() {
+                // 当てられない最初の改め文
+                let bad = (1..=u.instructions.len()).find(|&k| {
+                    let mut v = u.clone();
+                    v.instructions.truncate(k);
+                    !matches!(
+                        std::panic::catch_unwind(|| lawean_amend::apply_unit(
+                            before, &v, "applied"
+                        )),
+                        Ok(Ok(_))
+                    )
+                });
+                if let Some(k) = bad {
+                    eprintln!("  failing: {}", u.instructions[k - 1].text);
+                }
+            }
+            mk("apply_error", e.to_string(), 0)
+        }
         Err(_) => mk("panic", String::new(), 0),
     }
 }
