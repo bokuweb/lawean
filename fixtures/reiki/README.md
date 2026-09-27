@@ -38,10 +38,10 @@ cargo run --release -p lawean-amend --example reiki_apply -- --out result.tsv
 
 | 結果 | 件数 |
 |---|---|
-| **当てて改正後と一致** | **415（45.2%）** → `apply_baseline.txt` |
-| 当てたが改正後と違う | 146 |
+| **当てて改正後と一致** | **428（46.6%）** → `apply_baseline.txt` |
+| 当てたが改正後と違う | 136 |
 | 読めない（様式の改正、PDF の切り出しの崩れ など） | 171 |
-| 当てられない（字句・位置・表の行が見つからない） | 123 |
+| 当てられない（字句・位置・表の行が見つからない） | 120 |
 | 未対応の操作 | 63 |
 
 `crates/lawean-amend/tests/reiki_fixtures.rs`:
@@ -52,6 +52,6 @@ cargo run --release -p lawean-amend --example reiki_apply -- --out result.tsv
 ## 整合
 
 改め文の字句の組（「A」を「B」に、「A」を削る、「A」の次に「B」を加える）が、どれも改正前・改正後の変わった所に現れる組だけを入れている。
-そのうち 415 件は、上のとおり lawean で当てて確かめた。
+そのうち 428 件は、上のとおり lawean で当てて確かめた。
 
 改め文（条例・規則の本文）は著作権法第 13 条により権利の目的とならない。

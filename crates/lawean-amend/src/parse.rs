@@ -353,18 +353,58 @@ pub fn parse_units(text: &str) -> Result<Vec<AmendUnit>, ParseError> {
         {
             continue;
         }
+        // 直前の改め文が中身を取る（「本則に次の二章を加える。」「第八章を次のように改める。」）。単位の見出しの字下げは問わない
+        let takes_content = raw_indent >= 1
+            && units
+                .last()
+                .and_then(|u| u.instructions.last())
+                .and_then(|i| i.ops.last())
+                .is_some_and(Op::takes_content);
         if amending_chapter.is_match(line) {
             // 「第三章　内閣府関係」「第一節　本府関係」と続く見出しは読み飛ばして、その次の行で決める
             let next = lines[li + 1..].iter().enumerate().find(|(_, l)| {
                 let t = l.trim_start_matches(['\u{3000}', ' ']).trim_end();
                 !t.is_empty() && !amending_chapter.is_match(t)
             });
+            // 中身を待っている改め文（「本則に次の二章を加える。」）の後の章名は、加える章の章名かもしれない。
+            // 見出し（「（大都市等の特例）」）の次が改正法の単位の見出し（「第N条　X法（…）の一部を次のように改正する。」）
+            // のときだけ、改正法の章名として読み飛ばす
+            // 改正法が「第N条　X法の一部を…」を字下げせずに書くなら、字下げの無い「第百八十六条　…」も改正法の条
+            // （整備法の「第二節　X法の一部改正に伴う経過措置」の後。加える条は字下げして書く）
+            let unit_header_after = |from: usize| {
+                (from..lines.len())
+                    .map(|i| {
+                        (
+                            i,
+                            lines[i],
+                            lines[i].trim_start_matches(['\u{3000}', ' ']).trim_end(),
+                        )
+                    })
+                    .find(|(i, _, t)| {
+                        !t.is_empty()
+                            && !caption.is_match(t)
+                            && !amending_chapter.is_match(t)
+                            && !any_caption(*i)
+                    })
+                    .is_none_or(|(_, raw, t)| {
+                        header.is_match(t)
+                            || list_header.is_match(t)
+                            || header_raw_indent == Some(0)
+                                && raw.starts_with('第')
+                                && t.split_once('\u{3000}')
+                                    .is_some_and(|(h, _)| h.ends_with('条') || h.contains("条の"))
+                    })
+            };
             if next.is_none_or(|(k, n)| {
                 let n = n.trim_start_matches(['\u{3000}', ' ']).trim_end();
-                caption.is_match(n)
-                    || header.is_match(n)
-                    || list_header.is_match(n)
-                    || any_caption(li + 1 + k)
+                if takes_content {
+                    header.is_match(n) || list_header.is_match(n) || unit_header_after(li + 1 + k)
+                } else {
+                    caption.is_match(n)
+                        || header.is_match(n)
+                        || list_header.is_match(n)
+                        || any_caption(li + 1 + k)
+                }
             }) {
                 continue;
             }
@@ -1268,7 +1308,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                             paragraph: Some(ParaRef::Num(n)),
                             item: None,
                             part: None,
-                            suppl: false,
+                            suppl: la.suppl,
                             sub: None,
                         });
                     }
@@ -1281,7 +1321,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                     paragraph: None,
                     item: None,
                     part: None,
-                    suppl: false,
+                    suppl: la.suppl,
                     sub: None,
                 }),
                 // 「第四条から第八条第一項まで」: 前の条の全部と、終わりの条の項まで
@@ -1312,7 +1352,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                         paragraph: None,
                         item: None,
                         part: None,
-                        suppl: false,
+                        suppl: la.suppl,
                         sub: None,
                     });
                     for n in 1..=q {
@@ -1321,7 +1361,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                             paragraph: Some(ParaRef::Num(n)),
                             item: None,
                             part: None,
-                            suppl: false,
+                            suppl: la.suppl,
                             sub: None,
                         });
                     }
@@ -2308,6 +2348,8 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                 && (l.contains("目次") || l.contains("名") || l.contains("見出し")) =>
         {
             let mut rest: Vec<String> = Vec::new();
+            // 「同条」を書き出すための先行詞（本物の先行詞は残りの位置を読み直すまで進めない）
+            let mut running = ante.clone();
             for tok in l
                 .split("並びに")
                 .flat_map(|x| x.split("及び"))
@@ -2344,6 +2386,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                     .or_else(|| tok.strip_suffix("の見出し"))
                 {
                     let l = loc(base, ante)?;
+                    running = ante.clone();
                     extra_ops.push(Box::new(move |f: &String, t: String| {
                         caption_op(
                             l.clone(),
@@ -2355,7 +2398,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                         .in_suppl(l.suppl)
                     }));
                 } else {
-                    rest.push(tok.to_string());
+                    rest.push(pin_same_article(tok, &mut running));
                 }
             }
             if extra_ops.is_empty() {
@@ -2717,6 +2760,22 @@ fn split_table_target(
         )));
     }
     Ok(None)
+}
+
+/// 見出し・章名などを抜いた残りの位置は後でつないで読み直す。「第四十三条の見出し及び同条第一項」の「同条」は
+/// 読み直すと前の残りの位置（第四十二条）を指すので、ここで条を書き出す。`ante` は書き出し用の先行詞で、位置の順に進める
+fn pin_same_article(tok: &str, ante: &mut Ante) -> String {
+    let tok = match (tok.strip_prefix("同条"), &ante.article) {
+        (Some(r), Some(a)) if !ante.suppl && a.to_num_string() != "0" => {
+            format!("{}{r}", crate::apply::article_label(a))
+        }
+        _ => tok.to_string(),
+    };
+    let mut probe = ante.clone();
+    if loc(&tok, &mut probe).is_ok() {
+        *ante = probe;
+    }
+    tok
 }
 
 /// 「第百三十二条の前の見出し及び同条」「第六条及び同条の前の見出し」「附則第四項の前の見出し及び同項から附則第九項まで」:
@@ -4086,6 +4145,8 @@ fn parse_instruction_split(
                 // 「同条第三項（第一号を除く。）及び第八項中」: 除く位置は外して読み、位置ごとに覚える
                 let (loc_clean, exs) = strip_exceptions(&g("loc"));
                 let snapshot = ante.clone();
+                // 「同条」を書き出すための先行詞（本物の先行詞は残りの位置を読み直すまで進めない）
+                let mut running = ante.clone();
                 for tok in loc_clean
                     .split("並びに")
                     .flat_map(|x| x.split("及び"))
@@ -4139,12 +4200,14 @@ fn parse_instruction_split(
                                 to: to.clone(),
                             });
                         }
-                        rest_tokens.push(base.to_string());
+                        running = ante.clone();
+                        rest_tokens.push(pin_same_article(base, &mut running));
                     } else if let Some(base) = tok
                         .strip_suffix("の前の見出し")
                         .or_else(|| tok.strip_suffix("の見出し"))
                     {
                         let l = loc(base, &mut ante)?;
+                        running = ante.clone();
                         ops.push(
                             caption_op(
                                 l.clone(),
@@ -4167,7 +4230,7 @@ fn parse_instruction_split(
                             to: to.clone(),
                         });
                     } else {
-                        rest_tokens.push(tok.to_string());
+                        rest_tokens.push(pin_same_article(tok, &mut running));
                     }
                 }
                 let ats = expand_locs(&rest_tokens.join("及び"), &mut ante)?;
@@ -6671,5 +6734,57 @@ mod tests {
             matches!(&units[0].instructions[1].ops[0], Op::InsertContainersAfter { text, .. } if text.len() == 2 && text[0] == "第四章　雑則")
         );
         assert_eq!(units[1].instructions.len(), 1);
+    }
+
+    /// 「本則に次の二章を加える。」の内容の章名は、次の行が条の見出しでも内容として残す。
+    /// 内容の後の改正法の章名（見出し、改正法の単位の見出しが続く）は読み飛ばす
+    #[test]
+    fn appended_chapter_headings_followed_by_captions_are_content() {
+        let t = "　　　第一章　総務省関係
+　（甲法の一部改正）
+第一条　甲法（昭和二十二年法律第一号）の一部を次のように改正する。
+　　本則に次の二章を加える。
+　　　　第七章　補則
+　（報告）
+　第三十条　大臣は、報告を求めることができる。
+　　　　第八章　罰則
+　第三十一条　前条の報告をしない者は、十万円以下の過料に処する。
+　　　第二章　文部科学省関係
+　（丙法の一部改正）
+第二条　丙法（昭和二十二年法律第二号）の一部を次のように改正する。
+　　第二条中「丙」を「丁」に改める。";
+        let units = parse_units(t).unwrap();
+        assert_eq!(units.len(), 2);
+        assert_eq!(units[0].instructions.len(), 1);
+        let text: Vec<String> = units[0].instructions[0]
+            .ops
+            .iter()
+            .flat_map(|op| match op {
+                Op::AppendContainers { text, .. } => text.clone(),
+                _ => vec![],
+            })
+            .collect();
+        assert_eq!(text.first().map(String::as_str), Some("第七章　補則"));
+        assert!(text.iter().any(|l| l == "第八章　罰則"), "{text:?}");
+        assert!(!text.iter().any(|l| l.contains("文部科学省")), "{text:?}");
+        assert_eq!(units[1].instructions.len(), 1);
+    }
+
+    /// 整備法の「第二節　X法の一部改正に伴う経過措置」+ 見出し（単位の末尾。次は改正法の「第百八十六条　…」）は、
+    /// 直前の「第二十一条を次のように改める。」の内容ではない（令5-53）
+    #[test]
+    fn amending_law_sections_after_replaced_articles_are_skipped() {
+        let t = "第百八十五条　甲法（平成十三年法律第三十一号）の一部を次のように改正する。
+　　第二十一条を次のように改める。
+　　（民事訴訟法の準用）
+　第二十一条　民事訴訟法の規定を準用する。
+　　　　第二節　甲法の一部改正に伴う経過措置
+　（手続費用額の確定手続に関する経過措置）";
+        let units = parse_units(t).unwrap();
+        assert!(
+            matches!(&units[0].instructions[0].ops[0], Op::ReplaceArticle { text, .. } if text.len() == 2),
+            "{:?}",
+            units[0].instructions[0].ops
+        );
     }
 }

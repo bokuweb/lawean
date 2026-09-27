@@ -49,6 +49,76 @@ fn amending_law_num(page: &str) -> Option<String> {
     Some(format!("{era}{y}年法律第{}号", to_kanji(num)))
 }
 
+/// 衆議院の本文の「国際観光旅客税法（平成三十年法律第▼▼▼号）」: 同じ国会で成立した法律の番号が決まる前の伏せ字。
+/// コーパスの一覧（`index.tsv`: 題名とページ）から、括弧の直前の題名と年が合う法律の番号で埋める
+pub(crate) struct LawNums(BTreeMap<String, Vec<(String, String, String)>>);
+
+impl LawNums {
+    /// `txt` の隣の `index.tsv`。無ければ空
+    pub(crate) fn load(txt_dir: &str) -> LawNums {
+        let mut m: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+        let ix = Path::new(txt_dir).with_file_name("index.tsv");
+        for l in std::fs::read_to_string(ix).unwrap_or_default().lines() {
+            let c: Vec<&str> = l.split('\t').collect();
+            let (Some(page), Some(title)) = (c.get(2), c.get(3)) else {
+                continue;
+            };
+            let Some(num) = amending_law_num(page) else {
+                continue;
+            };
+            // 「平成三十年」→ [(題名, 「第十六号」, ページ)]
+            if let Some((year, n)) = num.split_once("法律") {
+                m.entry(year.to_string()).or_default().push((
+                    title.to_string(),
+                    n.to_string(),
+                    page.to_string(),
+                ));
+            }
+        }
+        LawNums(m)
+    }
+
+    /// `page` の本文の伏せ字を埋める。同じ年に同じ題名の法律が複数あれば、そのページの法律、無ければ公布日の近いもの
+    pub(crate) fn resolve(&self, text: &str, page: &str) -> String {
+        static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let r = R.get_or_init(|| {
+            regex::Regex::new(
+                r"（((?:明治|大正|昭和|平成|令和)[^（）年]{1,4}年)法律第▼+号([）。、])",
+            )
+            .unwrap()
+        });
+        let date = |p: &str| {
+            p.get(3..11)
+                .and_then(|d| d.parse::<i64>().ok())
+                .unwrap_or(0)
+        };
+        let mut out = String::with_capacity(text.len());
+        let mut last = 0;
+        for c in r.captures_iter(text) {
+            let m = c.get(0).unwrap();
+            let before = &text[..m.start()];
+            let hit = self.0.get(&c[1]).and_then(|v| {
+                let len = v
+                    .iter()
+                    .filter(|(t, _, _)| before.ends_with(t.as_str()))
+                    .map(|(t, _, _)| t.len())
+                    .max()?;
+                v.iter()
+                    .filter(|(t, _, _)| t.len() == len && before.ends_with(t.as_str()))
+                    .min_by_key(|(_, _, p)| (p != page, (date(p) - date(page)).abs()))
+            });
+            out.push_str(&text[last..m.start()]);
+            match hit {
+                Some((_, n, _)) => out.push_str(&format!("（{}法律{n}{}", &c[1], &c[2])),
+                None => out.push_str(m.as_str()),
+            }
+            last = m.end();
+        }
+        out.push_str(&text[last..]);
+        out
+    }
+}
+
 /// 被改正法の法令番号（「平成三年法律第九十号」）: 題名の直後の括弧書き。塊の中に無ければページ全体から
 fn target_law_num(block: &str, page: &str, title: &str) -> Option<String> {
     let re = regex::Regex::new(&format!(
@@ -493,19 +563,50 @@ fn try_pair(
                     d.len(),
                 )
             } else {
+                // 最初に違う条が、当てても改正前のまま（別の改正の分・版の組の問題の見込み）か
+                let (got, old) = (snapshot(&applied), snapshot(before));
+                let first = got.iter().find(|(k, v)| exp.get(*k) != Some(*v));
+                let unchanged = first.is_some_and(|(k, v)| old.get(k) == Some(v));
+                // e-Gov の改正後の版でも改正前のまま（その版にこの改正がまだ入っていない見込み）
+                let egov_unchanged = first.is_some_and(|(k, _)| old.get(k) == exp.get(k));
                 mk(
                     "mismatch",
                     format!(
-                        "{} lines: {}",
+                        "{} lines: {}{}",
                         d.len(),
-                        first_difference(&snapshot(&applied), &exp)
+                        first_difference(&got, &exp),
+                        if unchanged {
+                            " [当てても変わらない]"
+                        } else if egov_unchanged {
+                            " [e-Gov は改正前のまま]"
+                        } else {
+                            ""
+                        }
                     ),
                     d.len(),
                 )
             }
         }
         Ok(Err(lawean_amend::ApplyError::Unsupported(what))) => mk("unsupported", what, 0),
-        Ok(Err(e)) => mk("apply_error", e.to_string(), 0),
+        Ok(Err(e)) => {
+            if std::env::var("BENCH_DEBUG").is_ok() {
+                // 当てられない最初の改め文
+                let bad = (1..=u.instructions.len()).find(|&k| {
+                    let mut v = u.clone();
+                    v.instructions.truncate(k);
+                    !matches!(
+                        std::panic::catch_unwind(|| lawean_amend::apply_unit(
+                            before, &v, "applied"
+                        )),
+                        Ok(Ok(_))
+                    )
+                });
+                if let Some(k) = bad {
+                    eprintln!("  failing: {}", u.instructions[k - 1].text);
+                }
+            }
+            mk("apply_error", e.to_string(), 0)
+        }
         Err(_) => mk("panic", String::new(), 0),
     }
 }
@@ -622,11 +723,13 @@ fn run(mut args: Vec<String>) {
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
     let mut docs: BTreeMap<String, Option<std::rc::Rc<lawean_source::LegalDocument>>> =
         BTreeMap::new();
+    let law_nums = LawNums::load(&args[0]);
     for page in pages {
         let f = Path::new(&args[0]).join(format!("{page}.txt"));
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
         };
+        let text = law_nums.resolve(&text, page);
         // 版を読み込んだもの（docs）は、同じページの中だけ持つ（大きい法令の版で溢れないように）
         #[allow(clippy::type_complexity)]
         let mut results: Vec<(
