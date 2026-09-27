@@ -491,3 +491,36 @@ fn latin_letters_in_parentheses_are_fullwidth() {
     let got = apply(&doc, "　　第十四条中「第三項」を「第三項（b）」に改める。");
     assert!(xml(&got).contains("第三項（ｂ）の規定"), "{}", xml(&got));
 }
+
+/// 「同号に後段として次のように加える。」: 号の文に加える（項の文に加えていた。公共工事の品質確保の促進に関する法律 令元-35）
+#[test]
+fn appending_a_latter_sentence_to_an_item() {
+    let items = r#"<Item Num="1"><ItemTitle>一</ItemTitle><ItemSentence><Sentence Num="1">甲を定めること。</Sentence></ItemSentence></Item><Item Num="2"><ItemTitle>二</ItemTitle><ItemSentence><Sentence Num="1">工期を定めること。</Sentence></ItemSentence></Item>"#;
+    let doc = law(
+        "",
+        &format!(
+            r#"<Article Num="7"><ArticleTitle>第七条</ArticleTitle>{}</Article>"#,
+            para(
+                1,
+                "",
+                "発注者は、次に掲げる事項を実施しなければならない。",
+                items
+            )
+        ),
+        &para(1, "", "この法律は、公布の日から施行する。", ""),
+    );
+    let got = apply(
+        &doc,
+        "　　第七条第一項第二号中「工期」を「工期等」に改め、同号に後段として次のように加える。
+　　　この場合において、必要な措置を講ずること。",
+    );
+    let x = xml(&got);
+    assert!(
+        x.contains("工期等を定めること。</Sentence><Sentence Num=\"2\" WritingMode=\"vertical\">この場合において、必要な措置を講ずること。</Sentence></ItemSentence>"),
+        "{x}"
+    );
+    assert!(
+        x.contains("実施しなければならない。</Sentence></ParagraphSentence>"),
+        "{x}"
+    );
+}

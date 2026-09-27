@@ -1050,7 +1050,11 @@ pub(crate) fn apply_instruction(
                 let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                 let p = paragraph_mut(art, idx);
-                append_sentence(p, text)?;
+                match at.item.as_deref() {
+                    // 「同号に後段として次のように加える。」: 号（細目）の文
+                    Some(item) => append_item_sentence(p, item, at.sub.as_deref(), text)?,
+                    None => append_sentence(p, text)?,
+                }
             }
             Op::SetToc { text, .. } => set_toc(doc, text),
             Op::ReplaceTitle { from, to } => replace_title(doc, from, to)?,
@@ -3213,6 +3217,41 @@ pub(crate) fn append_sentence(p: &mut Paragraph, text: &[String]) -> Result<(), 
     }
     if text.len() > 1 {
         insert_items_after(p, None, &text[1..])?;
+    }
+    Ok(())
+}
+
+/// 号（`sub` があればその細目）の終わりに文を加える（「同号に後段として次のように加える」「同号にただし書を加える」）
+fn append_item_sentence(
+    p: &mut Paragraph,
+    num: &str,
+    sub: Option<&str>,
+    text: &[String],
+) -> Result<(), ApplyError> {
+    let [line] = text else {
+        return Err(ApplyError::BadContent(format!(
+            "号に加える文が {} 行",
+            text.len()
+        )));
+    };
+    let item = subitems_mut(p, num)?;
+    let item = match sub {
+        Some(sub) => find_subitem(item, sub)
+            .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{sub}が無い")))?,
+        None => item,
+    };
+    let ss = match &mut item.body {
+        ItemBody::Sentences(ss) => ss,
+        ItemBody::Columns(cs) => match cs.last_mut() {
+            Some(c) => &mut c.sentences,
+            None => return Err(ApplyError::BadContent(format!("第{num}号に文が無い"))),
+        },
+        _ => return Err(ApplyError::BadContent(format!("第{num}号に文が無い"))),
+    };
+    let n = ss.len();
+    for (k, mut s) in make_sentences(line).into_iter().enumerate() {
+        s.num = Some((n + k + 1).to_string());
+        ss.push(s);
     }
     Ok(())
 }
