@@ -475,6 +475,26 @@ fn same_article_after_a_caption_in_a_list() {
         })
         .collect();
     assert_eq!(arts, ["42:None", "43:Some(Num(1))"]);
+    // 「同項第三号及び同条第二項中」: 「同条」を書き出しても、「同項」は文の始まりの先行詞（第一項）のまま
+    let t = "第一条　甲法（平成元年法律第一号）の一部を次のように改正する。
+　　第二十七条第一項中「した許可」の下に「若しくは認定」を加え、同項第三号及び同条第二項中「許可」の下に「又は認定」を加える。";
+    let units = parse_units(t).unwrap();
+    let locs: Vec<String> = units[0].instructions[0]
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::InsertAfterPhrase { at, .. } => Some(format!("{:?}:{:?}", at.paragraph, at.item)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        locs,
+        [
+            "Some(Num(1)):None",
+            "Some(Num(1)):Some(\"3\")",
+            "Some(Num(2)):None"
+        ]
+    );
 }
 
 /// 括弧の中の欧文の小文字は e-Gov の書き方（「（ｂ）」）で加える

@@ -2348,6 +2348,8 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                 && (l.contains("目次") || l.contains("名") || l.contains("見出し")) =>
         {
             let mut rest: Vec<String> = Vec::new();
+            // 「同条」を書き出すための先行詞（本物の先行詞は残りの位置を読み直すまで進めない）
+            let mut running = ante.clone();
             for tok in l
                 .split("並びに")
                 .flat_map(|x| x.split("及び"))
@@ -2384,6 +2386,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                     .or_else(|| tok.strip_suffix("の見出し"))
                 {
                     let l = loc(base, ante)?;
+                    running = ante.clone();
                     extra_ops.push(Box::new(move |f: &String, t: String| {
                         caption_op(
                             l.clone(),
@@ -2395,7 +2398,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                         .in_suppl(l.suppl)
                     }));
                 } else {
-                    rest.push(pin_same_article(tok, ante));
+                    rest.push(pin_same_article(tok, &mut running));
                 }
             }
             if extra_ops.is_empty() {
@@ -2760,7 +2763,7 @@ fn split_table_target(
 }
 
 /// 見出し・章名などを抜いた残りの位置は後でつないで読み直す。「第四十三条の見出し及び同条第一項」の「同条」は
-/// 読み直すと前の残りの位置（第四十二条）を指すので、ここで条を書き出す。先行詞は位置の順に進める
+/// 読み直すと前の残りの位置（第四十二条）を指すので、ここで条を書き出す。`ante` は書き出し用の先行詞で、位置の順に進める
 fn pin_same_article(tok: &str, ante: &mut Ante) -> String {
     let tok = match (tok.strip_prefix("同条"), &ante.article) {
         (Some(r), Some(a)) if !ante.suppl && a.to_num_string() != "0" => {
@@ -4142,6 +4145,8 @@ fn parse_instruction_split(
                 // 「同条第三項（第一号を除く。）及び第八項中」: 除く位置は外して読み、位置ごとに覚える
                 let (loc_clean, exs) = strip_exceptions(&g("loc"));
                 let snapshot = ante.clone();
+                // 「同条」を書き出すための先行詞（本物の先行詞は残りの位置を読み直すまで進めない）
+                let mut running = ante.clone();
                 for tok in loc_clean
                     .split("並びに")
                     .flat_map(|x| x.split("及び"))
@@ -4195,12 +4200,14 @@ fn parse_instruction_split(
                                 to: to.clone(),
                             });
                         }
-                        rest_tokens.push(pin_same_article(base, &mut ante));
+                        running = ante.clone();
+                        rest_tokens.push(pin_same_article(base, &mut running));
                     } else if let Some(base) = tok
                         .strip_suffix("の前の見出し")
                         .or_else(|| tok.strip_suffix("の見出し"))
                     {
                         let l = loc(base, &mut ante)?;
+                        running = ante.clone();
                         ops.push(
                             caption_op(
                                 l.clone(),
@@ -4223,7 +4230,7 @@ fn parse_instruction_split(
                             to: to.clone(),
                         });
                     } else {
-                        rest_tokens.push(pin_same_article(tok, &mut ante));
+                        rest_tokens.push(pin_same_article(tok, &mut running));
                     }
                 }
                 let ats = expand_locs(&rest_tokens.join("及び"), &mut ante)?;
