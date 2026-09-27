@@ -493,12 +493,19 @@ fn try_pair(
                     d.len(),
                 )
             } else {
+                // 最初に違う条が、当てても改正前のまま（別の改正の分・版の組の問題の見込み）か
+                let (got, old) = (snapshot(&applied), snapshot(before));
+                let unchanged = got
+                    .iter()
+                    .find(|(k, v)| exp.get(*k) != Some(*v))
+                    .is_some_and(|(k, v)| old.get(k) == Some(v));
                 mk(
                     "mismatch",
                     format!(
-                        "{} lines: {}",
+                        "{} lines: {}{}",
                         d.len(),
-                        first_difference(&snapshot(&applied), &exp)
+                        first_difference(&got, &exp),
+                        if unchanged { " [当てても変わらない]" } else { "" }
                     ),
                     d.len(),
                 )

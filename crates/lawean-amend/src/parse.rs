@@ -1308,7 +1308,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                             paragraph: Some(ParaRef::Num(n)),
                             item: None,
                             part: None,
-                            suppl: false,
+                            suppl: la.suppl,
                             sub: None,
                         });
                     }
@@ -1321,7 +1321,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                     paragraph: None,
                     item: None,
                     part: None,
-                    suppl: false,
+                    suppl: la.suppl,
                     sub: None,
                 }),
                 // 「第四条から第八条第一項まで」: 前の条の全部と、終わりの条の項まで
@@ -1352,7 +1352,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                         paragraph: None,
                         item: None,
                         part: None,
-                        suppl: false,
+                        suppl: la.suppl,
                         sub: None,
                     });
                     for n in 1..=q {
@@ -1361,7 +1361,7 @@ fn expand_locs(s: &str, ante: &mut Ante) -> Result<Vec<Loc>, ParseError> {
                             paragraph: Some(ParaRef::Num(n)),
                             item: None,
                             part: None,
-                            suppl: false,
+                            suppl: la.suppl,
                             sub: None,
                         });
                     }

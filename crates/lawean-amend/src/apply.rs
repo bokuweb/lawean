@@ -728,10 +728,15 @@ pub(crate) fn apply_instruction(
                 });
                 set_toc(doc, &text[at..]);
             }
-            Op::SubitemsEdit { .. } => {
-                return Err(ApplyError::Unsupported(
-                    "号の下のイロハの列挙の改め・削り".into(),
-                ))
+            Op::SubitemsEdit { at, subs, text } => {
+                let art = loc_article_mut(doc, at)?;
+                let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
+                edit_subitems(
+                    paragraph_mut(art, idx),
+                    at.item.as_deref().unwrap_or_default(),
+                    subs,
+                    text.as_deref(),
+                )?;
             }
             Op::DeleteTitle => doc.title = None,
             Op::ParagraphToArticle { .. } => {
@@ -1086,6 +1091,18 @@ pub(crate) fn apply_instruction(
                 let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
                 match &at.item {
+                    // 「第二号ハに次のように加える。」+「(4)　…」: 細目の下の括弧の細目
+                    Some(item)
+                        if at.sub.is_some()
+                            && text.first().is_some_and(|l| l.starts_with(['(', '（'])) =>
+                    {
+                        append_subsubitems(
+                            paragraph_mut(art, idx),
+                            item,
+                            at.sub.as_deref().unwrap_or_default(),
+                            text,
+                        )?
+                    }
                     Some(item) => append_subitems(paragraph_mut(art, idx), item, text)?,
                     None => insert_items_after(paragraph_mut(art, idx), None, text)?,
                 }
@@ -1215,13 +1232,22 @@ pub(crate) fn apply_instruction(
                 // 附則の項の号（「附則第三項第二号を削る」）は原始附則の中
                 let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?.unwrap_or(0);
-                delete_item(paragraph_mut(art, idx), at.item.as_deref().unwrap_or(""))?;
+                let item = at.item.as_deref().unwrap_or("");
+                match at.sub.as_deref() {
+                    // 「第一号ニを削り」「第三号ロ(2)を削る」: 号の下の細目だけ
+                    Some(sub) => {
+                        edit_subitems(paragraph_mut(art, idx), item, &[sub.to_string()], None)?
+                    }
+                    None => delete_item(paragraph_mut(art, idx), item)?,
+                }
             }
             Op::Delete { at } if matches!(at.article, ArticleNum::Range { .. }) => {
                 // 「第百四条から第百五条の二までを削る」
                 for a in expand_range(doc, at) {
                     remove_article(&mut doc.main_provision, &a.article);
                 }
+                // 「第百七十五条から第百七十九条まで　削除」の条（範囲の番号の条）も
+                remove_article(&mut doc.main_provision, &at.article);
             }
             Op::Delete { at } => {
                 // 「附則第三項の前の見出し並びに同項及び第四項を削る」: 附則の項は原始附則の中
@@ -2396,32 +2422,44 @@ fn sentences_mut<'a>(
     out
 }
 
-/// 号の下の細目（「ロ」、括弧の細目まで言う「イ(5)」「ホ（７）」）
-fn find_subitem<'a>(i: &'a mut Item, sub: &str) -> Option<&'a mut Item> {
-    // 「イ(5)」→ [「イ」, 「（５）」]。e-Gov の細目の題は全角
-    fn norm(s: &str) -> String {
-        s.chars()
-            .map(|c| match c {
-                '(' => '（',
-                ')' => '）',
-                '0'..='9' => char::from_u32(c as u32 - '0' as u32 + '０' as u32).unwrap_or(c),
-                c => c,
-            })
-            .collect()
-    }
-    let sub = norm(sub);
+/// 細目の記号を e-Gov の書き方（全角の括弧と数字）に
+fn norm_sub(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '(' => '（',
+            ')' => '）',
+            '0'..='9' => char::from_u32(c as u32 - '0' as u32 + '０' as u32).unwrap_or(c),
+            c => c,
+        })
+        .collect()
+}
+
+/// 「イ(5)」→ [「イ」, 「（５）」]
+fn sub_path(sub: &str) -> Vec<String> {
     let mut path: Vec<String> = Vec::new();
-    for c in sub.chars() {
+    for c in norm_sub(sub).chars() {
         match path.last_mut() {
             Some(last) if !last.ends_with('）') && c != '（' => last.push(c),
             _ => path.push(c.to_string()),
         }
     }
+    path
+}
+
+/// 号の下の細目（「ロ」、括弧の細目まで言う「イ(5)」「ホ（７）」）
+fn find_subitem<'a>(i: &'a mut Item, sub: &str) -> Option<&'a mut Item> {
+    descend_subitems(i, &sub_path(sub))
+}
+
+fn descend_subitems<'a>(i: &'a mut Item, path: &[String]) -> Option<&'a mut Item> {
     let mut cur = i;
-    for want in &path {
+    for want in path {
         cur = cur.children.iter_mut().find_map(|c| match c {
             ItemChild::Subitem(s)
-                if s.title.as_ref().map(|t| norm(&inline_text(t))).as_deref()
+                if s.title
+                    .as_ref()
+                    .map(|t| norm_sub(&inline_text(t)))
+                    .as_deref()
                     == Some(want.as_str()) =>
             {
                 Some(s)
@@ -2538,6 +2576,9 @@ pub(crate) fn strip_marks_doc(doc: &mut LegalDocument) {
 fn replace_protected(t: &str, from: &str, to: &str, _protect: &[String]) -> (String, usize) {
     if from.is_empty() {
         return (t.to_string(), 0);
+    }
+    if let Some(r) = replace_around_term(t, from, to) {
+        return r;
     }
     let mut guarded: Vec<(usize, usize)> = Vec::new();
     let mut open: Option<usize> = None;
@@ -2857,6 +2898,50 @@ fn replace_in_sentence(s: &mut Sentence, from: &str, to: &str, protect: &[String
     n
 }
 
+/// 「A（以下「」及び「」という。）」: 定義の語を挟む二つの字句「A（以下「」と「」という。）」をまとめて書いたもの
+/// （「都道府県公安委員会（以下「」及び「」という。）」を削り）。(前, 後) に分ける
+fn split_around_term(s: &str) -> Option<(&str, &str)> {
+    ["「」及び「」", "「」、「」"].iter().find_map(|sep| {
+        let i = s.find(sep)?;
+        (s[i + sep.len()..].find(sep).is_none()).then(|| {
+            (
+                &s[..i + '「'.len_utf8()],
+                &s[i + sep.len() - '」'.len_utf8()..],
+            )
+        })
+    })
+}
+
+/// `split_around_term` の字句を、間の語（「」を含まない）を残して置き換える。形でなければ None
+fn replace_around_term(t: &str, from: &str, to: &str) -> Option<(String, usize)> {
+    let (p, s) = split_around_term(from)?;
+    let (tp, ts) = if to.is_empty() {
+        ("", "")
+    } else {
+        split_around_term(to)?
+    };
+    let (mut out, mut rest, mut n) = (String::new(), t, 0);
+    while let Some(i) = rest.find(p) {
+        let after = &rest[i + p.len()..];
+        let Some(j) = after
+            .find(s)
+            .filter(|&j| !after[..j].contains(['「', '」']))
+        else {
+            out.push_str(&rest[..i + p.len()]);
+            rest = after;
+            continue;
+        };
+        out.push_str(&rest[..i]);
+        out.push_str(tp);
+        out.push_str(&after[..j]);
+        out.push_str(ts);
+        rest = &after[j + s.len()..];
+        n += 1;
+    }
+    out.push_str(rest);
+    Some((out, n))
+}
+
 /// 目次の字句を改める。加えた字句には印を付ける（同じ文の「「第五章…」を「第五章…第六章…」に、「第六章」を「第七章」に」の
 /// 後の置換は、先に加えた「第六章」を指さない。印は文の終わりに外す）
 pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Result<(), ApplyError> {
@@ -3135,10 +3220,20 @@ pub(crate) fn replace_subitem(
     sub: &str,
     lines: &[String],
 ) -> Result<(), ApplyError> {
-    // 内容を仮の項の仮の号の下として読み、その最初の細目を取る
+    // 内容を仮の項の仮の号（括弧の細目「(2)　…」なら、さらに仮の細目）の下として読み、その最初の細目を取る
+    let nested = lines.first().is_some_and(|l| l.starts_with(['(', '（']));
     let mut tmp = vec!["仮".to_string(), "一\u{3000}仮".to_string()];
+    if nested {
+        tmp.push("イ\u{3000}仮".to_string());
+    }
     tmp.extend(lines.iter().cloned());
-    let new = parse_paragraphs(&tmp)?
+    let first_sub = |cs: Vec<ItemChild>| {
+        cs.into_iter().find_map(|c| match c {
+            ItemChild::Subitem(s) => Some(s),
+            _ => None,
+        })
+    };
+    let mut new = parse_paragraphs(&tmp)?
         .into_iter()
         .next()
         .and_then(|q| {
@@ -3147,14 +3242,12 @@ pub(crate) fn replace_subitem(
                 _ => None,
             })
         })
-        .and_then(|i| {
-            i.children.into_iter().find_map(|c| match c {
-                ItemChild::Subitem(s) => Some(s),
-                _ => None,
-            })
-        })
-        .ok_or_else(|| ApplyError::BadContent("細目の内容が読めない".into()))?;
-    let slot = p
+        .and_then(|i| first_sub(i.children));
+    if nested {
+        new = new.and_then(|s| first_sub(s.children));
+    }
+    let new = new.ok_or_else(|| ApplyError::BadContent("細目の内容が読めない".into()))?;
+    let item = p
         .children
         .iter_mut()
         .find_map(|c| match c {
@@ -3162,17 +3255,7 @@ pub(crate) fn replace_subitem(
             _ => None,
         })
         .ok_or_else(|| ApplyError::BadContent(format!("第{num}号が無い")))?;
-    let slot = slot
-        .children
-        .iter_mut()
-        .find_map(|c| match c {
-            ItemChild::Subitem(s)
-                if s.title.as_ref().map(|t| inline_text(t)).as_deref() == Some(sub) =>
-            {
-                Some(s)
-            }
-            _ => None,
-        })
+    let slot = find_subitem(item, sub)
         .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{sub}が無い")))?;
     slot.title = new.title;
     slot.body = new.body;
@@ -3368,6 +3451,150 @@ pub(crate) fn append_subitems(
             other => other,
         };
         slot.children.push(c);
+    }
+    Ok(())
+}
+
+/// 「同号イからニまでを次のように改める」「同号イ及びロを削る」: 挙げた細目を取り除き、内容があればその位置に入れる。
+/// 細目の番号（Num）は並びの順に振り直す（記号は内容のまま。削った後の記号の繰り上げは改め文が別に言う）
+pub(crate) fn edit_subitems(
+    p: &mut Paragraph,
+    num: &str,
+    subs: &[String],
+    lines: Option<&[String]>,
+) -> Result<(), ApplyError> {
+    // 「ロ(1)及び(2)」: 同じ親（ロ）の下の括弧の細目
+    let paths: Vec<Vec<String>> = subs.iter().map(|s| sub_path(s)).collect();
+    let depth = paths.first().map_or(1, Vec::len);
+    let parent = paths
+        .first()
+        .map(|p| p[..depth - 1].to_vec())
+        .unwrap_or_default();
+    if paths
+        .iter()
+        .any(|p| p.len() != depth || p[..depth - 1] != parent[..])
+    {
+        return Err(ApplyError::Unsupported(
+            "親の違う細目をまとめて改める".into(),
+        ));
+    }
+    let titles: Vec<String> = paths.iter().map(|p| p[depth - 1].clone()).collect();
+    let new: Vec<ItemChild> = match lines {
+        None => Vec::new(),
+        Some(lines) => {
+            let mut tmp = vec!["仮".to_string(), "一\u{3000}仮".to_string()];
+            if depth > 1 {
+                tmp.push("イ\u{3000}仮".to_string());
+            }
+            tmp.extend(lines.iter().cloned());
+            let mut cs = parse_paragraphs(&tmp)?
+                .into_iter()
+                .next()
+                .and_then(|q| {
+                    q.children.into_iter().find_map(|c| match c {
+                        ParagraphChild::Item(i) => Some(i.children),
+                        _ => None,
+                    })
+                })
+                .unwrap_or_default();
+            if depth > 1 {
+                cs = cs
+                    .into_iter()
+                    .find_map(|c| match c {
+                        ItemChild::Subitem(s) => Some(s.children),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+            }
+            if cs.is_empty() {
+                return Err(ApplyError::BadContent("イロハの内容が読めない".into()));
+            }
+            cs
+        }
+    };
+    let item = subitems_mut(p, num)?;
+    let item = descend_subitems(item, &parent)
+        .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{}が無い", parent.concat())))?;
+    let pos: Vec<usize> = item
+        .children
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            matches!(c, ItemChild::Subitem(s) if titles.contains(&norm_sub(&sub_title(s))))
+        })
+        .map(|(k, _)| k)
+        .collect();
+    if pos.is_empty() || pos.len() != subs.len() {
+        return Err(ApplyError::BadContent(format!(
+            "第{num}号{}が無い",
+            subs.join("・")
+        )));
+    }
+    for &k in pos.iter().rev() {
+        item.children.remove(k);
+    }
+    let at = pos[0];
+    for (k, c) in new.into_iter().enumerate() {
+        item.children.insert(at + k, c);
+    }
+    let mut n = 0;
+    for c in &mut item.children {
+        if let ItemChild::Subitem(s) = c {
+            n += 1;
+            s.num = Some(n.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 号の細目（「ハ」）の下に括弧の細目（「(4)　…」）を加える
+pub(crate) fn append_subsubitems(
+    p: &mut Paragraph,
+    num: &str,
+    sub: &str,
+    lines: &[String],
+) -> Result<(), ApplyError> {
+    let mut tmp = vec![
+        "仮".to_string(),
+        "一\u{3000}仮".to_string(),
+        "イ\u{3000}仮".to_string(),
+    ];
+    tmp.extend(lines.iter().cloned());
+    let subs: Vec<ItemChild> = parse_paragraphs(&tmp)?
+        .into_iter()
+        .next()
+        .and_then(|q| {
+            q.children.into_iter().find_map(|c| match c {
+                ParagraphChild::Item(i) => Some(i.children),
+                _ => None,
+            })
+        })
+        .and_then(|cs| {
+            cs.into_iter().find_map(|c| match c {
+                ItemChild::Subitem(s) => Some(s.children),
+                _ => None,
+            })
+        })
+        .unwrap_or_default();
+    if subs.is_empty() {
+        return Err(ApplyError::BadContent("細目の内容が読めない".into()));
+    }
+    let item = subitems_mut(p, num)?;
+    let slot = find_subitem(item, sub)
+        .ok_or_else(|| ApplyError::BadContent(format!("第{num}号{sub}が無い")))?;
+    let base = slot
+        .children
+        .iter()
+        .filter(|c| matches!(c, ItemChild::Subitem(_)))
+        .count();
+    for (k, c) in subs.into_iter().enumerate() {
+        slot.children.push(match c {
+            ItemChild::Subitem(mut s) => {
+                s.num = Some((base + k + 1).to_string());
+                ItemChild::Subitem(s)
+            }
+            other => other,
+        });
     }
     Ok(())
 }

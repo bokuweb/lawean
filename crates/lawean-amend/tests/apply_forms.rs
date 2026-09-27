@@ -334,3 +334,104 @@ fn items_written_as_table_rows_and_lists() {
     assert_eq!(x.matches("一万六百円").count(), 1, "{x}");
     assert!(x.contains("サイバー警察局"), "{x}");
 }
+
+/// 「「都道府県公安委員会（以下「」及び「」という。）」を削り」: 定義の語を挟む二つの字句を削り、語を残す
+#[test]
+fn deleting_the_phrases_around_a_defined_term() {
+    let doc = law(
+        "",
+        &format!(
+            r#"<Article Num="25"><ArticleTitle>第二十五条</ArticleTitle>{}</Article>"#,
+            para(
+                1,
+                "",
+                "都道府県公安委員会（以下「公安委員会」という。）は、公安委員会規則で定める。",
+                ""
+            )
+        ),
+        &para(1, "", "この法律は、公布の日から施行する。", ""),
+    );
+    let got = apply(
+        &doc,
+        "　　第二十五条中「都道府県公安委員会（以下「」及び「」という。）」を削る。",
+    );
+    let x = xml(&got);
+    assert!(x.contains("公安委員会は、公安委員会規則で定める。"), "{x}");
+}
+
+/// 「附則第二項から第三項までを削る。」: 範囲の項も附則で引く（本則の仮の条を見ていた）
+#[test]
+fn deleting_a_range_of_suppl_paragraphs() {
+    let doc = law(
+        "",
+        &format!(
+            r#"<Article Num="1"><ArticleTitle>第一条</ArticleTitle>{}</Article>"#,
+            para(1, "", "甲とする。", "")
+        ),
+        &[
+            para(1, "", "この法律は、公布の日から施行する。", ""),
+            para(2, "", "乙の特例。", ""),
+            para(3, "", "丙の特例。", ""),
+            para(4, "", "丁の特例。", ""),
+        ]
+        .concat(),
+    );
+    let got = apply(&doc, "　　附則第二項から第三項までを削る。");
+    let x = xml(&got);
+    assert!(!x.contains("乙の特例") && !x.contains("丙の特例"), "{x}");
+    assert!(x.contains("丁の特例"), "{x}");
+}
+
+fn subitems_law() -> LegalDocument {
+    let item = r#"<Item Num="1"><ItemTitle>一</ItemTitle><ItemSentence><Sentence Num="1">次に掲げる業務</Sentence></ItemSentence><Subitem1 Num="1"><Subitem1Title>イ</Subitem1Title><Subitem1Sentence><Sentence Num="1">イの業務</Sentence></Subitem1Sentence></Subitem1><Subitem1 Num="2"><Subitem1Title>ロ</Subitem1Title><Subitem1Sentence><Sentence Num="1">次に掲げる者</Sentence></Subitem1Sentence><Subitem2 Num="1"><Subitem2Title>（１）</Subitem2Title><Subitem2Sentence><Sentence Num="1">旧の(1)</Sentence></Subitem2Sentence></Subitem2><Subitem2 Num="2"><Subitem2Title>（２）</Subitem2Title><Subitem2Sentence><Sentence Num="1">旧の(2)</Sentence></Subitem2Sentence></Subitem2></Subitem1><Subitem1 Num="3"><Subitem1Title>ハ</Subitem1Title><Subitem1Sentence><Sentence Num="1">ハの業務</Sentence></Subitem1Sentence></Subitem1></Item><Item Num="2"><ItemTitle>二</ItemTitle><ItemSentence><Sentence Num="1">第二号の業務</Sentence></ItemSentence></Item>"#;
+    law(
+        "",
+        &format!(
+            r#"<Article Num="10"><ArticleTitle>第十条</ArticleTitle>{}</Article>"#,
+            para(1, "", "機構は、次の業務を行う。", item)
+        ),
+        &para(1, "", "この法律は、公布の日から施行する。", ""),
+    )
+}
+
+/// 「第一号ハを削る。」: 号の下の細目だけを削る（号の全部を削っていた）
+#[test]
+fn deleting_a_subitem_keeps_the_item() {
+    let got = apply(&subitems_law(), "　　第十条第一号ハを削る。");
+    let x = xml(&got);
+    assert!(!x.contains("ハの業務"), "{x}");
+    assert!(
+        x.contains("イの業務") && x.contains("次に掲げる業務"),
+        "{x}"
+    );
+}
+
+/// 「同号ロ(1)及び(2)を次のように改める。」「同号ロ(2)を次のように改める。」「同号ロに次のように加える。」+「(3)　…」
+#[test]
+fn editing_parenthesized_subitems() {
+    let got = apply(
+        &subitems_law(),
+        "　　第十条第一号ロ(1)及び(2)を次のように改める。
+　　　　(1)　新の第一
+　　　　(2)　新の第二",
+    );
+    let x = xml(&got);
+    assert!(
+        x.contains("新の第一") && x.contains("新の第二") && !x.contains("旧の"),
+        "{x}"
+    );
+    let got = apply(
+        &subitems_law(),
+        "　　第十条第一号ロ(2)を次のように改める。
+　　　　(2)　新の第二
+　　第十条第一号ロに次のように加える。
+　　　　(3)　加えた第三",
+    );
+    let x = xml(&got);
+    assert!(
+        x.contains("旧の(1)") && x.contains("新の第二") && !x.contains("旧の(2)"),
+        "{x}"
+    );
+    assert!(x.contains("加えた第三"), "{x}");
+    assert!(x.contains(r#"<Subitem2 Num="3">"#), "{x}");
+}
