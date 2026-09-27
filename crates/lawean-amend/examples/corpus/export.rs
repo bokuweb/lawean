@@ -7,7 +7,7 @@
 //!
 //! 条文は、この単位が変えた条（本則の条、原始附則の条、目次、別表）だけを、改正前の版と改正後の版から出す。
 //! 形は構造付き plain text（`{"type": "paragraph", "text": …}` と `{"type": "table", "rows": [[…]]}` の列）
-use super::{load_rev, snapshot, take_flag, units_of, Snapshot};
+use super::{load_rev, snapshot, take_flag, units_of, LawNums, Snapshot};
 use lawean_source::xml::{Element, Node};
 use lawean_source::{
     Article, ArticleChild, Item, ItemBody, ItemChild, LegalDocument, Paragraph, ParagraphChild,
@@ -605,11 +605,13 @@ pub fn export(mut args: Vec<String>) {
     }
     let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap());
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let law_nums = LawNums::load(&args[0]);
     for (page, want) in rows {
         let Ok(text) = std::fs::read_to_string(Path::new(&args[0]).join(format!("{page}.txt")))
         else {
             continue;
         };
+        let text = law_nums.resolve(&text, &page);
         let units = units_of(&text);
         let per_block = |b: usize| units.iter().filter(|u| u.0 == b).count();
         for (bi, ui, status, prev, after) in want {
