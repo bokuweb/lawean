@@ -495,17 +495,23 @@ fn try_pair(
             } else {
                 // 最初に違う条が、当てても改正前のまま（別の改正の分・版の組の問題の見込み）か
                 let (got, old) = (snapshot(&applied), snapshot(before));
-                let unchanged = got
-                    .iter()
-                    .find(|(k, v)| exp.get(*k) != Some(*v))
-                    .is_some_and(|(k, v)| old.get(k) == Some(v));
+                let first = got.iter().find(|(k, v)| exp.get(*k) != Some(*v));
+                let unchanged = first.is_some_and(|(k, v)| old.get(k) == Some(v));
+                // e-Gov の改正後の版でも改正前のまま（その版にこの改正がまだ入っていない見込み）
+                let egov_unchanged = first.is_some_and(|(k, _)| old.get(k) == exp.get(k));
                 mk(
                     "mismatch",
                     format!(
                         "{} lines: {}{}",
                         d.len(),
                         first_difference(&got, &exp),
-                        if unchanged { " [当てても変わらない]" } else { "" }
+                        if unchanged {
+                            " [当てても変わらない]"
+                        } else if egov_unchanged {
+                            " [e-Gov は改正前のまま]"
+                        } else {
+                            ""
+                        }
                     ),
                     d.len(),
                 )

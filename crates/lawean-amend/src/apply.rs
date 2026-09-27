@@ -318,13 +318,25 @@ pub(crate) fn egov_parens(s: &str) -> String {
     let r = R.get_or_init(|| {
         regex::Regex::new(r"\(([0-9０-９]{1,3}|[一二三四五六七八九十百の]{1,8})\)").unwrap()
     });
-    r.replace_all(s, |c: &regex::Captures| {
+    let s = r
+        .replace_all(s, |c: &regex::Captures| {
+            let inner: String = c[1]
+                .chars()
+                .map(|ch| match ch {
+                    '0'..='9' => char::from_u32(ch as u32 - '0' as u32 + '０' as u32).unwrap_or(ch),
+                    ch => ch,
+                })
+                .collect();
+            format!("（{inner}）")
+        })
+        .into_owned();
+    // 「協定第二条第三項（b）」「(ii)」: 括弧の中の欧文の小文字は e-Gov では全角（「（ｂ）」）
+    static L: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let l = L.get_or_init(|| regex::Regex::new(r"[(（]([a-z]{1,4})[)）]").unwrap());
+    l.replace_all(&s, |c: &regex::Captures| {
         let inner: String = c[1]
             .chars()
-            .map(|ch| match ch {
-                '0'..='9' => char::from_u32(ch as u32 - '0' as u32 + '０' as u32).unwrap_or(ch),
-                ch => ch,
-            })
+            .map(|ch| char::from_u32(ch as u32 - 'a' as u32 + 'ａ' as u32).unwrap_or(ch))
             .collect();
         format!("（{inner}）")
     })
@@ -397,16 +409,18 @@ pub(crate) fn apply_instruction(
                 for at in expand_range(doc, at) {
                     let art = loc_article_mut(doc, &at)?;
                     let idx = para_index(art, &at.paragraph, &mut snapshots)?;
-                    let n = replace_in_article_part(
-                        art,
-                        idx,
-                        at.item.as_deref(),
-                        at.sub.as_deref(),
-                        at.part,
-                        from,
-                        &mark(to),
-                        &inserted,
-                    );
+                    let n = strict_first(|| {
+                        replace_in_article_part(
+                            art,
+                            idx,
+                            at.item.as_deref(),
+                            at.sub.as_deref(),
+                            at.part,
+                            from,
+                            &mark(to),
+                            &inserted,
+                        )
+                    });
                     if n == 0 {
                         return Err(ApplyError::PhraseNotFound {
                             at: loc_name(&at),
@@ -419,16 +433,18 @@ pub(crate) fn apply_instruction(
             Op::InsertAfterPhrase { at, anchor, text } => {
                 let art = loc_article_mut(doc, at)?;
                 let idx = para_index(art, &at.paragraph, &mut snapshots)?;
-                let n = replace_in_article_part(
-                    art,
-                    idx,
-                    at.item.as_deref(),
-                    at.sub.as_deref(),
-                    at.part,
-                    anchor,
-                    &format!("{anchor}{}", mark(text)),
-                    &inserted,
-                );
+                let n = strict_first(|| {
+                    replace_in_article_part(
+                        art,
+                        idx,
+                        at.item.as_deref(),
+                        at.sub.as_deref(),
+                        at.part,
+                        anchor,
+                        &format!("{anchor}{}", mark(text)),
+                        &inserted,
+                    )
+                });
                 if n == 0 {
                     return Err(ApplyError::PhraseNotFound {
                         at: loc_name(at),
@@ -2613,7 +2629,12 @@ fn replace_protected(t: &str, from: &str, to: &str, _protect: &[String]) -> (Str
         .copied()
         .filter(|i| !guarded.iter().any(|(a, b)| a <= i && i + from.len() <= *b))
         .collect();
-    let targets = if outside.is_empty() { hits } else { outside };
+    // 加えた字句の中しか無ければその中を指す（`STRICT` の間は指さない。`strict_first`）
+    let targets = if outside.is_empty() && !STRICT.with(|x| x.get()) {
+        hits
+    } else {
+        outside
+    };
     if targets.is_empty() {
         return (t.to_string(), 0);
     }
@@ -2898,6 +2919,24 @@ fn replace_in_sentence(s: &mut Sentence, from: &str, to: &str, protect: &[String
     n
 }
 
+thread_local! {
+    static STRICT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// まず加えた字句（印の中）を指さずに置き換え、どこにも無いときだけ印の中も指す。
+/// 字句ごと（文・目次の要素ごと）に決めると、別の文に印の外の字句があるのに印の中を置き換えてしまう
+/// （目次中「第二十九条」を「第三十条」に、「第三十条」を「第三十一条」に改める）
+fn strict_first(mut f: impl FnMut() -> usize) -> usize {
+    STRICT.with(|x| x.set(true));
+    let n = f();
+    STRICT.with(|x| x.set(false));
+    if n > 0 {
+        n
+    } else {
+        f()
+    }
+}
+
 /// 「A（以下「」及び「」という。）」: 定義の語を挟む二つの字句「A（以下「」と「」という。）」をまとめて書いたもの
 /// （「都道府県公安委員会（以下「」及び「」という。）」を削り）。(前, 後) に分ける
 fn split_around_term(s: &str) -> Option<(&str, &str)> {
@@ -2959,7 +2998,7 @@ pub(crate) fn replace_toc(doc: &mut LegalDocument, from: &str, to: &str) -> Resu
         }
         n
     }
-    match doc.toc.as_mut().map(|t| go(t, from, to)) {
+    match doc.toc.as_mut().map(|t| strict_first(|| go(t, from, to))) {
         Some(n) if n > 0 => Ok(()),
         Some(_) => {
             // 字句が節や条の範囲をまたぐ（「第六節　管理組合法人（第四十七条−第五十六条の七）第七節　…」）ときは

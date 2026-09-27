@@ -435,3 +435,59 @@ fn editing_parenthesized_subitems() {
     assert!(x.contains("加えた第三"), "{x}");
     assert!(x.contains(r#"<Subitem2 Num="3">"#), "{x}");
 }
+
+/// 目次中「第二十九条」を「第三十条」に、「第三十条」を「第三十一条」に改める: 後の置換は先に加えた「第三十条」を指さない
+/// （目次の要素ごとに決めると、別の要素に元の「第三十条」があるのに加えた方を置き換えていた。災害救助法 平30-52）
+#[test]
+fn successive_toc_replacements_skip_inserted_text() {
+    let toc = r#"<TOC><TOCLabel>目次</TOCLabel><TOCChapter Num="3"><ChapterTitle>第三章　費用</ChapterTitle><ArticleRange>（第十八条―第二十九条）</ArticleRange></TOCChapter><TOCChapter Num="4"><ChapterTitle>第四章　雑則</ChapterTitle><ArticleRange>（第三十条）</ArticleRange></TOCChapter></TOC>"#;
+    let doc = law(
+        toc,
+        &format!(
+            r#"<Chapter Num="3"><ChapterTitle>第三章　費用</ChapterTitle><Article Num="18"><ArticleTitle>第十八条</ArticleTitle>{}</Article></Chapter>"#,
+            para(1, "", "甲とする。", "")
+        ),
+        &para(1, "", "この法律は、公布の日から施行する。", ""),
+    );
+    let got = apply(
+        &doc,
+        "　　目次中「第二十九条」を「第三十条」に、「第三十条」を「第三十一条」に改める。",
+    );
+    let t = apply::toc_text(&got).unwrap();
+    assert!(t.contains("（第十八条―第三十条）"), "{t}");
+    assert!(t.contains("（第三十一条）"), "{t}");
+}
+
+/// 「第四十二条（見出しを含む。）、第四十三条の見出し及び同条第一項並びに第四十五条の見出し中」の「同条」は第四十三条
+#[test]
+fn same_article_after_a_caption_in_a_list() {
+    let t = "第一条　甲法（平成元年法律第一号）の一部を次のように改正する。
+　　第四十二条（見出しを含む。）、第四十三条の見出し及び同条第一項並びに第四十五条の見出し中「事業」を「事業等」に改める。";
+    let units = parse_units(t).unwrap();
+    let arts: Vec<String> = units[0].instructions[0]
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Replace { at, .. } => {
+                Some(format!("{}:{:?}", at.article.to_num_string(), at.paragraph))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arts, ["42:None", "43:Some(Num(1))"]);
+}
+
+/// 括弧の中の欧文の小文字は e-Gov の書き方（「（ｂ）」）で加える
+#[test]
+fn latin_letters_in_parentheses_are_fullwidth() {
+    let doc = law(
+        "",
+        &format!(
+            r#"<Article Num="14"><ArticleTitle>第十四条</ArticleTitle>{}</Article>"#,
+            para(1, "", "協定第二条第三項の規定による。", "")
+        ),
+        &para(1, "", "この法律は、公布の日から施行する。", ""),
+    );
+    let got = apply(&doc, "　　第十四条中「第三項」を「第三項（b）」に改める。");
+    assert!(xml(&got).contains("第三項（ｂ）の規定"), "{}", xml(&got));
+}

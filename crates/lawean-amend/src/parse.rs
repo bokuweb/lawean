@@ -2395,7 +2395,7 @@ fn parse_phrase_op(seg: &str, ante: &mut Ante) -> Result<Option<PhraseOps>, Pars
                         .in_suppl(l.suppl)
                     }));
                 } else {
-                    rest.push(tok.to_string());
+                    rest.push(pin_same_article(tok, ante));
                 }
             }
             if extra_ops.is_empty() {
@@ -2757,6 +2757,22 @@ fn split_table_target(
         )));
     }
     Ok(None)
+}
+
+/// 見出し・章名などを抜いた残りの位置は後でつないで読み直す。「第四十三条の見出し及び同条第一項」の「同条」は
+/// 読み直すと前の残りの位置（第四十二条）を指すので、ここで条を書き出す。先行詞は位置の順に進める
+fn pin_same_article(tok: &str, ante: &mut Ante) -> String {
+    let tok = match (tok.strip_prefix("同条"), &ante.article) {
+        (Some(r), Some(a)) if !ante.suppl && a.to_num_string() != "0" => {
+            format!("{}{r}", crate::apply::article_label(a))
+        }
+        _ => tok.to_string(),
+    };
+    let mut probe = ante.clone();
+    if loc(&tok, &mut probe).is_ok() {
+        *ante = probe;
+    }
+    tok
 }
 
 /// 「第百三十二条の前の見出し及び同条」「第六条及び同条の前の見出し」「附則第四項の前の見出し及び同項から附則第九項まで」:
@@ -4179,7 +4195,7 @@ fn parse_instruction_split(
                                 to: to.clone(),
                             });
                         }
-                        rest_tokens.push(base.to_string());
+                        rest_tokens.push(pin_same_article(base, &mut ante));
                     } else if let Some(base) = tok
                         .strip_suffix("の前の見出し")
                         .or_else(|| tok.strip_suffix("の見出し"))
@@ -4207,7 +4223,7 @@ fn parse_instruction_split(
                             to: to.clone(),
                         });
                     } else {
-                        rest_tokens.push(tok.to_string());
+                        rest_tokens.push(pin_same_article(tok, &mut ante));
                     }
                 }
                 let ats = expand_locs(&rest_tokens.join("及び"), &mut ante)?;
