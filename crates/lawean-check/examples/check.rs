@@ -22,7 +22,7 @@ fn main() {
             .iter()
             .find(|c| c["id"] == *id)
             .unwrap_or_else(|| panic!("no case {id}"));
-        let s = |k: &str| c[k].as_str().map(&read);
+        let s = |k: &str| c[k].as_str().map(read);
         let others: Vec<String> = c["other_laws"]
             .as_array()
             .map(|v| v.iter().map(|p| read(p.as_str().unwrap())).collect())
